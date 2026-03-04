@@ -8,9 +8,7 @@ backend/uploads/
 *.xlsx
 *.xls
 
-# ── 브랜드 로고 (커밋하지 않음, 직접 교체) ────────────
-Strategyand-logo-black.svg
-pricewaterhousecoopers-pwc-seeklogo.svg
+# ── 클라이언트별 실행 파일 ────────────────────────────
 *.command
 
 # ── Python ─────────────────────────────────────────────

@@ -23,7 +23,7 @@ export default function Navbar() {
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src="/strategyand-logo.svg"
-              alt="Site Logo"
+              alt="Strategy&"
               className="h-8 w-auto"
             />
             <div className="h-5 w-px bg-gray-300" />
