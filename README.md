@@ -1,4 +1,4 @@
-# AX Lens System
+# PwC AX Lens System
 
 HR As-Is 프로세스의 **L5 Task**를 3단계 Knock-out 기준으로 **AI 수행 가능 / 인간 수행 필요** 로 자동 분류하는 풀스택 웹 애플리케이션입니다.
 

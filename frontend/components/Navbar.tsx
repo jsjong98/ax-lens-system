@@ -28,7 +28,7 @@ export default function Navbar() {
             />
             <div className="h-5 w-px bg-gray-300" />
             <span className="text-sm font-semibold tracking-tight" style={{ color: "#A62121" }}>
-              AX Lens System
+              PwC AX Lens System
             </span>
           </Link>
 

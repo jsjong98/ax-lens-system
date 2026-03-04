@@ -11,7 +11,7 @@ const notoSansKR = Noto_Sans_KR({
 });
 
 export const metadata: Metadata = {
-  title: "AX Lens System",
+  title: "PwC AX Lens System",
   description: "HR As-Is 프로세스의 L5 Task를 AI/인간 수행 여부로 분류합니다.",
   icons: {
     icon: "/pwc-logo.svg",
