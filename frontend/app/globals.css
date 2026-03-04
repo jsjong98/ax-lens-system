@@ -1,0 +1,46 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+
+  /* Brand palette */
+  --brand:        #A62121;
+  --brand-hover:  #8A1B1B;
+  --brand-accent: #D95578;
+  --brand-soft:   #F2A0AF;
+  --brand-pale:   #F2DCE0;
+  --brand-bg:     #FFF5F7;
+  --brand-border: #F2A0AF;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-noto-sans-kr), "Noto Sans KR", sans-serif;
+
+  --color-brand:        var(--brand);
+  --color-brand-hover:  var(--brand-hover);
+  --color-brand-accent: var(--brand-accent);
+  --color-brand-soft:   var(--brand-soft);
+  --color-brand-pale:   var(--brand-pale);
+  --color-brand-bg:     var(--brand-bg);
+  --color-brand-border: var(--brand-border);
+}
+
+body {
+  background: #FFF5F7;
+  color: var(--foreground);
+  font-family: var(--font-noto-sans-kr), "Noto Sans KR", sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+/* ── 타이포그래피 스케일 ─────────────────────────────────────────────────────
+   page-title      : 22px / bold     — 페이지 주제목 (h1)
+   section-title   : 16px / semibold — 섹션 소제목 (h2, card 헤더)
+   body            : 14px / regular  — 일반 본문, 테이블 내용
+   body-sm         : 13px / regular  — 보조 설명, 필터 라벨
+   label           : 12px / medium   — 배지, 태그, 테이블 헤더
+   caption         : 11px / regular  — 메타 정보, 날짜, ID
+──────────────────────────────────────────────────────────────────────────── */

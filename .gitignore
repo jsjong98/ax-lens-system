@@ -1,0 +1,46 @@
+# ── 민감 정보 ──────────────────────────────────────────
+backend/.env
+backend/results.json
+backend/settings.json
+
+# ── 업로드된 파일 / 클라이언트 데이터 ──────────────────
+backend/uploads/
+*.xlsx
+*.xls
+
+# ── 브랜드 로고 (커밋하지 않음, 직접 교체) ────────────
+Strategyand-logo-black.svg
+pricewaterhousecoopers-pwc-seeklogo.svg
+*.command
+
+# ── Python ─────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+.env.local
+
+# ── Node.js / Next.js ──────────────────────────────────
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.test.local
+frontend/.env.production.local
+
+# ── OS / 에디터 ────────────────────────────────────────
+.DS_Store
+.DS_Store?
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo

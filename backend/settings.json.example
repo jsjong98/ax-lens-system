@@ -1,0 +1,7 @@
+{
+  "criteria_prompt": "",
+  "api_key": "",
+  "model": "gpt-5.2",
+  "batch_size": 1,
+  "temperature": 0.0
+}
