@@ -1,16 +1,20 @@
 """
-llm_classifier.py — Knock-out 기반 HR Task 분류기 (AI 수행 가능 / 인간 수행 필요)
+llm_classifier.py — Knock-out 기반 HR Task 분류기
 
-[분류 결과 2종]
-  인간 수행 필요 — Knock-out 기준(규제·확정승인·상호작용) 중 하나라도 해당
-  AI 수행 가능   — 위 기준 모두 해당 없음. Input/Output 유형은 부가 정보로 제공
+[분류 결과 3종]
+  인간 수행 필요  — Knock-out 기준(규제·확정승인·상호작용) 중 하나라도 해당하며,
+                    AI가 보조할 수 있는 파트가 없는 업무
+  AI + Human     — Knock-out 기준 일부에 해당하나, 업무 내에 AI 수행 파트와
+                    Human 수행 파트가 명확히 분리 가능한 업무
+                    (To-be 설계 시 역할 분담 기준으로 활용)
+  AI 수행 가능   — Knock-out 기준 모두 해당 없음. 자동화 대상 업무
 
-[분석 구조 (배치 단일 호출)]
-  Phase 1: Knock-out 검사 → 인간 수행 필요 여부 확정
-  Phase 2: AI 수행 가능 태스크의 Input/Output 유형 분석 (부가 컨텍스트)
+[분석 구조]
+  Step 1: Knock-out 검사 → 인간 수행 필요 여부 1차 판정
+  Step 2: AI+Human 가능 여부 검토 → 업무 내 AI/Human 파트 분리 가능한지 판단
+  Step 3: AI 수행 가능 태스크의 Input/Output 유형 분석 (부가 컨텍스트)
 """
 from __future__ import annotations
-import asyncio
 import json
 import os
 from typing import AsyncIterator
@@ -25,10 +29,15 @@ from models import ClassificationResult, ClassifierSettings, Task
 # ─────────────────────────────────────────────────────────────────────────────
 
 _SYSTEM_PROMPT = """당신은 HR 업무 자동화 전략 전문가입니다.
-주어진 HR Task들을 아래 기준에 따라 "AI 수행 가능" 또는 "인간 수행 필요"로 분류합니다.
+주어진 HR Task들을 아래 기준에 따라 세 가지 레이블로 분류합니다.
+
+  - "AI 수행 가능"  : Knock-out 기준에 해당 없음. 완전 자동화 대상
+  - "AI + Human"   : Knock-out 기준 일부에 해당하나, 업무 내 AI 파트와 Human 파트가
+                     명확히 분리 가능. To-be 설계 시 역할 분담 기준으로 활용
+  - "인간 수행 필요": Knock-out 기준에 해당하며, AI 보조 파트가 분리되지 않는 업무
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-【Knock-out 평가 기준】 — 해당하면 즉시 "인간 수행 필요"
+【Step 1】 Knock-out 평가 — 해당하면 1차로 "인간 수행 필요" 판정
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 ▌[1단계] 규제 측면 (AI 기본법 · EU AI Act)  ← 가장 먼저 확인
@@ -38,13 +47,16 @@ _SYSTEM_PROMPT = """당신은 HR 업무 자동화 전략 전문가입니다.
      인간의 최종 감독·확정이 의무화된 업무
      예: 최종 합격자 선정, 성과 등급 확정, 승진 대상자 확정
 
-▌[2단계] 업무 측면 — 확정/승인 업무 (책임귀속성)
-  ③ 조직 기준·제도 확정 — 전사/사업장 적용 정책·기준을 확정
-     예: 평가 제도 개편안 확정, 보상 정책 확정, 취업규칙 변경
+▌[2단계] 확정/승인 업무 (책임귀속성)
+  ③ 조직 기준·제도 확정 — 전사/사업장 적용 정책·기준을 확정하는 행위 자체
+     ※ 단, 기준이 이미 합의·확정된 상태에서 해당 기준을 적용·반영·매핑하는
+        작업은 확정 업무가 아님 → Knock-out 해당 없음
+     예(해당): 평가 제도 개편안 확정, 보상 정책 확정, 취업규칙 변경
+     예(미해당): 확정된 기준에 따른 교육과정 매핑, 확정된 규칙 기반 분류 반영
   ④ 고영향·비가역 의사결정 — 법적 분쟁·노사 갈등 등 복구 비용이 현저히 큰 결정
      예: 직장 내 괴롭힘 조치 확정, 차별 이슈 결론, 징계 확정
 
-▌[3단계] 업무 측면 — 상호작용 업무 (관계·맥락·윤리·변화)
+▌[3단계] 상호작용 업무 (관계·맥락·윤리·변화)
   ⑤ 공감·심리안전 — 개인 심리 회복을 위한 공감 기반 대인 상호작용
      예: 복직 면담, 퇴직 면담, 육아휴직 복직자 면담
   ⑥ 협상·중재 — 상충하는 이해관계의 현장 협상 및 중재
@@ -53,51 +65,77 @@ _SYSTEM_PROMPT = """당신은 HR 업무 자동화 전략 전문가입니다.
      예: 평가등급 이의제기 대응, 승진 누락 이의제기 대응
   ⑧ 변화/리더십 정착 — 비전 제시로 조직 행동 변화 촉진
      예: 제도 런칭 설명회, 리더 코칭, 문화 내재화 활동
-  ⑨ 창의적 설계 — 새 제도·구조를 만드는 집단 창작
-     예: 직무/조직/제도 설계 워크숍, 신규 복리후생 기획
-
-→ ①~⑨ 중 하나라도 해당하면 → "인간 수행 필요"
-→ 모두 해당 없으면 → "AI 수행 가능"
+  ⑨ 창의적 설계 — 원칙·기준·규정이 사전에 정의되지 않은 상태에서
+     새 제도·구조·콘텐츠를 새롭게 만드는 행위
+     ※ 단, 원칙/기준/규정이 사전에 정의·합의된 경우, 그 기준에 따라
+        설계·작성·구성하는 작업은 창의적 설계가 아님 → Knock-out 해당 없음
+     예(해당): 신규 제도 설계 워크숍, 전혀 새로운 복리후생 기획
+     예(미해당): 정해진 Lesson Plan 형식에 따른 내용 작성,
+                 확정된 학습목표 기반 슬라이드 구성
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-【AI 수행 가능 태스크 — Input/Output 유형 분석 (부가 정보)】
+【Step 2】 AI + Human 판정 — Knock-out 해당 시 추가 검토
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-"AI 수행 가능"으로 분류된 태스크에 한해 아래 유형을 분석해 input_types, output_types 필드에 기재합니다.
+Knock-out 기준에 해당하더라도, 아래 패턴 중 하나에 해당하면
+"AI + Human"으로 분류하고 ai_role / human_role을 명확히 기재합니다.
+이 필드는 추후 To-be 설계 단계에서 AI와 Human의 역할 분담 기준으로 활용됩니다.
+
+  [패턴 A] 데이터·초안 준비는 AI / 최종 판단·승인·협의는 Human
+     예: AI가 실적 데이터 정리 및 보고서 초안 작성 → Human이 이슈 협의 및 확정
+  [패턴 B] 비동기 커뮤니케이션(메일·설문 발송·취합)은 AI / 대면 상호작용·판단은 Human
+     예: AI가 의견수렴 메일 발송·응답 취합·분석 → Human이 내용 검토 및 조율
+  [패턴 C] 규칙 기반 처리·집계는 AI / 맥락·조직 판단이 필요한 부분은 Human
+     예: AI가 조건값 기반 분류·매핑 수행 → Human이 예외·맥락 케이스 판단
+
+  → 위 패턴에 해당하지 않고 Knock-out 업무 전체가 Human 고유 영역이면
+    → "인간 수행 필요"로 최종 확정
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【Step 3】 AI 수행 가능 태스크 — Input/Output 유형 분석
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+"AI 수행 가능"으로 분류된 태스크에 한해 input_types, output_types를 기재합니다.
 
 Input 유형 (해당하는 것을 쉼표로 나열):
-  · 시스템 데이터 — HR시스템·ERP에서 조회/추출하는 데이터
-  · 문서/서류     — 신청서·증명서·이력서·계약서 등 문서 형태
-  · 외부 정보     — 채용플랫폼·4대보험·벤치마크 등 외부 기관 정보
-  · 구두/메일 요청 — 메일·메신저·구두 지시 형태의 요청
+  · 시스템 데이터  — HR시스템·ERP에서 조회/추출하는 데이터
+  · 문서/서류      — 신청서·증명서·이력서·계약서 등 문서 형태
+  · 외부 정보      — 채용플랫폼·4대보험·벤치마크 등 외부 기관 정보
+  · 구두/메일 요청  — 메일·메신저·구두 지시 형태의 요청
 
 Output 유형 (해당하는 것을 쉼표로 나열):
-  · 시스템 반영   — HR시스템·ERP 데이터 입력/수정/반영
-  · 문서/보고서   — 보고서·명세서·증명서·Excel 등 문서 산출물
-  · 커뮤니케이션  — 안내 메일·공지·회신·알림 등 소통 형태 산출물
-  · 의사결정      — 승인·확정·판정 등 결정 형태 산출물
+  · 시스템 반영    — HR시스템·ERP 데이터 입력/수정/반영
+  · 문서/보고서    — 보고서·명세서·증명서·Excel 등 문서 산출물
+  · 커뮤니케이션   — 안내 메일·공지·회신·알림 등 소통 형태 산출물
+  · 의사결정       — 승인·확정·판정 등 결정 형태 산출물
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 【출력 형식】 JSON만 출력, 다른 텍스트 없이
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-각 Task에 대해 3단계를 순서대로 평가하고 아래 형식으로 출력합니다.
-인간 수행 필요 판정 시 해당 단계에서 즉시 확정하고 이후 단계는 건너뜁니다.
-
 {
   "tasks": [
     {
       "id": "L5_ID",
+
       "stage1_pass": true 또는 false,
-      "stage1_note": "1단계 판단 근거 (통과 시 빈 문자열 가능, 탈락 시 어떤 기준 ①②에 해당하는지)",
+      "stage1_note": "1단계 판단 근거 (통과 시 빈 문자열 가능)",
+
       "stage2_pass": true 또는 false,
-      "stage2_note": "2단계 판단 근거 (통과 시 빈 문자열 가능, 탈락 시 어떤 기준 ③④에 해당하는지)",
+      "stage2_note": "2단계 판단 근거 (통과 시 빈 문자열 가능)",
+
       "stage3_pass": true 또는 false,
-      "stage3_note": "3단계 판단 근거 (통과 시 빈 문자열 가능, 탈락 시 어떤 기준 ⑤~⑨에 해당하는지)",
-      "label": "AI 수행 가능" 또는 "인간 수행 필요",
+      "stage3_note": "3단계 판단 근거 (통과 시 빈 문자열 가능)",
+
+      "hybrid_check": true 또는 false,
+      "hybrid_note": "AI+Human 패턴 해당 여부 및 근거 (Knock-out 미해당 시 빈 문자열)",
+
+      "label": "AI 수행 가능" 또는 "AI + Human" 또는 "인간 수행 필요",
       "criterion": "1단계: 규제 측면" | "2단계: 확정/승인 업무" | "3단계: 상호작용 업무" | "",
-      "input_types": "시스템 데이터, 문서/서류" (AI 수행 가능 시만 기재, 인간 수행 필요 시 ""),
-      "output_types": "시스템 반영, 문서/보고서" (AI 수행 가능 시만 기재, 인간 수행 필요 시 ""),
+
+      "input_types": "시스템 데이터, 문서/서류 (AI 수행 가능 시만 기재, 나머지는 빈 문자열)",
+      "output_types": "시스템 반영, 문서/보고서 (AI 수행 가능 시만 기재, 나머지는 빈 문자열)",
+
       "reason": "최종 판단 근거 한국어 60자 이내",
       "confidence": 0.0 ~ 1.0
     }
@@ -111,7 +149,7 @@ _EXTRA_CRITERIA_HEADER = """
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
 
-_LABELS = {"AI 수행 가능", "인간 수행 필요"}
+_LABELS = {"AI 수행 가능", "AI + Human", "인간 수행 필요"}
 
 
 def build_system_prompt(extra_criteria: str = "") -> str:
@@ -126,7 +164,7 @@ def _checked(value: str) -> bool:
 
 
 def build_user_prompt(tasks: list[Task]) -> str:
-    lines = ["다음 HR Task들을 3개 Phase에 따라 순서대로 분석해 주세요:\n"]
+    lines = ["다음 HR Task들을 Step 1 → Step 2 → Step 3 순서로 분석해 주세요:\n"]
     for t in tasks:
         lines.append(f"[ID: {t.id}]")
         lines.append(f"  계층: {t.l2} > {t.l3} > {t.l4}")
@@ -136,7 +174,6 @@ def build_user_prompt(tasks: list[Task]) -> str:
         if t.performer:
             lines.append(f"  수행주체(텍스트): {t.performer[:180]}")
 
-        # A-1. 수행주체 체크박스
         performer_checked = [
             label for label, val in [
                 ("임원", t.performer_executive),
@@ -148,7 +185,6 @@ def build_user_prompt(tasks: list[Task]) -> str:
         if performer_checked:
             lines.append(f"  수행주체(체크): {', '.join(performer_checked)}")
 
-        # D-1. Pain Point
         pain_checked = [
             label for label, val in [
                 ("시간/속도", t.pain_time),
@@ -163,7 +199,6 @@ def build_user_prompt(tasks: list[Task]) -> str:
         if pain_checked:
             lines.append(f"  Pain Point: {', '.join(pain_checked)}")
 
-        # E-2. Output
         output_checked = [
             label for label, val in [
                 ("시스템 반영", t.output_system),
@@ -176,7 +211,6 @@ def build_user_prompt(tasks: list[Task]) -> str:
         if output_checked:
             lines.append(f"  Output 유형: {', '.join(output_checked)}")
 
-        # F-1. 업무 판단 로직
         logic_checked = [
             label for label, val in [
                 ("Rule-based(규칙 기반)", t.logic_rule_based),
@@ -201,14 +235,13 @@ def build_user_prompt(tasks: list[Task]) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class LLMClassifier(BaseClassifier):
-    """3단계 파이프라인 기반 OpenAI 분류기."""
+    """3단계 Knock-out + AI+Human 하이브리드 판정 분류기."""
 
     async def classify_stream(
         self,
         tasks: list[Task],
         settings: ClassifierSettings,
     ) -> AsyncIterator[ClassificationResult]:
-        # API Key: .env > settings > 환경변수 순으로 탐색
         api_key = os.getenv("OPENAI_API_KEY", "") or settings.api_key
         if not api_key:
             raise ValueError(
@@ -219,7 +252,6 @@ class LLMClassifier(BaseClassifier):
         client = AsyncOpenAI(api_key=api_key)
         system_prompt = build_system_prompt(settings.criteria_prompt)
 
-        # Task 1개씩 처리 → 실시간 진행률, 안정적 분석
         for task in tasks:
             result = await self._call_single(client, task, system_prompt)
             yield result
@@ -230,7 +262,6 @@ class LLMClassifier(BaseClassifier):
         task: Task,
         system_prompt: str,
     ) -> ClassificationResult:
-        """태스크 1개를 분류하고 3단계 분석 결과를 반환합니다."""
         from models import StageAnalysis
         user_prompt = build_user_prompt([task])
 
@@ -246,7 +277,6 @@ class LLMClassifier(BaseClassifier):
             )
             raw = response.choices[0].message.content
             data = json.loads(raw)
-            # 단일 태스크 응답: tasks 배열의 첫 번째 원소 사용
             classified = data.get("tasks", [data])
             r = classified[0] if classified else {}
 
@@ -260,6 +290,9 @@ class LLMClassifier(BaseClassifier):
 
         raw_label = r.get("label", "미분류")
         label = raw_label if raw_label in _LABELS else "미분류"
+
+        input_types  = r.get("input_types", "")  if label == "AI 수행 가능" else ""
+        output_types = r.get("output_types", "") if label == "AI 수행 가능" else ""
 
         return ClassificationResult(
             task_id=task.id,
@@ -277,8 +310,10 @@ class LLMClassifier(BaseClassifier):
                 passed=bool(r.get("stage3_pass", True)),
                 note=str(r.get("stage3_note", "")),
             ),
-            input_types=r.get("input_types", ""),
-            output_types=r.get("output_types", ""),
+            hybrid_check=bool(r.get("hybrid_check", False)),
+            hybrid_note=str(r.get("hybrid_note", "")),
+            input_types=input_types,
+            output_types=output_types,
             reason=r.get("reason", ""),
             confidence=float(r.get("confidence", 0.5)),
         )

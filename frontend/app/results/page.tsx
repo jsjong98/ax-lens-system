@@ -100,12 +100,13 @@ export default function ResultsPage() {
 
       {/* 통계 카드 */}
       {stats && (
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
           {([
-            { label: "전체 Task",    value: stats.total,                              cardStyle: { background: "#fff", border: "1px solid #E2E8F0" }, valueStyle: { color: "#171717" } },
-            { label: "AI 수행 가능", value: `${stats.ai_count} (${stats.ai_ratio}%)`, cardStyle: { background: "#FFF5F7", border: "1px solid #F2A0AF" }, valueStyle: { color: "#A62121" } },
-            { label: "인간 수행 필요", value: `${stats.human_count} (${stats.human_ratio}%)`, cardStyle: { background: "#ECFDF5", border: "1px solid #A7F3D0" }, valueStyle: { color: "#065F46" } },
-            { label: "미분류",        value: stats.unclassified_count,                 cardStyle: { background: "#fff", border: "1px solid #E2E8F0" }, valueStyle: { color: "#6B7280" } },
+            { label: "전체 Task",     value: stats.total,                                        cardStyle: { background: "#fff", border: "1px solid #E2E8F0" },      valueStyle: { color: "#171717" } },
+            { label: "AI 수행 가능",  value: `${stats.ai_count} (${stats.ai_ratio}%)`,           cardStyle: { background: "#FFF5F7", border: "1px solid #F2A0AF" },   valueStyle: { color: "#A62121" } },
+            { label: "AI + Human",   value: `${stats.hybrid_count} (${stats.hybrid_ratio}%)`,   cardStyle: { background: "#FFFBEB", border: "1px solid #FCD34D" },   valueStyle: { color: "#92400E" } },
+            { label: "인간 수행 필요", value: `${stats.human_count} (${stats.human_ratio}%)`,    cardStyle: { background: "#ECFDF5", border: "1px solid #A7F3D0" },   valueStyle: { color: "#065F46" } },
+            { label: "미분류",         value: stats.unclassified_count,                          cardStyle: { background: "#fff", border: "1px solid #E2E8F0" },      valueStyle: { color: "#6B7280" } },
           ] as const).map((s) => (
             <div key={s.label} className="rounded-xl p-4 shadow-sm" style={s.cardStyle}>
               <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">{s.label}</p>
@@ -125,17 +126,20 @@ export default function ResultsPage() {
           <div className="px-5 pb-5">
             <div className="space-y-2">
               {stats.by_l3.map((row) => {
-                const aiPct = row.total > 0 ? Math.round((row.ai / row.total) * 100) : 0;
+                const aiPct  = row.total > 0 ? Math.round((row.ai / row.total) * 100) : 0;
+                const hybPct = row.total > 0 ? Math.round(((row.hybrid ?? 0) / row.total) * 100) : 0;
                 return (
-                  <div key={row.l3} className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-4 text-sm">
+                  <div key={row.l3} className="grid grid-cols-[1fr_auto_auto_auto_auto] items-center gap-4 text-sm">
                     <span className="truncate text-gray-700">{row.l3}</span>
-                    <span className="w-16 text-right text-xs text-emerald-600">AI {row.ai}</span>
-                    <span className="w-16 text-right text-xs text-orange-600">인간 {row.human}</span>
+                    <span className="w-16 text-right text-xs text-red-600">AI {row.ai}</span>
+                    <span className="w-20 text-right text-xs text-amber-600">AI+H {row.hybrid ?? 0}</span>
+                    <span className="w-16 text-right text-xs text-emerald-600">인간 {row.human}</span>
                     <div className="w-28 flex items-center gap-1">
-                      <div className="flex-1 h-1.5 rounded-full bg-gray-200">
-                        <div className="h-1.5 rounded-full bg-emerald-500" style={{ width: `${aiPct}%` }} />
+                      <div className="flex-1 h-1.5 rounded-full bg-gray-200 overflow-hidden flex">
+                        <div className="h-1.5 bg-red-400" style={{ width: `${aiPct}%` }} />
+                        <div className="h-1.5 bg-amber-400" style={{ width: `${hybPct}%` }} />
                       </div>
-                      <span className="text-xs text-gray-500 w-8 text-right">{aiPct}%</span>
+                      <span className="text-xs text-gray-500 w-8 text-right">{aiPct + hybPct}%</span>
                     </div>
                   </div>
                 );
@@ -148,7 +152,7 @@ export default function ResultsPage() {
       {/* 필터 */}
       <div className="flex items-center gap-3">
         <label className="text-xs font-medium text-gray-500">레이블 필터:</label>
-        {(["", "AI 수행 가능", "인간 수행 필요", "미분류"] as const).map((l) => (
+        {(["", "AI 수행 가능", "AI + Human", "인간 수행 필요", "미분류"] as const).map((l) => (
           <button
             key={l || "all"}
             onClick={() => setLabelFilter(l)}

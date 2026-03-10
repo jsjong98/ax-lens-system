@@ -54,7 +54,7 @@ class Task(BaseModel):
 
 # ── 분류 결과 관련 ────────────────────────────────────────────────────────────
 
-LabelType = Literal["AI 수행 가능", "인간 수행 필요", "미분류"]
+LabelType = Literal["AI 수행 가능", "AI + Human", "인간 수행 필요", "미분류"]
 
 
 class StageAnalysis(BaseModel):
@@ -75,6 +75,8 @@ class ClassificationResult(BaseModel):
     stage1: StageAnalysis = Field(default_factory=StageAnalysis, description="1단계: 규제 측면 분석")
     stage2: StageAnalysis = Field(default_factory=StageAnalysis, description="2단계: 확정/승인 업무 분석")
     stage3: StageAnalysis = Field(default_factory=StageAnalysis, description="3단계: 상호작용 업무 분석")
+    hybrid_check: bool = Field(False, description="AI+Human 하이브리드 패턴 해당 여부")
+    hybrid_note: str = Field("", description="AI+Human 패턴 근거 및 AI/Human 역할 설명")
     input_types: str = Field(
         "",
         description="감지된 Input 유형 쉼표 구분 (예: '시스템 데이터, 문서/서류'). AI 수행 가능 태스크의 부가 정보.",
@@ -131,8 +133,10 @@ class ResultsResponse(BaseModel):
 class StatsResponse(BaseModel):
     total: int
     ai_count: int
+    hybrid_count: int
     human_count: int
     unclassified_count: int
     ai_ratio: float
+    hybrid_ratio: float
     human_ratio: float
     by_l3: list[dict]

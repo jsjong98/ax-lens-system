@@ -17,6 +17,13 @@ const STYLES: Record<LabelType, BadgeStyle> = {
     borderColor: "#F2A0AF",
     display: "AI 수행 가능",
   },
+  "AI + Human": {
+    bg: "#FFFBEB",
+    text: "#92400E",
+    dotColor: "#F59E0B",
+    borderColor: "#FCD34D",
+    display: "AI + Human",
+  },
   "인간 수행 필요": {
     bg: "#ECFDF5",
     text: "#065F46",

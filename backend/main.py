@@ -218,7 +218,7 @@ async def classify_tasks(req: ClassifyRequest):
 
 @app.get("/api/results", response_model=ResultsResponse, tags=["Results"])
 async def get_results(
-    label: Optional[str] = Query(None, description="레이블 필터 (AI 수행 가능|인간 수행 필요|미분류)"),
+    label: Optional[str] = Query(None, description="레이블 필터 (AI 수행 가능|AI + Human|인간 수행 필요|미분류)"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=500),
 ):
@@ -272,29 +272,34 @@ async def delete_all_results():
 async def get_stats():
     results_store = load_results()
     total = len(_tasks_cache)
-    ai_count = sum(1 for r in results_store.values() if r.label == "AI 수행 가능")
-    human_count = sum(1 for r in results_store.values() if r.label == "인간 수행 필요")
-    unclassified_count = total - ai_count - human_count
+    ai_count     = sum(1 for r in results_store.values() if r.label == "AI 수행 가능")
+    hybrid_count = sum(1 for r in results_store.values() if r.label == "AI + Human")
+    human_count  = sum(1 for r in results_store.values() if r.label == "인간 수행 필요")
+    unclassified_count = total - ai_count - hybrid_count - human_count
 
     # L3별 집계
     l3_map: dict[str, dict] = {}
     for t in _tasks_cache:
         if t.l3 not in l3_map:
-            l3_map[t.l3] = {"l3": t.l3, "total": 0, "ai": 0, "human": 0}
+            l3_map[t.l3] = {"l3": t.l3, "total": 0, "ai": 0, "hybrid": 0, "human": 0}
         l3_map[t.l3]["total"] += 1
         r = results_store.get(t.id)
         if r:
             if r.label == "AI 수행 가능":
                 l3_map[t.l3]["ai"] += 1
+            elif r.label == "AI + Human":
+                l3_map[t.l3]["hybrid"] += 1
             elif r.label == "인간 수행 필요":
                 l3_map[t.l3]["human"] += 1
 
     return StatsResponse(
         total=total,
         ai_count=ai_count,
+        hybrid_count=hybrid_count,
         human_count=human_count,
         unclassified_count=unclassified_count,
         ai_ratio=round(ai_count / total * 100, 1) if total else 0,
+        hybrid_ratio=round(hybrid_count / total * 100, 1) if total else 0,
         human_ratio=round(human_count / total * 100, 1) if total else 0,
         by_l3=sorted(l3_map.values(), key=lambda x: x["ai"], reverse=True),
     )
@@ -348,8 +353,9 @@ async def export_results():
     ws.append(headers)
 
     header_fill = PatternFill("solid", fgColor="1F4E79")
-    # AI 수행 가능 → 빨간색, 인간 수행 필요 → 초록색
-    ai_fill     = PatternFill("solid", fgColor="FFE0E0")   # 연분홍(빨간)
+    # AI 수행 가능 → 연분홍, AI + Human → 연노랑, 인간 수행 필요 → 연초록
+    ai_fill     = PatternFill("solid", fgColor="FFE0E0")   # 연분홍
+    hybrid_fill = PatternFill("solid", fgColor="FFF9DB")   # 연노랑
     human_fill  = PatternFill("solid", fgColor="D6F5E3")   # 연초록
 
     for cell in ws[1]:
@@ -371,6 +377,8 @@ async def export_results():
         label_cell = ws.cell(row=last_row, column=8)
         if label == "AI 수행 가능":
             label_cell.fill = ai_fill
+        elif label == "AI + Human":
+            label_cell.fill = hybrid_fill
         elif label == "인간 수행 필요":
             label_cell.fill = human_fill
 
@@ -380,16 +388,19 @@ async def export_results():
 
     # ── 요약 시트 ──
     ws2 = wb.create_sheet("요약")
-    total   = len(_tasks_cache)
-    ai_cnt  = sum(1 for r in results_store.values() if r.label == "AI 수행 가능")
-    hum_cnt = sum(1 for r in results_store.values() if r.label == "인간 수행 필요")
+    total    = len(_tasks_cache)
+    ai_cnt   = sum(1 for r in results_store.values() if r.label == "AI 수행 가능")
+    hyb_cnt  = sum(1 for r in results_store.values() if r.label == "AI + Human")
+    hum_cnt  = sum(1 for r in results_store.values() if r.label == "인간 수행 필요")
     rows = [
         ["항목", "값"],
         ["전체 Task", total],
         ["AI 수행 가능", ai_cnt],
+        ["AI + Human", hyb_cnt],
         ["인간 수행 필요", hum_cnt],
-        ["미분류", total - ai_cnt - hum_cnt],
+        ["미분류", total - ai_cnt - hyb_cnt - hum_cnt],
         ["AI 수행 가능 비율", f"{ai_cnt/total*100:.1f}%" if total else "0%"],
+        ["AI + Human 비율", f"{hyb_cnt/total*100:.1f}%" if total else "0%"],
     ]
     for row in rows:
         ws2.append(row)

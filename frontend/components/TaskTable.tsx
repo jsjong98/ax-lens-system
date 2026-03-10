@@ -70,7 +70,7 @@ export default function TaskTable({
     }
   };
 
-  const labelOptions: LabelType[] = ["AI 수행 가능", "인간 수행 필요", "미분류"];
+  const labelOptions: LabelType[] = ["AI 수행 가능", "AI + Human", "인간 수행 필요", "미분류"];
 
   /* ── 공통 헤더 스타일 ── */
   const thBase = "px-3 py-2.5 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap bg-gray-50";
@@ -329,6 +329,19 @@ export default function TaskTable({
                                 </div>
                               </div>
                             ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* AI + Human 역할 분담 */}
+                      {showResult && row.result?.hybrid_check && row.result.hybrid_note && (
+                        <div className="col-span-full">
+                          <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-600 mb-1">AI + Human 역할 분담</p>
+                          <div
+                            className="rounded-md px-3 py-2 text-xs text-amber-900"
+                            style={{ background: "#FFFBEB", border: "1px solid #FCD34D" }}
+                          >
+                            {row.result.hybrid_note}
                           </div>
                         </div>
                       )}

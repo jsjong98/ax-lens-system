@@ -11,7 +11,7 @@ const BACKEND_DIRECT = typeof window !== "undefined"
 
 // ── 타입 정의 ────────────────────────────────────────────────────────────────
 
-export type LabelType = "AI 수행 가능" | "인간 수행 필요" | "미분류";
+export type LabelType = "AI 수행 가능" | "AI + Human" | "인간 수행 필요" | "미분류";
 
 export interface Task {
   id: string;
@@ -38,6 +38,8 @@ export interface ClassificationResult {
   stage1: StageAnalysis;
   stage2: StageAnalysis;
   stage3: StageAnalysis;
+  hybrid_check: boolean;
+  hybrid_note: string;
   input_types: string;
   output_types: string;
   reason: string;
@@ -68,11 +70,13 @@ export interface ResultsResponse {
 export interface StatsResponse {
   total: number;
   ai_count: number;
+  hybrid_count: number;
   human_count: number;
   unclassified_count: number;
   ai_ratio: number;
+  hybrid_ratio: number;
   human_ratio: number;
-  by_l3: Array<{ l3: string; total: number; ai: number; human: number }>;
+  by_l3: Array<{ l3: string; total: number; ai: number; hybrid: number; human: number }>;
 }
 
 export interface FilterOptions {
