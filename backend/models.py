@@ -16,6 +16,7 @@ class Task(BaseModel):
     l3: str = Field(..., description="Unit Process (L3) 명")
     l4_id: str = ""
     l4: str = Field(..., description="Activity (L4) 명")
+    l4_description: str = Field("", description="Activity (L4) 설명 (없는 경우 빈 문자열)")
     name: str = Field(..., description="L5 Task 명")
     description: str = Field("", description="L5 Task 설명")
     performer: str = Field("", description="수행주체 내용 (자유 텍스트)")
@@ -102,7 +103,7 @@ class ClassifierSettings(BaseModel):
         description="LLM에 전달할 추가 분류 기준 텍스트",
     )
     api_key: str = Field("", description="OpenAI API 키 (비어있으면 환경변수 사용)")
-    model: str = Field("gpt-5.2", description="사용할 LLM 모델명")
+    model: str = Field("gpt-5.4", description="사용할 LLM 모델명")
     batch_size: int = Field(10, ge=1, le=50, description="배치당 Task 수")
     temperature: float = Field(0.0, ge=0.0, le=2.0)
 

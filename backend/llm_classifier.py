@@ -77,16 +77,39 @@ _SYSTEM_PROMPT = """당신은 HR 업무 자동화 전략 전문가입니다.
 【Step 2】 AI + Human 판정 — Knock-out 해당 시 추가 검토
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+■ 사전 작업: 업무 흐름(Flow) 재구성
+  판정에 앞서, 주어진 Task의 Name · Description · Pain Point를 종합하여
+  이 업무 안에서 어떤 행위가 어떤 순서로 일어나는지 내부적으로 먼저 파악하십시오.
+  흐름을 파악한 뒤, 각 단계를 두 구간으로 구분하십시오.
+    ① AI 처리 가능 구간 — 데이터 조회·집계·정리·초안 작성·발송·분류 등 규칙·패턴 기반 작업
+    ② Human 필수 구간   — 판단·확정·승인·협의·조율·공감 등 맥락·책임·관계가 개입하는 작업
+  두 구간이 1개라도 분리되면 "AI + Human" 후보로 올립니다.
+
 Knock-out 기준에 해당하더라도, 아래 패턴 중 하나에 해당하면
-"AI + Human"으로 분류하고 ai_role / human_role을 명확히 기재합니다.
+"AI + Human"으로 분류합니다.
+hybrid_note 필드는 반드시 "[패턴 X] AI 파트: ~~ / Human 파트: ~~" 형식으로 기재하십시오.
 이 필드는 추후 To-be 설계 단계에서 AI와 Human의 역할 분담 기준으로 활용됩니다.
 
-  [패턴 A] 데이터·초안 준비는 AI / 최종 판단·승인·협의는 Human
-     예: AI가 실적 데이터 정리 및 보고서 초안 작성 → Human이 이슈 협의 및 확정
-  [패턴 B] 비동기 커뮤니케이션(메일·설문 발송·취합)은 AI / 대면 상호작용·판단은 Human
-     예: AI가 의견수렴 메일 발송·응답 취합·분석 → Human이 내용 검토 및 조율
-  [패턴 C] 규칙 기반 처리·집계는 AI / 맥락·조직 판단이 필요한 부분은 Human
-     예: AI가 조건값 기반 분류·매핑 수행 → Human이 예외·맥락 케이스 판단
+  [패턴 A] 준비·정리는 AI / 판단·확정은 Human
+     설명: AI가 데이터 집계·시각화·이상치 탐지·보고서 초안 작성 등 준비 작업을 수행하고,
+           Human이 그 결과를 보고 원인 판단·조치 확정·협의를 진행하는 구조
+     핵심 신호 단어/표현: "보고", "확인", "검토 후 반영", "협의", "논의"가 Description에
+           포함되면서 그 앞 흐름에 데이터 정리·취합·집계가 존재할 때
+     예: AI가 실적 데이터 집계·시각화·이상치 탐지 → Human이 수치를 보고 원인 판단 및 조치 확정
+
+  [패턴 B] 발송·취합은 AI / 대면 조율은 Human
+     설명: AI가 설문·메일 발송, 응답 취합, 요약 리포트 생성 등 비동기 커뮤니케이션을 처리하고,
+           Human이 맥락을 보고 이해관계자를 조율하는 구조
+     핵심 신호 단어/표현: "의견 수렴", "취합", "공유" 뒤에 "조율", "합의", "공감대 형성"이
+           따라올 때
+     예: AI가 설문 발송·응답 취합·요약 리포트 생성 → Human이 이해관계자 조율
+
+  [패턴 C] 규칙 기반 처리는 AI / 예외·맥락 판단은 Human
+     설명: AI가 정해진 기준으로 자동 분류·매핑·집계를 수행하고,
+           Human이 기준에 맞지 않는 예외 케이스나 조직 맥락이 필요한 판단을 처리하는 구조
+     핵심 신호 단어/표현: "기준에 따라", "조건 설정 시", "원칙·규정이 합의된 경우"라는
+           단서가 Description 또는 Pain Point에 있을 때
+     예: AI가 정해진 기준으로 자동 분류·매핑 → Human이 기준에 맞지 않는 케이스 판단
 
   → 위 패턴에 해당하지 않고 Knock-out 업무 전체가 Human 고유 영역이면
     → "인간 수행 필요"로 최종 확정
@@ -128,7 +151,7 @@ Output 유형 (해당하는 것을 쉼표로 나열):
       "stage3_note": "3단계 판단 근거 (통과 시 빈 문자열 가능)",
 
       "hybrid_check": true 또는 false,
-      "hybrid_note": "AI+Human 패턴 해당 여부 및 근거 (Knock-out 미해당 시 빈 문자열)",
+      "hybrid_note": "[패턴 A|B|C] AI 파트: ~~ / Human 파트: ~~ 형식으로 기재 (Knock-out 미해당 시 빈 문자열)",
 
       "label": "AI 수행 가능" 또는 "AI + Human" 또는 "인간 수행 필요",
       "criterion": "1단계: 규제 측면" | "2단계: 확정/승인 업무" | "3단계: 상호작용 업무" | "",
@@ -168,6 +191,8 @@ def build_user_prompt(tasks: list[Task]) -> str:
     for t in tasks:
         lines.append(f"[ID: {t.id}]")
         lines.append(f"  계층: {t.l2} > {t.l3} > {t.l4}")
+        if t.l4_description:
+            lines.append(f"  L4 설명: {t.l4_description[:200]}")
         lines.append(f"  Task명: {t.name}")
         if t.description:
             lines.append(f"  설명: {t.description[:250]}")
@@ -253,7 +278,7 @@ class LLMClassifier(BaseClassifier):
         system_prompt = build_system_prompt(settings.criteria_prompt)
 
         for task in tasks:
-            result = await self._call_single(client, task, system_prompt)
+            result = await self._call_single(client, task, system_prompt, settings.model)
             yield result
 
     async def _call_single(
@@ -261,13 +286,15 @@ class LLMClassifier(BaseClassifier):
         client: AsyncOpenAI,
         task: Task,
         system_prompt: str,
+        model: str = "gpt-5.4",
     ) -> ClassificationResult:
         from models import StageAnalysis
         user_prompt = build_user_prompt([task])
 
         try:
             response = await client.chat.completions.create(
-                model="gpt-5.2",
+                model=model,
+                # temperature는 reasoning_effort=none(기본값)일 때만 지원됨 (GPT-5.4 공식 문서)
                 temperature=0.0,
                 messages=[
                     {"role": "system", "content": system_prompt},

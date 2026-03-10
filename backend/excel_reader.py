@@ -23,6 +23,7 @@ _COL = {
     "l3_name":   5,   # E
     "l4_id":     6,   # F
     "l4_name":   7,   # G
+    "l4_desc":   8,   # H  (없는 경우 빈 문자열)
     # L5 Task
     "l5_id":     9,   # I
     "l5_name":   10,  # J
@@ -229,6 +230,7 @@ def load_tasks(excel_path: str | Path | None = None) -> list[Task]:
                 l3=_cell(row, _COL["l3_name"]),
                 l4_id=_cell(row, _COL["l4_id"]),
                 l4=_cell(row, _COL["l4_name"]),
+                l4_description=_cell(row, _COL["l4_desc"]),
                 name=_cell(row, _COL["l5_name"]),
                 description=_cell(row, _COL["l5_desc"]),
                 performer=_cell(row, _COL["performer"]),
