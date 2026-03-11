@@ -68,6 +68,7 @@ class ClassificationResult(BaseModel):
     task_id: str
     label: LabelType = "미분류"
     reason: str = ""
+    provider: str = Field("openai", description="분류에 사용된 API 제공자 (openai | anthropic)")
     criterion: str = Field(
         "",
         description="인간 수행 필요 시 적용된 knock-out 단계 (예: '1단계: 규제 측면'). AI 수행 가능이면 빈 문자열.",
@@ -103,7 +104,9 @@ class ClassifierSettings(BaseModel):
         description="LLM에 전달할 추가 분류 기준 텍스트",
     )
     api_key: str = Field("", description="OpenAI API 키 (비어있으면 환경변수 사용)")
-    model: str = Field("gpt-5.4", description="사용할 LLM 모델명")
+    model: str = Field("gpt-5.4", description="사용할 OpenAI 모델명")
+    anthropic_api_key: str = Field("", description="Anthropic API 키 (비어있으면 환경변수 사용)")
+    anthropic_model: str = Field("claude-sonnet-4-6", description="사용할 Anthropic 모델명")
     batch_size: int = Field(10, ge=1, le=50, description="배치당 Task 수")
     temperature: float = Field(0.0, ge=0.0, le=2.0)
 
@@ -115,6 +118,7 @@ class ClassifyRequest(BaseModel):
         None, description="분류할 Task ID 목록. None이면 전체 처리"
     )
     settings: Optional[ClassifierSettings] = None
+    provider: str = Field("openai", description="분류에 사용할 API 제공자 (openai | anthropic)")
 
 
 # ── API 응답 ─────────────────────────────────────────────────────────────────

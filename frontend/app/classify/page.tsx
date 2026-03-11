@@ -8,20 +8,37 @@ import {
 import TaskTable from "@/components/TaskTable";
 import StatusBadge from "@/components/StatusBadge";
 import { Play, Square, AlertCircle, CheckCircle2, SlidersHorizontal, Trash2 } from "lucide-react";
-import { deleteAllResults } from "@/lib/api";
+import { deleteAllResults, type ProviderType } from "@/lib/api";
 
 type RunState = "idle" | "running" | "done" | "error";
+
+const PROVIDER_CONFIG = {
+  openai: {
+    label: "OpenAI GPT-5.4",
+    badge: "OpenAI",
+    badgeColor: "#10a37f",
+    keyEnv: "OPENAI_API_KEY",
+  },
+  anthropic: {
+    label: "Claude Sonnet 4.6",
+    badge: "Anthropic",
+    badgeColor: "#c96442",
+    keyEnv: "ANTHROPIC_API_KEY",
+  },
+} as const;
 
 export default function ClassifyPage() {
   const [tasks, setTasks]           = useState<Task[]>([]);
   const [settings, setSettings]     = useState<ClassifierSettings | null>(null);
+  const [provider, setProvider]     = useState<ProviderType>("openai");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [runState, setRunState]     = useState<RunState>("idle");
   const [progress, setProgress]     = useState({ current: 0, total: 0 });
   const [liveResults, setLiveResults] = useState<Record<string, ClassificationResult>>({});
   const [errorMsg, setErrorMsg]     = useState("");
   const [backendOk, setBackendOk]         = useState<boolean | null>(null);
-  const [apiKeyReady, setApiKeyReady]     = useState<boolean | null>(null);
+  const [openaiReady, setOpenaiReady]     = useState<boolean | null>(null);
+  const [anthropicReady, setAnthropicReady] = useState<boolean | null>(null);
   const startTimeRef = useRef<number | null>(null);
   const [remainingSec, setRemainingSec] = useState<number | null>(null);
   const stopRef = useRef<(() => void) | null>(null);
@@ -30,16 +47,19 @@ export default function ClassifyPage() {
     healthCheck()
       .then((res) => {
         setBackendOk(true);
-        setApiKeyReady(res.api_key_configured ?? false);
+        setOpenaiReady(res.openai_configured ?? false);
+        setAnthropicReady(res.anthropic_configured ?? false);
       })
       .catch(() => {
         setBackendOk(false);
-        setApiKeyReady(false);
+        setOpenaiReady(false);
+        setAnthropicReady(false);
       });
     getTasks({ page_size: 500 }).then((r) => setTasks(r.tasks));
     getSettings().then(setSettings);
   }, []);
 
+  const currentProviderReady = provider === "openai" ? openaiReady : anthropicReady;
   const canRun = backendOk && settings !== null && runState !== "running";
 
   const handleStart = () => {
@@ -55,7 +75,7 @@ export default function ClassifyPage() {
     setProgress({ current: 0, total });
 
     const stop = classifyTasks(
-      { task_ids: targetIds, settings },
+      { task_ids: targetIds, settings, provider },
       (event: SSEEvent) => {
         if (event.type === "progress") {
           setProgress({ current: event.current, total: event.total });
@@ -124,15 +144,50 @@ export default function ClassifyPage() {
         </div>
       )}
 
-      {/* API Key 미설정 경고 — .env 또는 settings 어느 쪽에도 키가 없을 때만 표시 */}
-      {backendOk && apiKeyReady === false && (
+      {/* API Key 미설정 경고 */}
+      {backendOk && currentProviderReady === false && (
         <div className="flex items-center gap-2 rounded-lg border border-yellow-200 bg-yellow-50 p-4 text-sm text-yellow-800">
           <AlertCircle className="h-5 w-5 flex-shrink-0" />
-          OpenAI API Key가 설정되지 않았습니다.{" "}
+          {PROVIDER_CONFIG[provider].badge} API Key가 설정되지 않았습니다.{" "}
           <code className="rounded bg-yellow-100 px-1">backend/.env</code> 파일에{" "}
-          <code className="rounded bg-yellow-100 px-1">OPENAI_API_KEY=sk-...</code>를 추가해 주세요.
+          <code className="rounded bg-yellow-100 px-1">{PROVIDER_CONFIG[provider].keyEnv}=...</code>를 추가하거나{" "}
+          <a href="/settings" className="underline font-medium">설정 페이지</a>에서 입력해 주세요.
         </div>
       )}
+
+      {/* Provider 선택 */}
+      <div className="rounded-xl border border-gray-200 bg-white px-6 py-4 shadow-sm">
+        <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">분류 모델 선택</p>
+        <div className="flex gap-3">
+          {(["openai", "anthropic"] as ProviderType[]).map((p) => {
+            const cfg = PROVIDER_CONFIG[p];
+            const isActive = provider === p;
+            return (
+              <button
+                key={p}
+                onClick={() => { if (runState !== "running") setProvider(p); }}
+                disabled={runState === "running"}
+                className="flex items-center gap-2.5 rounded-lg border px-4 py-2.5 text-sm font-medium transition-all disabled:opacity-50"
+                style={isActive
+                  ? { backgroundColor: cfg.badgeColor, borderColor: cfg.badgeColor, color: "#fff" }
+                  : { backgroundColor: "#fff", borderColor: "#D1D5DB", color: "#374151" }}
+              >
+                <span
+                  className="h-2 w-2 rounded-full"
+                  style={{ backgroundColor: isActive ? "#fff" : cfg.badgeColor }}
+                />
+                {cfg.label}
+                {p === "openai" && openaiReady && (
+                  <span className="ml-1 text-xs opacity-70">✓</span>
+                )}
+                {p === "anthropic" && anthropicReady && (
+                  <span className="ml-1 text-xs opacity-70">✓</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
       {/* 컨트롤 패널 */}
       <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">

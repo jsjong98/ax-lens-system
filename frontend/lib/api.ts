@@ -4,7 +4,6 @@
  * SSE 스트리밍: 백엔드 직접 연결 (Next.js 프록시가 SSE를 버퍼링하므로)
  */
 
-// SSE 스트리밍은 백엔드에 직접 연결 (프록시 버퍼링 우회)
 const BACKEND_DIRECT = typeof window !== "undefined"
   ? `${window.location.protocol}//${window.location.hostname}:8000`
   : "http://localhost:8000";
@@ -12,6 +11,7 @@ const BACKEND_DIRECT = typeof window !== "undefined"
 // ── 타입 정의 ────────────────────────────────────────────────────────────────
 
 export type LabelType = "AI 수행 가능" | "AI + Human" | "인간 수행 필요" | "미분류";
+export type ProviderType = "openai" | "anthropic";
 
 export interface Task {
   id: string;
@@ -34,6 +34,7 @@ export interface StageAnalysis {
 export interface ClassificationResult {
   task_id: string;
   label: LabelType;
+  provider: ProviderType;
   criterion: string;
   stage1: StageAnalysis;
   stage2: StageAnalysis;
@@ -51,6 +52,8 @@ export interface ClassifierSettings {
   criteria_prompt: string;
   api_key: string;
   model: string;
+  anthropic_api_key: string;
+  anthropic_model: string;
   batch_size: number;
   temperature: number;
 }
@@ -88,6 +91,26 @@ export interface FilterOptions {
 export interface ClassifyRequest {
   task_ids?: string[] | null;
   settings?: ClassifierSettings | null;
+  provider?: ProviderType;
+}
+
+export interface ComparisonItem {
+  task_id: string;
+  openai_label: LabelType | null;
+  openai_reason: string | null;
+  openai_confidence: number | null;
+  anthropic_label: LabelType | null;
+  anthropic_reason: string | null;
+  anthropic_confidence: number | null;
+  match: boolean | null;
+}
+
+export interface ComparisonResponse {
+  total: number;
+  both_classified: number;
+  matching: number;
+  match_rate: number;
+  comparison: ComparisonItem[];
 }
 
 // SSE 이벤트 타입
@@ -158,7 +181,6 @@ export function classifyTasks(
 
   (async () => {
     try {
-      // SSE: Next.js 프록시 우회하여 백엔드 직접 연결
       const res = await fetch(`${BACKEND_DIRECT}/api/classify`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -206,33 +228,49 @@ export function classifyTasks(
 
 export async function getResults(params: {
   label?: string;
+  provider?: ProviderType;
   page?: number;
   page_size?: number;
 } = {}): Promise<ResultsResponse> {
   const qs = new URLSearchParams();
   if (params.label)     qs.set("label", params.label);
+  if (params.provider)  qs.set("provider", params.provider);
   if (params.page)      qs.set("page", String(params.page));
   if (params.page_size) qs.set("page_size", String(params.page_size));
   const query = qs.toString() ? `?${qs}` : "";
   return apiFetch<ResultsResponse>(`/results${query}`);
 }
 
-export async function getStats(): Promise<StatsResponse> {
-  return apiFetch<StatsResponse>("/results/stats");
+export async function getStats(provider: ProviderType = "openai"): Promise<StatsResponse> {
+  return apiFetch<StatsResponse>(`/results/stats?provider=${provider}`);
+}
+
+export async function getComparisonResults(params: {
+  page?: number;
+  page_size?: number;
+} = {}): Promise<ComparisonResponse> {
+  const qs = new URLSearchParams();
+  if (params.page)      qs.set("page", String(params.page));
+  if (params.page_size) qs.set("page_size", String(params.page_size));
+  const query = qs.toString() ? `?${qs}` : "";
+  return apiFetch<ComparisonResponse>(`/results/compare${query}`);
 }
 
 export async function updateResult(
   taskId: string,
-  update: { label: LabelType; reason?: string }
+  update: { label: LabelType; reason?: string },
+  provider: ProviderType = "openai"
 ): Promise<ClassificationResult> {
-  return apiFetch<ClassificationResult>(`/results/${encodeURIComponent(taskId)}`, {
-    method: "PUT",
-    body: JSON.stringify(update),
-  });
+  return apiFetch<ClassificationResult>(
+    `/results/${encodeURIComponent(taskId)}?provider=${provider}`,
+    { method: "PUT", body: JSON.stringify(update) }
+  );
 }
 
-export async function deleteAllResults(): Promise<void> {
-  await apiFetch("/results", { method: "DELETE" });
+export async function deleteAllResults(
+  provider: "openai" | "anthropic" | "all" = "openai"
+): Promise<void> {
+  await apiFetch(`/results?provider=${provider}`, { method: "DELETE" });
 }
 
 // ── 설정 API ─────────────────────────────────────────────────────────────────
@@ -250,8 +288,12 @@ export async function saveSettings(settings: ClassifierSettings): Promise<Classi
 
 // ── 내보내기 ─────────────────────────────────────────────────────────────────
 
-export function downloadExport(): void {
-  window.location.href = "/api/export";
+export function downloadExport(provider: ProviderType = "openai"): void {
+  window.location.href = `/api/export?provider=${provider}`;
+}
+
+export function downloadCompareExport(): void {
+  window.location.href = "/api/export/compare";
 }
 
 // ── 엑셀 업로드 ──────────────────────────────────────────────────────────────
@@ -297,6 +339,12 @@ export async function uploadExcel(
 
 // ── 헬스체크 ─────────────────────────────────────────────────────────────────
 
-export async function healthCheck(): Promise<{ status: string; task_count: number; api_key_configured: boolean }> {
+export async function healthCheck(): Promise<{
+  status: string;
+  task_count: number;
+  api_key_configured: boolean;
+  openai_configured: boolean;
+  anthropic_configured: boolean;
+}> {
   return apiFetch("/health");
 }

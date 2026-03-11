@@ -96,7 +96,9 @@ export default function SettingsPage() {
   const [form, setForm]           = useState<ClassifierSettings>({
     criteria_prompt: "",
     api_key: "",
-    model: "gpt-5.2",
+    model: "gpt-5.4",
+    anthropic_api_key: "",
+    anthropic_model: "claude-sonnet-4-6",
     batch_size: 5,
     temperature: 0.0,
   });
@@ -225,12 +227,62 @@ export default function SettingsPage() {
         />
       </section>
 
+      {/* API 설정 */}
+      <section className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm space-y-6">
+        <div>
+          <h2 className="text-base font-semibold text-gray-900">API 설정</h2>
+          <p className="text-xs text-gray-500 mt-0.5">두 API를 모두 설정하면 분류 실행 시 제공자를 선택할 수 있습니다.</p>
+        </div>
+
+        {/* OpenAI */}
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <span className="rounded px-2 py-0.5 text-xs font-bold text-white" style={{ backgroundColor: "#10a37f" }}>OpenAI</span>
+            <span className="text-sm font-medium text-gray-700">GPT-5.4</span>
+          </div>
+          <div className="space-y-1.5">
+            <label className="block text-xs font-medium text-gray-600">API Key</label>
+            <input
+              type="password"
+              value={form.api_key}
+              onChange={(e) => set("api_key", e.target.value)}
+              placeholder="sk-..."
+              className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-mono focus:outline-none"
+              onFocus={(e) => { e.currentTarget.style.borderColor = "#10a37f"; e.currentTarget.style.boxShadow = "0 0 0 1px #10a37f"; }}
+              onBlur={(e) => { e.currentTarget.style.borderColor = ""; e.currentTarget.style.boxShadow = ""; }}
+            />
+            <p className="text-xs text-gray-400">또는 <code className="bg-gray-100 rounded px-1">backend/.env</code>에 <code className="bg-gray-100 rounded px-1">OPENAI_API_KEY=sk-...</code> 설정</p>
+          </div>
+        </div>
+
+        <div className="border-t border-gray-100" />
+
+        {/* Anthropic */}
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <span className="rounded px-2 py-0.5 text-xs font-bold text-white" style={{ backgroundColor: "#c96442" }}>Anthropic</span>
+            <span className="text-sm font-medium text-gray-700">Claude Sonnet 4.6</span>
+          </div>
+          <div className="space-y-1.5">
+            <label className="block text-xs font-medium text-gray-600">API Key</label>
+            <input
+              type="password"
+              value={form.anthropic_api_key}
+              onChange={(e) => set("anthropic_api_key", e.target.value)}
+              placeholder="sk-ant-..."
+              className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-mono focus:outline-none"
+              onFocus={(e) => { e.currentTarget.style.borderColor = "#c96442"; e.currentTarget.style.boxShadow = "0 0 0 1px #c96442"; }}
+              onBlur={(e) => { e.currentTarget.style.borderColor = ""; e.currentTarget.style.boxShadow = ""; }}
+            />
+            <p className="text-xs text-gray-400">또는 <code className="bg-gray-100 rounded px-1">backend/.env</code>에 <code className="bg-gray-100 rounded px-1">ANTHROPIC_API_KEY=sk-ant-...</code> 설정</p>
+          </div>
+        </div>
+      </section>
+
       {/* 분석 설정 */}
       <section className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm space-y-5">
         <div>
           <h2 className="text-base font-semibold text-gray-900">분석 설정</h2>
-          <p className="text-xs text-gray-500 mt-0.5">
-          </p>
         </div>
 
         <div className="space-y-1.5">
@@ -272,9 +324,10 @@ export default function SettingsPage() {
       </div>
 
       <section className="rounded-xl border border-gray-100 bg-gray-50 p-5 text-xs text-gray-600 space-y-1">
-        <p className="font-semibold text-gray-700">참고: API 인증 방법</p>
-        <p>• API Key는 <code className="bg-gray-200 rounded px-1">backend/.env</code> 파일에서 관리됩니다.</p>
-        <p>• <code className="bg-gray-200 rounded px-1">OPENAI_API_KEY=sk-...</code> 형식으로 저장되어 있으며 앱 시작 시 자동으로 로드됩니다.</p>
+        <p className="font-semibold text-gray-700">참고: .env 파일 설정 예시</p>
+        <p>• <code className="bg-gray-200 rounded px-1">OPENAI_API_KEY=sk-...</code></p>
+        <p>• <code className="bg-gray-200 rounded px-1">ANTHROPIC_API_KEY=sk-ant-...</code></p>
+        <p className="text-gray-400">앱 시작 시 자동으로 로드됩니다. 위 필드에 직접 입력해도 동일하게 동작합니다.</p>
       </section>
     </div>
   );

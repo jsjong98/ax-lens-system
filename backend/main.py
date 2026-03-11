@@ -22,7 +22,6 @@ def _load_dotenv() -> None:
         from dotenv import load_dotenv
         load_dotenv(env_path, override=False)
     except ImportError:
-        # python-dotenv 미설치 시 직접 파싱
         for line in env_path.read_text("utf-8").splitlines():
             line = line.strip()
             if line and not line.startswith("#") and "=" in line:
@@ -64,8 +63,8 @@ from settings_store import (
 
 app = FastAPI(
     title="HR Task 분류 API",
-    description="HR As-Is 프로세스의 L5 Task를 AI/인간 분류하는 API",
-    version="1.0.0",
+    description="HR As-Is 프로세스의 L5 Task를 OpenAI / Anthropic으로 분류하는 API",
+    version="2.0.0",
 )
 
 app.add_middleware(
@@ -76,8 +75,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── 인메모리 Task 캐시 (파일 업로드 시 로드) ──────────────────────────────────
-# 앱 시작 시 자동 로드하지 않음. 사용자가 엑셀 파일을 업로드해야 Task가 로드됩니다.
+# ── 인메모리 Task 캐시 ────────────────────────────────────────────────────────
 _tasks_cache: list[Task] = []
 
 
@@ -87,10 +85,10 @@ _tasks_cache: list[Task] = []
 
 @app.get("/api/tasks", response_model=TaskListResponse, tags=["Tasks"])
 async def get_tasks(
-    search: Optional[str] = Query(None, description="Task명/설명 검색어"),
-    l2: Optional[str] = Query(None, description="L2 필터"),
-    l3: Optional[str] = Query(None, description="L3 필터"),
-    l4: Optional[str] = Query(None, description="L4 필터"),
+    search: Optional[str] = Query(None),
+    l2: Optional[str] = Query(None),
+    l3: Optional[str] = Query(None),
+    l4: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=500),
 ):
@@ -120,7 +118,6 @@ async def get_tasks(
 
 @app.get("/api/tasks/filters", tags=["Tasks"])
 async def get_filter_options():
-    """L2/L3/L4 필터 선택지를 반환합니다."""
     l2_set: dict[str, str] = {}
     l3_set: dict[str, str] = {}
     l4_set: dict[str, str] = {}
@@ -152,21 +149,22 @@ async def get_task(task_id: str):
 @app.post("/api/classify", tags=["Classify"])
 async def classify_tasks(req: ClassifyRequest):
     """
-    Task를 분류합니다. Server-Sent Events (SSE) 형식으로 진행 상황을 스트리밍합니다.
-
-    각 이벤트 형식:
-      data: {"type": "progress", "task_id": "...", "current": N, "total": M, "result": {...}}
-      data: {"type": "done", "total": M}
-      data: {"type": "error", "message": "..."}
+    Task를 분류합니다. provider 필드로 OpenAI / Anthropic 선택 가능.
+    Server-Sent Events (SSE) 형식으로 진행 상황을 스트리밍합니다.
     """
+    provider = req.provider  # "openai" | "anthropic"
     settings = req.settings or load_settings()
 
-    # 프론트엔드에서 마스킹된 API Key(sk-***...)가 넘어오면 저장된 실제 키로 교체
-    if settings.api_key and settings.api_key.startswith("sk-" + "*"):
-        stored = load_settings()
-        settings.api_key = stored.api_key
+    # 마스킹된 키가 넘어오면 저장된 실제 키로 교체
+    if provider == "openai":
+        if settings.api_key and settings.api_key.startswith("sk-" + "*"):
+            stored = load_settings()
+            settings.api_key = stored.api_key
+    elif provider == "anthropic":
+        if settings.anthropic_api_key and settings.anthropic_api_key.startswith("sk-ant-" + "*"):
+            stored = load_settings()
+            settings.anthropic_api_key = stored.anthropic_api_key
 
-    # 분류할 Task 목록 결정
     if req.task_ids:
         id_set = set(req.task_ids)
         tasks = [t for t in _tasks_cache if t.id in id_set]
@@ -176,14 +174,15 @@ async def classify_tasks(req: ClassifyRequest):
     if not tasks:
         raise HTTPException(status_code=400, detail="분류할 Task가 없습니다.")
 
-    classifier = get_classifier(settings)
-    results_store = load_results()
+    classifier = get_classifier(settings, provider)
+    results_store = load_results(provider)
     total = len(tasks)
 
     async def event_generator():
         current = 0
         try:
             async for result in classifier.classify_stream(tasks, settings):
+                result.provider = provider
                 current += 1
                 results_store[result.task_id] = result
                 payload = {
@@ -195,8 +194,7 @@ async def classify_tasks(req: ClassifyRequest):
                 }
                 yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
-            # 완료 후 저장
-            save_results(results_store)
+            save_results(results_store, provider)
             yield f"data: {json.dumps({'type': 'done', 'total': current}, ensure_ascii=False)}\n\n"
 
         except Exception as e:
@@ -205,10 +203,7 @@ async def classify_tasks(req: ClassifyRequest):
     return StreamingResponse(
         event_generator(),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        },
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 
@@ -218,11 +213,12 @@ async def classify_tasks(req: ClassifyRequest):
 
 @app.get("/api/results", response_model=ResultsResponse, tags=["Results"])
 async def get_results(
-    label: Optional[str] = Query(None, description="레이블 필터 (AI 수행 가능|AI + Human|인간 수행 필요|미분류)"),
+    label: Optional[str] = Query(None),
+    provider: str = Query("openai", description="openai | anthropic"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=500),
 ):
-    results_store = load_results()
+    results_store = load_results(provider)
     results = list(results_store.values())
 
     if label:
@@ -243,41 +239,93 @@ async def get_results(
     )
 
 
+@app.get("/api/results/compare", tags=["Results"])
+async def get_comparison_results(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=500),
+):
+    """OpenAI와 Anthropic 분류 결과를 나란히 비교합니다."""
+    openai_results    = load_results("openai")
+    anthropic_results = load_results("anthropic")
+
+    all_ids = sorted(set(openai_results.keys()) | set(anthropic_results.keys()))
+
+    comparison = []
+    for task_id in all_ids:
+        o = openai_results.get(task_id)
+        a = anthropic_results.get(task_id)
+        comparison.append({
+            "task_id": task_id,
+            "openai_label":       o.label      if o else None,
+            "openai_reason":      o.reason     if o else None,
+            "openai_confidence":  o.confidence if o else None,
+            "anthropic_label":    a.label      if a else None,
+            "anthropic_reason":   a.reason     if a else None,
+            "anthropic_confidence": a.confidence if a else None,
+            "match": (o.label == a.label) if (o and a) else None,
+        })
+
+    total    = len(comparison)
+    both     = sum(1 for c in comparison if c["openai_label"] and c["anthropic_label"])
+    matching = sum(1 for c in comparison if c.get("match") is True)
+
+    start = (page - 1) * page_size
+    paged = comparison[start : start + page_size]
+
+    return {
+        "total": total,
+        "both_classified": both,
+        "matching": matching,
+        "match_rate": round(matching / both * 100, 1) if both else 0,
+        "comparison": paged,
+    }
+
+
 @app.put("/api/results/{task_id}", response_model=ClassificationResult, tags=["Results"])
-async def update_result(task_id: str, update: ClassificationResultUpdate):
-    """분류 결과를 수동으로 수정합니다."""
-    results_store = load_results()
+async def update_result(
+    task_id: str,
+    update: ClassificationResultUpdate,
+    provider: str = Query("openai"),
+):
+    results_store = load_results(provider)
     existing = results_store.get(task_id)
 
     if existing is None:
-        existing = ClassificationResult(task_id=task_id)
+        existing = ClassificationResult(task_id=task_id, provider=provider)
 
     existing.label = update.label
     if update.reason is not None:
         existing.reason = update.reason
     existing.manually_edited = True
 
-    upsert_result(existing)
+    upsert_result(existing, provider)
     return existing
 
 
 @app.delete("/api/results", tags=["Results"])
-async def delete_all_results():
-    """모든 분류 결과를 초기화합니다."""
-    clear_results()
-    return {"message": "결과가 초기화되었습니다."}
+async def delete_all_results(
+    provider: str = Query("openai", description="openai | anthropic | all"),
+):
+    """분류 결과를 초기화합니다. provider=all 이면 양쪽 모두 초기화."""
+    if provider == "all":
+        clear_results("openai")
+        clear_results("anthropic")
+    else:
+        clear_results(provider)
+    return {"message": f"'{provider}' 결과가 초기화되었습니다."}
 
 
 @app.get("/api/results/stats", response_model=StatsResponse, tags=["Results"])
-async def get_stats():
-    results_store = load_results()
-    total = len(_tasks_cache)
+async def get_stats(
+    provider: str = Query("openai", description="openai | anthropic"),
+):
+    results_store = load_results(provider)
+    total        = len(_tasks_cache)
     ai_count     = sum(1 for r in results_store.values() if r.label == "AI 수행 가능")
     hybrid_count = sum(1 for r in results_store.values() if r.label == "AI + Human")
     human_count  = sum(1 for r in results_store.values() if r.label == "인간 수행 필요")
     unclassified_count = total - ai_count - hybrid_count - human_count
 
-    # L3별 집계
     l3_map: dict[str, dict] = {}
     for t in _tasks_cache:
         if t.l3 not in l3_map:
@@ -312,23 +360,27 @@ async def get_stats():
 @app.get("/api/settings", response_model=ClassifierSettings, tags=["Settings"])
 async def get_settings():
     settings = load_settings()
-    # API 키는 마스킹해서 반환
     masked = settings.model_copy()
     if masked.api_key:
         masked.api_key = "sk-" + "*" * 20
+    if masked.anthropic_api_key:
+        masked.anthropic_api_key = "sk-ant-" + "*" * 20
     return masked
 
 
 @app.post("/api/settings", response_model=ClassifierSettings, tags=["Settings"])
 async def update_settings(settings: ClassifierSettings):
-    # 마스킹된 키가 들어오면 기존 키 유지
+    existing = load_settings()
     if settings.api_key.startswith("sk-" + "*"):
-        existing = load_settings()
         settings.api_key = existing.api_key
+    if settings.anthropic_api_key.startswith("sk-ant-" + "*"):
+        settings.anthropic_api_key = existing.anthropic_api_key
     save_settings(settings)
     masked = settings.model_copy()
     if masked.api_key:
         masked.api_key = "sk-" + "*" * 20
+    if masked.anthropic_api_key:
+        masked.anthropic_api_key = "sk-ant-" + "*" * 20
     return masked
 
 
@@ -336,34 +388,23 @@ async def update_settings(settings: ClassifierSettings):
 # 엑셀 내보내기
 # ─────────────────────────────────────────────────────────────────────────────
 
-@app.get("/api/export", tags=["Export"])
-async def export_results():
-    """분류 결과를 엑셀 파일로 다운로드합니다."""
-    results_store = load_results()
-    task_map = {t.id: t for t in _tasks_cache}
-
-    wb = openpyxl.Workbook()
-
-    # ── 분류결과 시트 ──
-    ws = wb.active
-    ws.title = "분류결과"
-
+def _build_result_sheet(ws, tasks_cache: list[Task], results_store: dict, provider_label: str):
+    """결과 시트 생성 공통 함수."""
     headers = ["L5_ID", "L2", "L3", "L4", "L5_Name", "L5_Description", "수행주체",
                "분류결과", "적용기준(Knock-out)", "판단근거", "수동수정여부"]
     ws.append(headers)
 
     header_fill = PatternFill("solid", fgColor="1F4E79")
-    # AI 수행 가능 → 연분홍, AI + Human → 연노랑, 인간 수행 필요 → 연초록
-    ai_fill     = PatternFill("solid", fgColor="FFE0E0")   # 연분홍
-    hybrid_fill = PatternFill("solid", fgColor="FFF9DB")   # 연노랑
-    human_fill  = PatternFill("solid", fgColor="D6F5E3")   # 연초록
+    ai_fill     = PatternFill("solid", fgColor="FFE0E0")
+    hybrid_fill = PatternFill("solid", fgColor="FFF9DB")
+    human_fill  = PatternFill("solid", fgColor="D6F5E3")
 
     for cell in ws[1]:
         cell.fill = header_fill
         cell.font = Font(bold=True, color="FFFFFF")
         cell.alignment = Alignment(horizontal="center")
 
-    for t in _tasks_cache:
+    for t in tasks_cache:
         r = results_store.get(t.id)
         label     = r.label if r else "미분류"
         criterion = r.criterion if r else ""
@@ -386,7 +427,21 @@ async def export_results():
     for i, w in enumerate(col_widths, 1):
         ws.column_dimensions[ws.cell(1, i).column_letter].width = w
 
-    # ── 요약 시트 ──
+
+@app.get("/api/export", tags=["Export"])
+async def export_results(
+    provider: str = Query("openai", description="openai | anthropic"),
+):
+    """분류 결과를 엑셀 파일로 다운로드합니다."""
+    results_store = load_results(provider)
+    provider_label = "OpenAI" if provider == "openai" else "Claude"
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = f"분류결과_{provider_label}"
+    _build_result_sheet(ws, _tasks_cache, results_store, provider_label)
+
+    # 요약 시트
     ws2 = wb.create_sheet("요약")
     total    = len(_tasks_cache)
     ai_cnt   = sum(1 for r in results_store.values() if r.label == "AI 수행 가능")
@@ -394,6 +449,7 @@ async def export_results():
     hum_cnt  = sum(1 for r in results_store.values() if r.label == "인간 수행 필요")
     rows = [
         ["항목", "값"],
+        ["모델", provider_label],
         ["전체 Task", total],
         ["AI 수행 가능", ai_cnt],
         ["AI + Human", hyb_cnt],
@@ -405,15 +461,85 @@ async def export_results():
     for row in rows:
         ws2.append(row)
 
-    # 바이트 스트림으로 저장
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
-
+    filename = f"classification_{provider}.xlsx"
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": "attachment; filename=classification_results.xlsx"},
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+@app.get("/api/export/compare", tags=["Export"])
+async def export_comparison():
+    """OpenAI와 Claude 결과를 비교하는 엑셀 다운로드 (3개 시트)."""
+    openai_results    = load_results("openai")
+    anthropic_results = load_results("anthropic")
+
+    wb = openpyxl.Workbook()
+
+    # 시트 1: OpenAI 결과
+    ws1 = wb.active
+    ws1.title = "OpenAI (GPT-5.4)"
+    _build_result_sheet(ws1, _tasks_cache, openai_results, "OpenAI")
+
+    # 시트 2: Claude 결과
+    ws2 = wb.create_sheet("Claude (Sonnet 4.6)")
+    _build_result_sheet(ws2, _tasks_cache, anthropic_results, "Claude")
+
+    # 시트 3: 비교
+    ws3 = wb.create_sheet("비교")
+    comp_headers = ["L5_ID", "L5_Name", "OpenAI 결과", "Claude 결과", "일치 여부",
+                    "OpenAI 근거", "Claude 근거"]
+    ws3.append(comp_headers)
+    header_fill = PatternFill("solid", fgColor="374151")
+    for cell in ws3[1]:
+        cell.fill = header_fill
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.alignment = Alignment(horizontal="center")
+
+    match_fill    = PatternFill("solid", fgColor="D1FAE5")
+    mismatch_fill = PatternFill("solid", fgColor="FEE2E2")
+
+    task_map = {t.id: t for t in _tasks_cache}
+    all_ids  = sorted(set(openai_results.keys()) | set(anthropic_results.keys()))
+
+    for task_id in all_ids:
+        o = openai_results.get(task_id)
+        a = anthropic_results.get(task_id)
+        task = task_map.get(task_id)
+        name = task.name if task else task_id
+        match = (o.label == a.label) if (o and a) else None
+
+        row = [
+            task_id,
+            name,
+            o.label if o else "-",
+            a.label if a else "-",
+            "✓ 일치" if match is True else ("✗ 불일치" if match is False else "-"),
+            o.reason if o else "",
+            a.reason if a else "",
+        ]
+        ws3.append(row)
+
+        last = ws3.max_row
+        fill = match_fill if match is True else (mismatch_fill if match is False else None)
+        if fill:
+            for col in range(1, 6):
+                ws3.cell(row=last, column=col).fill = fill
+
+    for i, w in enumerate([12, 35, 16, 16, 12, 40, 40], 1):
+        ws3.column_dimensions[ws3.cell(1, i).column_letter].width = w
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=classification_compare.xlsx"},
     )
 
 
@@ -423,20 +549,16 @@ async def export_results():
 
 _UPLOAD_DIR = Path(__file__).parent / "uploads"
 _UPLOAD_DIR.mkdir(exist_ok=True)
-
-# 현재 로드된 엑셀 파일 경로 추적
 _current_excel_path: Path | None = None
 
 
 @app.get("/api/upload/current", tags=["Upload"])
 async def get_current_file():
-    """현재 로드된 엑셀 파일 정보를 반환합니다."""
     from excel_reader import _find_excel
     try:
         if _current_excel_path and _current_excel_path.exists():
             path = _current_excel_path
         else:
-            # uploads 폴더 먼저, 그 다음 상위 디렉토리 탐색
             try:
                 path = _find_excel(_UPLOAD_DIR)
             except FileNotFoundError:
@@ -452,10 +574,6 @@ async def get_current_file():
 
 @app.post("/api/upload", tags=["Upload"])
 async def upload_excel(file: UploadFile = File(...)):
-    """
-    엑셀 파일을 업로드하고 Task 목록을 새로 로드합니다.
-    .xlsx 형식만 허용합니다.
-    """
     global _tasks_cache, _current_excel_path
 
     if not file.filename or not file.filename.endswith(".xlsx"):
@@ -468,7 +586,6 @@ async def upload_excel(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"파일 저장 실패: {e}")
 
-    # 새 파일로 Task 재로드
     try:
         new_tasks = load_tasks(save_path)
     except Exception as e:
@@ -491,12 +608,13 @@ async def upload_excel(file: UploadFile = File(...)):
 
 @app.get("/api/health", tags=["System"])
 async def health():
-    # .env 또는 settings.json 어느 쪽에든 API Key가 있으면 configured=True
-    env_key = os.environ.get("OPENAI_API_KEY", "").strip()
-    settings_key = load_settings().api_key.strip()
-    api_key_configured = bool(env_key or settings_key)
+    env_openai    = os.environ.get("OPENAI_API_KEY", "").strip()
+    env_anthropic = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    s = load_settings()
     return {
         "status": "ok",
         "task_count": len(_tasks_cache),
-        "api_key_configured": api_key_configured,
+        "api_key_configured": bool(env_openai or s.api_key.strip()),
+        "openai_configured": bool(env_openai or s.api_key.strip()),
+        "anthropic_configured": bool(env_anthropic or s.anthropic_api_key.strip()),
     }
