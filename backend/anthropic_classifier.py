@@ -17,6 +17,7 @@ from anthropic import AsyncAnthropic
 from classifier import BaseClassifier
 from llm_classifier import build_system_prompt, build_user_prompt, _LABELS
 from models import ClassificationResult, ClassifierSettings, Task
+from usage_store import add_usage
 
 
 def _extract_json(text: str) -> dict:
@@ -71,6 +72,13 @@ class AnthropicClassifier(BaseClassifier):
                 messages=[{"role": "user", "content": user_prompt}],
             )
             raw = response.content[0].text
+            # 토큰 사용량 누적 기록
+            if response.usage:
+                add_usage(
+                    "anthropic",
+                    input_tokens=response.usage.input_tokens,
+                    output_tokens=response.usage.output_tokens,
+                )
             data = _extract_json(raw)
             classified = data.get("tasks", [data])
             r = classified[0] if classified else {}

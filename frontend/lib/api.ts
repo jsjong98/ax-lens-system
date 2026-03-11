@@ -348,3 +348,28 @@ export async function healthCheck(): Promise<{
 }> {
   return apiFetch("/health");
 }
+
+// ── 사용량 ───────────────────────────────────────────────────────────────────
+
+export interface ProviderUsage {
+  total_calls: number;
+  input_tokens: number;
+  output_tokens: number;
+  estimated_cost_usd: number;
+  last_used: string | null;
+  price_per_1m_input: number;
+  price_per_1m_output: number;
+}
+
+export interface UsageStats {
+  openai: ProviderUsage;
+  anthropic: ProviderUsage;
+}
+
+export async function getUsage(): Promise<UsageStats> {
+  return apiFetch("/usage");
+}
+
+export async function resetUsage(provider: "all" | "openai" | "anthropic" = "all"): Promise<void> {
+  await apiFetch(`/usage?provider=${provider}`, { method: "DELETE" });
+}

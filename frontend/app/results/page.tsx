@@ -106,7 +106,7 @@ function CompareTable({
 
         {comparison.length === 0 && (
           <div className="py-12 text-center text-sm text-gray-400">
-            비교할 데이터가 없습니다. OpenAI와 Claude 각각 분류를 먼저 실행해 주세요.
+            비교할 데이터가 없습니다. O 모델과 A 모델 각각 분류를 먼저 실행해 주세요.
           </div>
         )}
       </div>
@@ -214,7 +214,7 @@ export default function ResultsPage() {
 
   const handleDeleteAll = async () => {
     if (viewMode === "compare") {
-      if (!confirm("OpenAI와 Claude 결과를 모두 초기화하시겠습니까?")) return;
+      if (!confirm("O 모델과 A 모델 결과를 모두 초기화하시겠습니까?")) return;
       await deleteAllResults("all");
     } else {
       const providerLabel = PROVIDER_META[viewMode].label;

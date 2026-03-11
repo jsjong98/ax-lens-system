@@ -23,6 +23,7 @@ from openai import AsyncOpenAI
 
 from classifier import BaseClassifier
 from models import ClassificationResult, ClassifierSettings, Task
+from usage_store import add_usage
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 시스템 프롬프트
@@ -303,6 +304,13 @@ class LLMClassifier(BaseClassifier):
                 response_format={"type": "json_object"},
             )
             raw = response.choices[0].message.content
+            # 토큰 사용량 누적 기록
+            if response.usage:
+                add_usage(
+                    "openai",
+                    input_tokens=response.usage.prompt_tokens,
+                    output_tokens=response.usage.completion_tokens,
+                )
             data = json.loads(raw)
             classified = data.get("tasks", [data])
             r = classified[0] if classified else {}

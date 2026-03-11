@@ -58,6 +58,7 @@ from settings_store import (
     save_settings,
     upsert_result,
 )
+from usage_store import get_usage, reset_usage
 
 # ── 앱 초기화 ────────────────────────────────────────────────────────────────
 
@@ -618,3 +619,16 @@ async def health():
         "openai_configured": bool(env_openai or s.api_key.strip()),
         "anthropic_configured": bool(env_anthropic or s.anthropic_api_key.strip()),
     }
+
+
+@app.get("/api/usage", tags=["System"])
+async def get_usage_stats():
+    """누적 API 토큰 사용량 및 예상 비용을 반환합니다."""
+    return get_usage()
+
+
+@app.delete("/api/usage", tags=["System"])
+async def reset_usage_stats(provider: str = Query("all")):
+    """사용량을 초기화합니다. provider=all|openai|anthropic"""
+    reset_usage(provider)
+    return {"ok": True, "reset": provider}
