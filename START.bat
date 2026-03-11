@@ -1,11 +1,13 @@
 @echo off
 setlocal EnableDelayedExpansion
 chcp 65001 >nul 2>&1
-title PwC AX Lens System
+title PwC AX Lens
 
 echo.
 echo ============================================================
-echo   PwC AX Lens System  ^|  Starting...
+echo   PwC AX Lens  ^|  Starting...
+echo   App  -^>  http://localhost:3000
+echo   API  -^>  http://localhost:8000/docs
 echo ============================================================
 echo.
 
@@ -13,107 +15,86 @@ set "ROOT=%~dp0"
 set "BACKEND=%ROOT%backend"
 set "FRONTEND=%ROOT%frontend"
 
-REM ── Prerequisite checks ─────────────────────────────────────
+REM ── Check Python ─────────────────────────────────────────────
 set PYTHON_CMD=
 for %%c in (python py python3) do (
     if not defined PYTHON_CMD (
-        %%c --version >nul 2>&1 && set PYTHON_CMD=%%c
+        %%c -c "import uvicorn, fastapi" >nul 2>&1 && set PYTHON_CMD=%%c
     )
 )
 if not defined PYTHON_CMD (
-    echo  [ERROR] Python not found. Please run SETUP.bat first.
+    echo [ERROR] Python with uvicorn/fastapi not found.
+    echo         Run SETUP.bat or:  pip install fastapi uvicorn openpyxl openai anthropic python-multipart
     pause & exit /b 1
 )
+echo [OK] Python : !PYTHON_CMD!
 
+REM ── Check Node.js ────────────────────────────────────────────
 node --version >nul 2>&1
 if %ERRORLEVEL% NEQ 0 (
-    echo  [ERROR] Node.js not found. Please run SETUP.bat first.
+    echo [ERROR] Node.js not found. Install from https://nodejs.org
     pause & exit /b 1
 )
+for /f "tokens=*" %%v in ('node -v 2^>nul') do echo [OK] Node.js: %%v
+echo.
 
-if not exist "%FRONTEND%\node_modules" (
-    echo  [ERROR] Node modules not installed. Please run SETUP.bat first.
-    pause & exit /b 1
-)
-
-if not exist "%BACKEND%\.env" (
-    echo  [WARN] backend\.env not found.
-    echo         Classification will not work without an OpenAI API Key.
-    echo         Run SETUP.bat or create backend\.env manually.
-    echo.
-    timeout /t 4 >nul
-)
-
-REM ── Stop any existing processes on ports 8000 / 3000 ────────
-echo  Stopping any existing servers on ports 8000 and 3000...
-for /f "tokens=5" %%p in ('netstat -aon 2^>nul ^| findstr ":8000 "') do (
-    taskkill /PID %%p /F >nul 2>&1
-)
-for /f "tokens=5" %%p in ('netstat -aon 2^>nul ^| findstr ":3000 "') do (
-    taskkill /PID %%p /F >nul 2>&1
-)
+REM ── Kill existing processes on 8000 / 3000 ───────────────────
+echo [CLEAN] Stopping any existing servers...
+for /f "tokens=5" %%p in ('netstat -aon 2^>nul ^| findstr ":8000 "') do taskkill /PID %%p /F >nul 2>&1
+for /f "tokens=5" %%p in ('netstat -aon 2^>nul ^| findstr ":3000 "') do taskkill /PID %%p /F >nul 2>&1
 timeout /t 1 >nul
 
-REM ── Find uvicorn ─────────────────────────────────────────────
-set UVICORN_CMD=
-!PYTHON_CMD! -m uvicorn --version >nul 2>&1
-if %ERRORLEVEL% EQU 0 (
-    set "UVICORN_CMD=!PYTHON_CMD! -m uvicorn"
-) else (
-    where uvicorn >nul 2>&1
-    if %ERRORLEVEL% EQU 0 set UVICORN_CMD=uvicorn
-)
-if not defined UVICORN_CMD (
-    echo  [ERROR] uvicorn not found. Run SETUP.bat to install dependencies.
-    pause & exit /b 1
+REM ── Check frontend node_modules ──────────────────────────────
+if not exist "%FRONTEND%\node_modules" (
+    echo [SETUP] node_modules not found - running npm install...
+    cd /d "%FRONTEND%" && npm install --silent
 )
 
 REM ── Start Backend ────────────────────────────────────────────
-echo  Starting backend  (http://localhost:8000) ...
-start "PwC-Backend" /min cmd /c "cd /d "%BACKEND%" && !UVICORN_CMD! main:app --host 0.0.0.0 --port 8000 2>&1"
+echo [BACKEND]  Starting FastAPI on :8000 ...
+start "PwC-Backend" /min cmd /c "cd /d "%BACKEND%" && !PYTHON_CMD! -m uvicorn main:app --reload --host 127.0.0.1 --port 8000"
 
 REM ── Wait for backend ─────────────────────────────────────────
-echo  Waiting for backend to be ready...
 set RETRY=0
 :wait_backend
 timeout /t 2 >nul
-curl -s http://localhost:8000/api/health >nul 2>&1
+curl -sf http://localhost:8000/api/health >nul 2>&1
 if %ERRORLEVEL% NEQ 0 (
     set /a RETRY+=1
     if !RETRY! LSS 15 (
-        echo  .  retrying (!RETRY!/15)
+        echo            . retrying (!RETRY!/15)
         goto wait_backend
     )
-    echo  [WARN] Backend did not respond in time. Continuing anyway...
+    echo [WARN] Backend slow to start. Continuing anyway...
+) else (
+    echo            -^> OK
 )
-echo  Backend ready.
+echo.
 
 REM ── Start Frontend ───────────────────────────────────────────
-echo  Starting frontend (http://localhost:3000) ...
-start "PwC-Frontend" /min cmd /c "cd /d "%FRONTEND%" && npm run dev 2>&1"
+echo [FRONTEND] Starting Next.js on :3000 ...
+start "PwC-Frontend" /min cmd /c "cd /d "%FRONTEND%" && npx next dev --hostname localhost --port 3000"
 
 REM ── Wait for frontend ────────────────────────────────────────
-echo  Waiting for frontend to be ready...
 set RETRY=0
 :wait_frontend
 timeout /t 3 >nul
-curl -s http://localhost:3000 >nul 2>&1
+curl -sf http://localhost:3000 >nul 2>&1
 if %ERRORLEVEL% NEQ 0 (
     set /a RETRY+=1
     if !RETRY! LSS 15 (
-        echo  .  retrying (!RETRY!/15)
+        echo            . retrying (!RETRY!/15)
         goto wait_frontend
     )
-    echo  [WARN] Frontend did not respond in time. Opening browser anyway...
+    echo [WARN] Frontend slow to start. Opening browser anyway...
+) else (
+    echo            -^> OK
 )
-echo  Frontend ready.
+echo.
 
 REM ── Open browser ─────────────────────────────────────────────
-echo.
 echo ============================================================
-echo   App running at  http://localhost:3000
-echo   API docs:        http://localhost:8000/docs
-echo.
+echo   App is running at  http://localhost:3000
 echo   Close the two minimized windows to stop the servers.
 echo ============================================================
 echo.

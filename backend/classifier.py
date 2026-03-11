@@ -30,10 +30,11 @@ class BaseClassifier(ABC):
 # ── StubClassifier — API Key 미설정 시 사용 ───────────────────────────────────
 
 class StubClassifier(BaseClassifier):
-    """API Key가 없을 때 사용하는 더미 분류기."""
+    """API Key 미설정 또는 패키지 누락 시 사용하는 더미 분류기."""
 
-    def __init__(self, provider: str = "openai"):
+    def __init__(self, provider: str = "openai", reason: str = "api_key"):
         self._provider = provider
+        self._reason = reason  # "api_key" | "import_error"
 
     async def classify_stream(
         self,
@@ -42,12 +43,26 @@ class StubClassifier(BaseClassifier):
     ) -> AsyncIterator[ClassificationResult]:
         import asyncio
         label_map = {"openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}
+        pkg_map = {"openai": "openai", "anthropic": "anthropic"}
         key_name = label_map.get(self._provider, "API_KEY")
+        pkg_name = pkg_map.get(self._provider, "패키지")
+
+        if self._reason == "import_error":
+            msg = (
+                f"'{pkg_name}' 패키지가 설치되지 않았습니다. "
+                f"pip install {pkg_name} 를 실행해 주세요."
+            )
+        else:
+            msg = (
+                f"{key_name}가 설정되지 않았습니다. "
+                "설정 페이지에서 API Key를 입력해 주세요."
+            )
+
         for task in tasks:
             yield ClassificationResult(
                 task_id=task.id,
                 label="미분류",
-                reason=f"{key_name}가 설정되지 않았습니다. 설정 페이지에서 API Key를 입력해 주세요.",
+                reason=msg,
                 confidence=0.0,
                 provider=self._provider,
             )
@@ -74,7 +89,7 @@ def get_classifier(settings: ClassifierSettings, provider: str = "openai") -> Ba
             from anthropic_classifier import AnthropicClassifier
             return AnthropicClassifier()
         except ImportError:
-            return StubClassifier("anthropic")
+            return StubClassifier("anthropic", reason="import_error")
 
     else:  # openai (default)
         api_key = (settings.api_key or "").strip()
@@ -86,4 +101,4 @@ def get_classifier(settings: ClassifierSettings, provider: str = "openai") -> Ba
             from llm_classifier import LLMClassifier
             return LLMClassifier()
         except ImportError:
-            return StubClassifier("openai")
+            return StubClassifier("openai", reason="import_error")

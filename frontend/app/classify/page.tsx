@@ -14,14 +14,14 @@ type RunState = "idle" | "running" | "done" | "error";
 
 const PROVIDER_CONFIG = {
   openai: {
-    label: "OpenAI GPT-5.4",
-    badge: "OpenAI",
+    label: "O 모델",
+    badge: "O 모델",
     badgeColor: "#10a37f",
     keyEnv: "OPENAI_API_KEY",
   },
   anthropic: {
-    label: "Claude Sonnet 4.6",
-    badge: "Anthropic",
+    label: "A 모델",
+    badge: "A 모델",
     badgeColor: "#c96442",
     keyEnv: "ANTHROPIC_API_KEY",
   },
@@ -120,8 +120,9 @@ export default function ClassifyPage() {
 
   const pct = progress.total > 0 ? Math.round((progress.current / progress.total) * 100) : 0;
 
-  const aiCount    = Object.values(liveResults).filter((r) => r.label === "AI 수행 가능").length;
-  const humanCount = Object.values(liveResults).filter((r) => r.label === "인간 수행 필요").length;
+  const aiCount     = Object.values(liveResults).filter((r) => r.label === "AI 수행 가능").length;
+  const hybridCount = Object.values(liveResults).filter((r) => r.label === "AI + Human").length;
+  const humanCount  = Object.values(liveResults).filter((r) => r.label === "인간 수행 필요").length;
 
   const taskRows = tasks.map((t) => ({ ...t, result: liveResults[t.id] }));
 
@@ -265,6 +266,11 @@ export default function ClassifyPage() {
                   <span className="h-2 w-2 rounded-full bg-red-500" />
                   <span className="text-xs text-red-700 font-medium">AI 수행 가능</span>
                   <span className="text-sm font-bold text-red-800">{aiCount}</span>
+                </div>
+                <div className="flex items-center gap-2 rounded-lg bg-purple-50 border border-purple-200 px-3 py-1.5">
+                  <span className="h-2 w-2 rounded-full bg-purple-500" />
+                  <span className="text-xs text-purple-700 font-medium">AI + Human</span>
+                  <span className="text-sm font-bold text-purple-800">{hybridCount}</span>
                 </div>
                 <div className="flex items-center gap-2 rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-1.5">
                   <span className="h-2 w-2 rounded-full bg-emerald-500" />

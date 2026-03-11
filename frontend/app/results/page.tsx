@@ -16,8 +16,8 @@ const PAGE_SIZE = 50;
 type ViewMode = "openai" | "anthropic" | "compare";
 
 const PROVIDER_META: Record<ProviderType, { label: string; model: string; color: string; bg: string; border: string }> = {
-  openai:    { label: "OpenAI",    model: "GPT-5.4",       color: "#10a37f", bg: "#f0fdf4", border: "#86efac" },
-  anthropic: { label: "Anthropic", model: "Sonnet 4.6",    color: "#c96442", bg: "#fff7ed", border: "#fdba74" },
+  openai:    { label: "O 모델", model: "O 모델", color: "#10a37f", bg: "#f0fdf4", border: "#86efac" },
+  anthropic: { label: "A 모델", model: "A 모델", color: "#c96442", bg: "#fff7ed", border: "#fdba74" },
 };
 
 // ── 비교 테이블 ───────────────────────────────────────────────────────────────
@@ -46,8 +46,8 @@ function CompareTable({
           <thead>
             <tr className="border-b border-gray-100 bg-gray-50">
               <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">Task</th>
-              <th className="px-4 py-3 text-center text-xs font-semibold" style={{ color: "#10a37f" }}>OpenAI GPT-5.4</th>
-              <th className="px-4 py-3 text-center text-xs font-semibold" style={{ color: "#c96442" }}>Claude Sonnet 4.6</th>
+              <th className="px-4 py-3 text-center text-xs font-semibold" style={{ color: "#10a37f" }}>O 모델</th>
+              <th className="px-4 py-3 text-center text-xs font-semibold" style={{ color: "#c96442" }}>A 모델</th>
               <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500">일치</th>
             </tr>
           </thead>
@@ -235,8 +235,8 @@ export default function ResultsPage() {
   const totalPages = Math.ceil(total / PAGE_SIZE);
 
   const tabs: { id: ViewMode; label: string; icon?: React.ReactNode }[] = [
-    { id: "openai",    label: "OpenAI GPT-5.4" },
-    { id: "anthropic", label: "Claude Sonnet 4.6" },
+    { id: "openai",    label: "O 모델" },
+    { id: "anthropic", label: "A 모델" },
     { id: "compare",   label: "비교" },
   ];
 
