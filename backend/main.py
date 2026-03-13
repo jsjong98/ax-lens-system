@@ -13,6 +13,12 @@ import shutil
 from pathlib import Path
 from typing import Optional
 
+
+def _natural_key(s: str) -> list[int | str]:
+    """자연수 정렬 키: '1.1.1.2' < '1.1.1.10' 순서를 보장합니다."""
+    import re
+    return [int(c) if c.isdigit() else c for c in re.split(r'(\d+)', s)]
+
 # .env 파일 자동 로드 (python-dotenv 없어도 동작하는 fallback 포함)
 def _load_dotenv() -> None:
     env_path = Path(__file__).parent / ".env"
@@ -129,9 +135,9 @@ async def get_filter_options():
         l4_set[t.l4_id] = t.l4
 
     return {
-        "l2": [{"id": k, "name": v} for k, v in sorted(l2_set.items())],
-        "l3": [{"id": k, "name": v} for k, v in sorted(l3_set.items())],
-        "l4": [{"id": k, "name": v} for k, v in sorted(l4_set.items())],
+        "l2": [{"id": k, "name": v} for k, v in sorted(l2_set.items(), key=lambda x: _natural_key(x[0]))],
+        "l3": [{"id": k, "name": v} for k, v in sorted(l3_set.items(), key=lambda x: _natural_key(x[0]))],
+        "l4": [{"id": k, "name": v} for k, v in sorted(l4_set.items(), key=lambda x: _natural_key(x[0]))],
     }
 
 
@@ -220,7 +226,7 @@ async def get_results(
     page_size: int = Query(50, ge=1, le=500),
 ):
     results_store = load_results(provider)
-    results = list(results_store.values())
+    results = sorted(results_store.values(), key=lambda r: _natural_key(r.task_id))
 
     if label:
         results = [r for r in results if r.label == label]
@@ -249,7 +255,7 @@ async def get_comparison_results(
     openai_results    = load_results("openai")
     anthropic_results = load_results("anthropic")
 
-    all_ids = sorted(set(openai_results.keys()) | set(anthropic_results.keys()))
+    all_ids = sorted(set(openai_results.keys()) | set(anthropic_results.keys()), key=_natural_key)
 
     comparison = []
     for task_id in all_ids:
@@ -503,7 +509,7 @@ async def export_comparison():
     mismatch_fill = PatternFill("solid", fgColor="FEE2E2")
 
     task_map = {t.id: t for t in _tasks_cache}
-    all_ids  = sorted(set(openai_results.keys()) | set(anthropic_results.keys()))
+    all_ids  = sorted(set(openai_results.keys()) | set(anthropic_results.keys()), key=_natural_key)
 
     for task_id in all_ids:
         o = openai_results.get(task_id)
