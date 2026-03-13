@@ -87,7 +87,6 @@ class ClassificationResult(BaseModel):
         "",
         description="감지된 Output 유형 쉼표 구분 (예: '시스템 반영, 문서/보고서'). AI 수행 가능 태스크의 부가 정보.",
     )
-    confidence: float = Field(0.0, ge=0.0, le=1.0)
     manually_edited: bool = False
 
 

@@ -272,63 +272,67 @@ export default function TaskTable({
                         </div>
                       )}
 
-                      {/* 신뢰도 */}
-                      {showResult && row.result && (
-                        <div>
-                          <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1.5">신뢰도</p>
-                          <div className="flex items-center gap-2">
-                            <div className="flex-1 h-1.5 rounded-full bg-gray-200">
-                              <div
-                                className="h-1.5 rounded-full"
-                                style={{
-                                  width: `${Math.round(row.result.confidence * 100)}%`,
-                                  backgroundColor: "#A62121",
-                                }}
-                              />
-                            </div>
-                            <span className="text-xs font-medium text-gray-600 tabular-nums">
-                              {Math.round(row.result.confidence * 100)}%
-                            </span>
-                          </div>
-                        </div>
-                      )}
-
                       {/* 3단계 Knock-out 분석 */}
                       {showResult && row.result && (
                         <div className="col-span-full">
                           <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-2">3단계 Knock-out 분석</p>
                           <div className="flex flex-col gap-1.5">
-                            {(
-                              [
-                                { label: "1단계: 규제 측면",       stage: row.result.stage1 },
-                                { label: "2단계: 확정/승인 업무",  stage: row.result.stage2 },
-                                { label: "3단계: 상호작용 업무",   stage: row.result.stage3 },
-                              ] as const
-                            ).map(({ label, stage }) => (
-                              <div
-                                key={label}
-                                className="flex items-start gap-2 rounded-md px-3 py-2"
-                                style={{
-                                  backgroundColor: stage?.passed ? "#f0fdf4" : "#FFF5F7",
-                                  border: `1px solid ${stage?.passed ? "#bbf7d0" : "#F2DCE0"}`,
-                                }}
-                              >
-                                <span
-                                  className="mt-px text-sm font-bold flex-shrink-0"
-                                  style={{ color: stage?.passed ? "#16a34a" : "#A62121" }}
-                                >
-                                  {stage?.passed ? "✓" : "✗"}
-                                </span>
-                                <div>
-                                  <span className="text-xs font-semibold" style={{ color: stage?.passed ? "#15803d" : "#A62121" }}>
-                                    {label}
-                                  </span>
-                                  {stage?.note && (
-                                    <p className="mt-0.5 text-xs text-gray-600">{stage.note}</p>
-                                  )}
-                                </div>
-                              </div>
-                            ))}
+                            {(() => {
+                              const stages = [
+                                { label: "1단계: 규제 측면",      stage: row.result!.stage1 },
+                                { label: "2단계: 확정/승인 업무", stage: row.result!.stage2 },
+                                { label: "3단계: 상호작용 업무",  stage: row.result!.stage3 },
+                              ];
+                              // 첫 번째로 실패한 단계 인덱스 (없으면 -1)
+                              const firstFailIdx = stages.findIndex((s) => s.stage && !s.stage.passed);
+
+                              return stages.map(({ label, stage }, idx) => {
+                                // 이전 단계에서 이미 X가 난 경우 → 건너뜀(회색)
+                                const isSkipped = firstFailIdx !== -1 && idx > firstFailIdx;
+
+                                if (isSkipped) {
+                                  return (
+                                    <div
+                                      key={label}
+                                      className="flex items-start gap-2 rounded-md px-3 py-2"
+                                      style={{ backgroundColor: "#F9FAFB", border: "1px solid #E5E7EB" }}
+                                    >
+                                      <span className="mt-px text-sm font-bold flex-shrink-0 text-gray-300">—</span>
+                                      <div>
+                                        <span className="text-xs font-semibold text-gray-300">{label}</span>
+                                        <p className="mt-0.5 text-xs text-gray-300">이전 단계 해당으로 건너뜀</p>
+                                      </div>
+                                    </div>
+                                  );
+                                }
+
+                                return (
+                                  <div
+                                    key={label}
+                                    className="flex items-start gap-2 rounded-md px-3 py-2"
+                                    style={{
+                                      backgroundColor: stage?.passed ? "#f0fdf4" : "#FFF5F7",
+                                      border: `1px solid ${stage?.passed ? "#bbf7d0" : "#F2DCE0"}`,
+                                    }}
+                                  >
+                                    <span
+                                      className="mt-px text-sm font-bold flex-shrink-0"
+                                      style={{ color: stage?.passed ? "#16a34a" : "#A62121" }}
+                                    >
+                                      {stage?.passed ? "✓" : "✗"}
+                                    </span>
+                                    <div>
+                                      <span className="text-xs font-semibold" style={{ color: stage?.passed ? "#15803d" : "#A62121" }}>
+                                        {label}
+                                      </span>
+                                      {stage?.note && (
+                                        <p className="mt-0.5 text-xs text-gray-600">{stage.note}</p>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              });
+                            })()}
                           </div>
                         </div>
                       )}

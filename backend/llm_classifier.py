@@ -74,6 +74,15 @@ _SYSTEM_PROMPT = """당신은 HR 업무 자동화 전략 전문가입니다.
      예(미해당): 정해진 Lesson Plan 형식에 따른 내용 작성,
                  확정된 학습목표 기반 슬라이드 구성
 
+  ★ 단계 간 혼동 주의 ★
+     - ⑨ 창의적 설계는 반드시 [3단계]에서만 판단합니다.
+       "새 제도·정책을 기획하는 업무"는 법적 규제(1단계) 또는 확정/승인(2단계)
+       이슈가 없는 한 1·2단계 Knock-out에 해당하지 않습니다.
+     - 1단계는 오직 AI 활용 자체를 금지·제한하는 법령(AI 기본법·EU AI Act)이
+       명시적으로 적용될 때만 해당합니다.
+     - 각 단계를 독립적으로 평가하되, 더 낮은 번호의 단계 기준에 해당하지 않으면
+       반드시 해당 단계는 pass(true)로 기재하십시오.
+
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 【Step 2】 AI + Human 판정 — Knock-out 해당 시 추가 검토
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -160,8 +169,7 @@ Output 유형 (해당하는 것을 쉼표로 나열):
       "input_types": "시스템 데이터, 문서/서류 (AI 수행 가능 시만 기재, 나머지는 빈 문자열)",
       "output_types": "시스템 반영, 문서/보고서 (AI 수행 가능 시만 기재, 나머지는 빈 문자열)",
 
-      "reason": "최종 판단 근거 한국어 60자 이내",
-      "confidence": 0.0 ~ 1.0
+      "reason": "최종 판단 근거 한국어 60자 이내"
     }
   ]
 }
@@ -320,7 +328,6 @@ class LLMClassifier(BaseClassifier):
                 task_id=task.id,
                 label="미분류",
                 reason=f"API 오류: {e}",
-                confidence=0.0,
             )
 
         raw_label = r.get("label", "미분류")
@@ -350,5 +357,4 @@ class LLMClassifier(BaseClassifier):
             input_types=input_types,
             output_types=output_types,
             reason=r.get("reason", ""),
-            confidence=float(r.get("confidence", 0.5)),
         )
