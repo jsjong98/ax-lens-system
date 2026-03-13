@@ -72,17 +72,11 @@ function CompareTable({
                   <td className="px-4 py-3 text-center">
                     <div className="flex flex-col items-center gap-1">
                       {labelBadge(item.openai_label)}
-                      {item.openai_confidence != null && (
-                        <span className="text-[10px] text-gray-400">{Math.round(item.openai_confidence * 100)}%</span>
-                      )}
                     </div>
                   </td>
                   <td className="px-4 py-3 text-center">
                     <div className="flex flex-col items-center gap-1">
                       {labelBadge(item.anthropic_label)}
-                      {item.anthropic_confidence != null && (
-                        <span className="text-[10px] text-gray-400">{Math.round(item.anthropic_confidence * 100)}%</span>
-                      )}
                     </div>
                   </td>
                   <td className="px-4 py-3 text-center">

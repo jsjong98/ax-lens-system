@@ -44,7 +44,6 @@ export interface ClassificationResult {
   input_types: string;
   output_types: string;
   reason: string;
-  confidence: number;
   manually_edited: boolean;
 }
 
@@ -98,10 +97,8 @@ export interface ComparisonItem {
   task_id: string;
   openai_label: LabelType | null;
   openai_reason: string | null;
-  openai_confidence: number | null;
   anthropic_label: LabelType | null;
   anthropic_reason: string | null;
-  anthropic_confidence: number | null;
   match: boolean | null;
 }
 

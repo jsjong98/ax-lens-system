@@ -88,7 +88,6 @@ class AnthropicClassifier(BaseClassifier):
                 task_id=task.id,
                 label="미분류",
                 reason=f"API 오류: {e}",
-                confidence=0.0,
                 provider="anthropic",
             )
 
@@ -119,6 +118,5 @@ class AnthropicClassifier(BaseClassifier):
             input_types=input_types,
             output_types=output_types,
             reason=r.get("reason", ""),
-            confidence=float(r.get("confidence", 0.5)),
             provider="anthropic",
         )

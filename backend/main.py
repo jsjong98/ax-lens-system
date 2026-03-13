@@ -259,10 +259,8 @@ async def get_comparison_results(
             "task_id": task_id,
             "openai_label":       o.label      if o else None,
             "openai_reason":      o.reason     if o else None,
-            "openai_confidence":  o.confidence if o else None,
             "anthropic_label":    a.label      if a else None,
             "anthropic_reason":   a.reason     if a else None,
-            "anthropic_confidence": a.confidence if a else None,
             "match": (o.label == a.label) if (o and a) else None,
         })
 
