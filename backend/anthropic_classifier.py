@@ -96,6 +96,7 @@ class AnthropicClassifier(BaseClassifier):
 
         input_types  = r.get("input_types", "")  if label == "AI 수행 가능" else ""
         output_types = r.get("output_types", "") if label == "AI 수행 가능" else ""
+        ai_prerequisites = r.get("ai_prerequisites", "") if label in ("AI 수행 가능", "AI + Human") else ""
 
         return ClassificationResult(
             task_id=task.id,
@@ -117,6 +118,7 @@ class AnthropicClassifier(BaseClassifier):
             hybrid_note=str(r.get("hybrid_note", "")),
             input_types=input_types,
             output_types=output_types,
+            ai_prerequisites=ai_prerequisites,
             reason=r.get("reason", ""),
             provider="anthropic",
         )

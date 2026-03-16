@@ -396,7 +396,7 @@ async def update_settings(settings: ClassifierSettings):
 def _build_result_sheet(ws, tasks_cache: list[Task], results_store: dict, provider_label: str):
     """결과 시트 생성 공통 함수."""
     headers = ["L5_ID", "L2", "L3", "L4", "L5_Name", "L5_Description", "수행주체",
-               "분류결과", "적용기준(Knock-out)", "판단근거", "수동수정여부"]
+               "분류결과", "적용기준(Knock-out)", "판단근거", "AI수행필요여건", "수동수정여부"]
     ws.append(headers)
 
     header_fill = PatternFill("solid", fgColor="1F4E79")
@@ -414,9 +414,10 @@ def _build_result_sheet(ws, tasks_cache: list[Task], results_store: dict, provid
         label     = r.label if r else "미분류"
         criterion = r.criterion if r else ""
         reason    = r.reason if r else ""
+        ai_prereq = r.ai_prerequisites if r else ""
         edited    = "Y" if (r and r.manually_edited) else ""
         row = [t.id, t.l2, t.l3, t.l4, t.name, t.description, t.performer[:100],
-               label, criterion, reason, edited]
+               label, criterion, reason, ai_prereq, edited]
         ws.append(row)
 
         last_row = ws.max_row
@@ -428,7 +429,7 @@ def _build_result_sheet(ws, tasks_cache: list[Task], results_store: dict, provid
         elif label == "인간 수행 필요":
             label_cell.fill = human_fill
 
-    col_widths = [12, 10, 14, 14, 28, 45, 35, 16, 28, 40, 10]
+    col_widths = [12, 10, 14, 14, 28, 45, 35, 16, 28, 40, 50, 10]
     for i, w in enumerate(col_widths, 1):
         ws.column_dimensions[ws.cell(1, i).column_letter].width = w
 

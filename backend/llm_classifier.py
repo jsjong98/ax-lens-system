@@ -143,6 +143,29 @@ Output 유형 (해당하는 것을 쉼표로 나열):
   · 의사결정       — 승인·확정·판정 등 결정 형태 산출물
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【Step 4】 AI 수행 필요 여건 분석
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+"AI 수행 가능" 또는 "AI + Human"으로 분류된 태스크에 한해,
+AI가 실제로 해당 업무를 수행하기 위해 필요한 전제조건·인프라·데이터 요건을
+구체적으로 기술합니다.
+
+■ 분석 관점:
+  - Description, Pain Point, Input/Output data, 수행주체 정보를 종합 분석
+  - 해당 업무를 AI가 처리하려면 어떤 데이터·시스템·환경이 갖춰져야 하는지 기술
+
+■ 작성 예시:
+  - "자회사 의견의 배경·맥락을 파악할 수 있는 히스토리 DB 필요"
+  - "공동 데이터베이스와 표준 Template 구축 필요"
+  - "기준정보 시스템 연동 및 실시간 데이터 접근 권한 필요"
+  - "과거 평가 이력·피드백 데이터의 구조화된 축적 필요"
+  - "법령·규정 변경사항 자동 수집 및 매핑 체계 필요"
+
+■ 유의사항:
+  - "인간 수행 필요" Task는 빈 문자열("")로 출력
+  - 구체적이고 실행 가능한 수준으로 기술 (막연한 표현 지양)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 【출력 형식】 JSON만 출력, 다른 텍스트 없이
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -168,6 +191,8 @@ Output 유형 (해당하는 것을 쉼표로 나열):
 
       "input_types": "시스템 데이터, 문서/서류 (AI 수행 가능 시만 기재, 나머지는 빈 문자열)",
       "output_types": "시스템 반영, 문서/보고서 (AI 수행 가능 시만 기재, 나머지는 빈 문자열)",
+
+      "ai_prerequisites": "AI 수행에 필요한 전제조건·인프라·데이터 요건 (AI 수행 가능 또는 AI+Human 시만 기재, 인간 수행 필요는 빈 문자열)",
 
       "reason": "최종 판단 근거 한국어 60자 이내"
     }
@@ -335,6 +360,7 @@ class LLMClassifier(BaseClassifier):
 
         input_types  = r.get("input_types", "")  if label == "AI 수행 가능" else ""
         output_types = r.get("output_types", "") if label == "AI 수행 가능" else ""
+        ai_prerequisites = r.get("ai_prerequisites", "") if label in ("AI 수행 가능", "AI + Human") else ""
 
         return ClassificationResult(
             task_id=task.id,
@@ -356,5 +382,6 @@ class LLMClassifier(BaseClassifier):
             hybrid_note=str(r.get("hybrid_note", "")),
             input_types=input_types,
             output_types=output_types,
+            ai_prerequisites=ai_prerequisites,
             reason=r.get("reason", ""),
         )

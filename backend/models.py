@@ -87,6 +87,10 @@ class ClassificationResult(BaseModel):
         "",
         description="감지된 Output 유형 쉼표 구분 (예: '시스템 반영, 문서/보고서'). AI 수행 가능 태스크의 부가 정보.",
     )
+    ai_prerequisites: str = Field(
+        "",
+        description="AI 수행 필요 여건 — AI가 해당 업무를 수행하기 위한 전제조건·인프라·데이터 요건 (AI 수행 가능/AI+Human인 경우만 기재)",
+    )
     manually_edited: bool = False
 
 
