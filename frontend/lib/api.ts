@@ -448,3 +448,90 @@ export async function getWorkflowExecutionOrder(sheetId: string): Promise<{
 }> {
   return apiFetch(`/workflow/execution-order/${encodeURIComponent(sheetId)}`);
 }
+
+// PPT 업로드
+export async function uploadPptWorkflow(file: File): Promise<{
+  ok: boolean;
+  filename: string;
+  slide_count: number;
+  slides: Array<{
+    slide_index: number;
+    title: string;
+    node_count: number;
+    edge_count: number;
+    matches: Array<{
+      node_id: string;
+      node_text: string;
+      matched_task_id: string | null;
+      matched_task_name: string | null;
+      match_confidence: number;
+    }>;
+  }>;
+}> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await fetch("/api/workflow/upload-ppt", {
+    method: "POST",
+    body: formData,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+// To-Be 생성
+export interface ToBeResult {
+  ok: boolean;
+  summary: {
+    process_name: string;
+    total_tasks: number;
+    ai_tasks: number;
+    hybrid_tasks: number;
+    human_tasks: number;
+    automation_rate: number;
+    junior_agent_count: number;
+    junior_agents: Array<{
+      id: string;
+      name: string;
+      technique: string;
+      task_count: number;
+      tasks: Array<{ task_id: string; label: string }>;
+    }>;
+    human_step_count: number;
+    human_steps: Array<{
+      id: string;
+      label: string;
+      is_hybrid_part: boolean;
+      reason: string;
+    }>;
+    senior_agent: { id: string; name: string; description: string };
+  };
+  execution_steps: Array<{
+    step: number;
+    is_parallel: boolean;
+    actors: Array<{
+      type: "junior_ai" | "human";
+      agent_id?: string;
+      agent_name?: string;
+      technique?: string;
+      label?: string;
+      tasks?: Array<{ task_id: string; label: string }>;
+    }>;
+  }>;
+  react_flow: { nodes: unknown[]; edges: unknown[]; lanes: string[] };
+}
+
+export async function generateToBe(params: {
+  sheet_id?: string;
+  provider?: ProviderType;
+  process_name?: string;
+} = {}): Promise<ToBeResult> {
+  const qs = new URLSearchParams();
+  if (params.sheet_id)     qs.set("sheet_id", params.sheet_id);
+  if (params.provider)     qs.set("provider", params.provider);
+  if (params.process_name) qs.set("process_name", params.process_name);
+  const query = qs.toString() ? `?${qs}` : "";
+  return apiFetch(`/workflow/generate-tobe${query}`, { method: "POST" });
+}

@@ -817,3 +817,143 @@ async def get_execution_order(sheet_id: str):
         "sequential_count": sum(1 for s in steps if s["type"] == "순차"),
         "steps": steps,
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PPT 업로드 + 태스크 매칭
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.post("/api/workflow/upload-ppt", tags=["Workflow"])
+async def upload_ppt_workflow(file: UploadFile = File(...)):
+    """PPT 파일을 업로드하여 슬라이드별 노드를 추출하고 태스크와 매칭합니다."""
+    from ppt_parser import parse_ppt, match_nodes_to_tasks, ppt_slide_to_react_flow
+
+    content = await file.read()
+    try:
+        parsed = parse_ppt(content)
+    except Exception as e:
+        raise HTTPException(400, f"PPT 파싱 실패: {e}")
+
+    # 태스크 매칭용 데이터 준비
+    task_list = [
+        {
+            "id": t.id, "name": t.name,
+            "l4": t.l4, "l4_id": t.l4_id,
+            "l3": t.l3, "l3_id": t.l3_id,
+        }
+        for t in _tasks_cache
+    ]
+
+    slides_result = []
+    for slide in parsed.slides:
+        # 노드-태스크 매칭
+        matches = match_nodes_to_tasks(slide.nodes, task_list)
+
+        # React Flow 변환
+        react_flow = ppt_slide_to_react_flow(slide)
+
+        # 매칭 결과를 React Flow 노드에 반영
+        match_map = {m["node_id"]: m for m in matches}
+        for rf_node in react_flow["nodes"]:
+            m = match_map.get(rf_node["id"])
+            if m and m["matched_task_id"]:
+                rf_node["data"]["id"] = m["matched_task_id"]
+                rf_node["data"]["matchedTaskName"] = m["matched_task_name"]
+                rf_node["data"]["matchConfidence"] = m["match_confidence"]
+                rf_node["data"]["matchedLevel"] = m["matched_level"]
+
+        slides_result.append({
+            "slide_index": slide.index,
+            "title": slide.title,
+            "node_count": len(slide.nodes),
+            "edge_count": len(slide.edges),
+            "matches": matches,
+            "react_flow": react_flow,
+        })
+
+    # 워크플로우 캐시에 PPT 결과도 저장
+    global _workflow_cache
+    _workflow_cache["ppt"] = {
+        "filename": file.filename,
+        "parsed": parsed,
+        "slides": slides_result,
+    }
+
+    return {
+        "ok": True,
+        "filename": file.filename,
+        "slide_count": parsed.slide_count,
+        "slides": slides_result,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# To-Be Workflow 생성
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.post("/api/workflow/generate-tobe", tags=["Workflow"])
+async def generate_tobe_workflow(
+    sheet_id: str = Query("default", description="As-Is 워크플로우 시트 ID"),
+    provider: str = Query("openai", description="분류 결과 제공자 (openai | anthropic)"),
+    process_name: str = Query("", description="프로세스 이름 (빈 값이면 시트 이름 사용)"),
+):
+    """As-Is 워크플로우 + 분류 결과 → To-Be Workflow 초안을 생성합니다."""
+    from workflow_parser import parse_workflow_json, get_workflow_summary
+    from tobe_generator import generate_tobe
+
+    # 워크플로우 로드
+    if not _workflow_cache:
+        save_path = Path(__file__).parent / "workflow.json"
+        if save_path.exists():
+            data = json.loads(save_path.read_text(encoding="utf-8"))
+            parsed = parse_workflow_json(data)
+            _workflow_cache["parsed"] = parsed
+            _workflow_cache["summary"] = get_workflow_summary(parsed)
+            _workflow_cache["raw"] = data
+        else:
+            raise HTTPException(404, "업로드된 워크플로우가 없습니다. 먼저 워크플로우를 업로드하세요.")
+
+    parsed = _workflow_cache["parsed"]
+    sheet = next((s for s in parsed.sheets if s.sheet_id == sheet_id), None)
+    if not sheet:
+        # 첫 번째 시트로 fallback
+        if parsed.sheets:
+            sheet = parsed.sheets[0]
+        else:
+            raise HTTPException(404, "워크플로우에 시트가 없습니다.")
+
+    # 분류 결과 로드
+    results_store = load_results(provider)
+    if not results_store:
+        raise HTTPException(
+            400,
+            f"'{provider}' 분류 결과가 없습니다. 먼저 분류를 실행하세요.",
+        )
+
+    # ClassificationResult → dict 변환
+    classification_dict: dict[str, dict] = {}
+    for tid, cr in results_store.items():
+        # 태스크 이름도 포함 (매칭용)
+        task = next((t for t in _tasks_cache if t.id == tid), None)
+        classification_dict[tid] = {
+            "label": cr.label,
+            "reason": cr.reason,
+            "hybrid_note": cr.hybrid_note,
+            "input_types": cr.input_types,
+            "output_types": cr.output_types,
+            "task_name": task.name if task else "",
+        }
+
+    # To-Be 생성
+    tobe = generate_tobe(
+        as_is_sheet=sheet,
+        classification_results=classification_dict,
+        process_name=process_name or sheet.name,
+    )
+
+    return {
+        "ok": True,
+        "summary": tobe.summary,
+        "execution_steps": tobe.execution_steps,
+        "react_flow": tobe.react_flow,
+    }
