@@ -370,3 +370,81 @@ export async function getUsage(): Promise<UsageStats> {
 export async function resetUsage(provider: "all" | "openai" | "anthropic" = "all"): Promise<void> {
   await apiFetch(`/usage?provider=${provider}`, { method: "DELETE" });
 }
+
+// ── Workflow API ──────────────────────────────────────────────────────────────
+
+export interface WorkflowStepTask {
+  task_id: string;
+  label: string;
+  level: string;
+  node_id?: string;
+}
+
+export interface WorkflowStep {
+  step: number;
+  type: "순차" | "병렬";
+  tasks: WorkflowStepTask[];
+  is_parallel?: boolean;
+  nodes?: WorkflowStepTask[];
+}
+
+export interface WorkflowSheetSummary {
+  sheet_id: string;
+  sheet_name: string;
+  lanes: string[];
+  l4_count: number;
+  l5_count: number;
+  total_steps: number;
+  parallel_steps: number;
+  sequential_steps: number;
+  execution_order: WorkflowStep[];
+  l4_details: Array<{
+    node_id: string;
+    task_id: string;
+    label: string;
+    description: string;
+    child_l5_count: number;
+    child_l5s: WorkflowStepTask[];
+  }>;
+}
+
+export interface WorkflowSummary {
+  version: string;
+  sheet_count: number;
+  sheets: WorkflowSheetSummary[];
+}
+
+export async function uploadWorkflow(file: File): Promise<WorkflowSummary & { ok: boolean; filename: string }> {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const res = await fetch("/api/workflow/upload", {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function getWorkflowSummary(): Promise<WorkflowSummary> {
+  return apiFetch<WorkflowSummary>("/workflow/summary");
+}
+
+export async function getWorkflowSheets(): Promise<{ sheets: WorkflowSheetSummary[] }> {
+  return apiFetch("/workflow/sheets");
+}
+
+export async function getWorkflowExecutionOrder(sheetId: string): Promise<{
+  sheet_id: string;
+  sheet_name: string;
+  total_steps: number;
+  parallel_count: number;
+  sequential_count: number;
+  steps: WorkflowStep[];
+}> {
+  return apiFetch(`/workflow/execution-order/${encodeURIComponent(sheetId)}`);
+}

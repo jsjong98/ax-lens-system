@@ -636,3 +636,184 @@ async def reset_usage_stats(provider: str = Query("all")):
     """사용량을 초기화합니다. provider=all|openai|anthropic"""
     reset_usage(provider)
     return {"ok": True, "reset": provider}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Workflow 엔드포인트
+# ─────────────────────────────────────────────────────────────────────────────
+
+_workflow_cache: dict = {}   # 최근 업로드된 워크플로우 저장
+
+
+@app.post("/api/workflow/upload", tags=["Workflow"])
+async def upload_workflow(file: UploadFile = File(...)):
+    """hr-workflow-ai에서 내보낸 JSON 파일을 업로드하여 파싱합니다."""
+    from workflow_parser import parse_workflow_json, get_workflow_summary
+
+    content = await file.read()
+    try:
+        data = json.loads(content)
+    except json.JSONDecodeError:
+        raise HTTPException(400, "유효한 JSON 파일이 아닙니다.")
+
+    parsed = parse_workflow_json(data)
+    summary = get_workflow_summary(parsed)
+
+    # 캐시에 저장
+    global _workflow_cache
+    _workflow_cache = {
+        "filename": file.filename,
+        "parsed": parsed,
+        "summary": summary,
+        "raw": data,
+    }
+
+    # 워크플로우 JSON도 파일로 저장
+    save_path = Path(__file__).parent / "workflow.json"
+    save_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    return {
+        "ok": True,
+        "filename": file.filename,
+        **summary,
+    }
+
+
+@app.get("/api/workflow/summary", tags=["Workflow"])
+async def get_workflow():
+    """업로드된 워크플로우의 요약 정보를 반환합니다."""
+    from workflow_parser import parse_workflow_json, get_workflow_summary
+
+    if not _workflow_cache:
+        # 파일에서 로드 시도
+        save_path = Path(__file__).parent / "workflow.json"
+        if save_path.exists():
+            data = json.loads(save_path.read_text(encoding="utf-8"))
+            parsed = parse_workflow_json(data)
+            summary = get_workflow_summary(parsed)
+            global _workflow_cache
+            _workflow_cache = {
+                "filename": save_path.name,
+                "parsed": parsed,
+                "summary": summary,
+                "raw": data,
+            }
+        else:
+            raise HTTPException(404, "업로드된 워크플로우가 없습니다.")
+
+    return _workflow_cache["summary"]
+
+
+@app.get("/api/workflow/sheets", tags=["Workflow"])
+async def list_workflow_sheets():
+    """워크플로우 시트 목록을 반환합니다."""
+    if not _workflow_cache:
+        raise HTTPException(404, "업로드된 워크플로우가 없습니다.")
+
+    parsed = _workflow_cache["parsed"]
+    return {
+        "sheets": [
+            {
+                "sheet_id": s.sheet_id,
+                "name": s.name,
+                "lanes": s.lanes,
+                "l4_count": len(s.l4_nodes),
+                "l5_count": len(s.l5_nodes),
+                "total_steps": len(s.execution_order),
+            }
+            for s in parsed.sheets
+        ]
+    }
+
+
+@app.get("/api/workflow/sheets/{sheet_id}", tags=["Workflow"])
+async def get_workflow_sheet_detail(sheet_id: str):
+    """특정 시트의 상세 정보 (노드, 엣지, 실행 순서)를 반환합니다."""
+    if not _workflow_cache:
+        raise HTTPException(404, "업로드된 워크플로우가 없습니다.")
+
+    parsed = _workflow_cache["parsed"]
+    sheet = next((s for s in parsed.sheets if s.sheet_id == sheet_id), None)
+    if not sheet:
+        raise HTTPException(404, f"시트 '{sheet_id}'를 찾을 수 없습니다.")
+
+    return {
+        "sheet_id": sheet.sheet_id,
+        "name": sheet.name,
+        "lanes": sheet.lanes,
+        "nodes": [
+            {
+                "node_id": n.id,
+                "level": n.level,
+                "task_id": n.task_id,
+                "label": n.label,
+                "description": n.description,
+                "position": {"x": n.position_x, "y": n.position_y},
+                "metadata": n.metadata,
+            }
+            for n in sorted(sheet.nodes.values(), key=lambda n: (n.y, n.x))
+        ],
+        "edges": [
+            {
+                "id": e.id,
+                "source": e.source,
+                "target": e.target,
+                "label": e.label,
+            }
+            for e in sheet.edges
+        ],
+        "execution_order": [
+            {
+                "step": s.step_number,
+                "nodes": [
+                    {
+                        "node_id": nid,
+                        "task_id": sheet.nodes[nid].task_id if nid in sheet.nodes else "",
+                        "label": sheet.nodes[nid].label if nid in sheet.nodes else "",
+                        "level": sheet.nodes[nid].level if nid in sheet.nodes else "",
+                    }
+                    for nid in s.node_ids
+                ],
+                "is_parallel": s.is_parallel,
+            }
+            for s in sheet.execution_order
+        ],
+    }
+
+
+@app.get("/api/workflow/execution-order/{sheet_id}", tags=["Workflow"])
+async def get_execution_order(sheet_id: str):
+    """특정 시트의 실행 순서만 간결하게 반환합니다."""
+    if not _workflow_cache:
+        raise HTTPException(404, "업로드된 워크플로우가 없습니다.")
+
+    parsed = _workflow_cache["parsed"]
+    sheet = next((s for s in parsed.sheets if s.sheet_id == sheet_id), None)
+    if not sheet:
+        raise HTTPException(404, f"시트 '{sheet_id}'를 찾을 수 없습니다.")
+
+    steps = []
+    for s in sheet.execution_order:
+        step_info = {
+            "step": s.step_number,
+            "type": "병렬" if s.is_parallel else "순차",
+            "tasks": [],
+        }
+        for nid in s.node_ids:
+            node = sheet.nodes.get(nid)
+            if node:
+                step_info["tasks"].append({
+                    "task_id": node.task_id,
+                    "label": node.label,
+                    "level": node.level,
+                })
+        steps.append(step_info)
+
+    return {
+        "sheet_id": sheet_id,
+        "sheet_name": sheet.name,
+        "total_steps": len(steps),
+        "parallel_count": sum(1 for s in steps if s["type"] == "병렬"),
+        "sequential_count": sum(1 for s in steps if s["type"] == "순차"),
+        "steps": steps,
+    }
