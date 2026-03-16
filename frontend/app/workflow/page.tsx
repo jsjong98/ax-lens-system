@@ -473,12 +473,23 @@ export default function WorkflowPage() {
   );
 }
 
-/* ── To-Be 결과 뷰 ────────────────────────────────────────── */
+/* ── To-Be 결과 뷰 — Swim Lane 워크플로우 맵 ────────────── */
 function ToBeView({ result }: { result: ToBeResult }) {
-  const { summary, execution_steps } = result;
+  const { summary } = result;
+  const { junior_agents, human_steps, senior_agent } = summary;
+
+  // 기법 태그 색상
+  const techColor = (tech: string) => {
+    if (tech.includes("RAG")) return { bg: "#ECFDF5", text: "#065F46", border: "#A7F3D0" };
+    if (tech.includes("Clustering")) return { bg: "#EEF2FF", text: "#3730A3", border: "#C7D2FE" };
+    if (tech.includes("임베딩")) return { bg: "#F0FDF4", text: "#166534", border: "#BBF7D0" };
+    if (tech.includes("데이터")) return { bg: "#FFF7ED", text: "#9A3412", border: "#FDBA74" };
+    if (tech.includes("규칙")) return { bg: "#FEF3C7", text: "#92400E", border: "#FCD34D" };
+    return { bg: "#FFF5F7", text: "#A62121", border: "#F2A0AF" }; // LLM default
+  };
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       {/* 요약 카드 */}
       <div className="flex gap-3 flex-wrap">
         <StatCard label="전체 태스크" value={summary.total_tasks} />
@@ -493,124 +504,209 @@ function ToBeView({ result }: { result: ToBeResult }) {
         <StatCard label="Human 스텝" value={summary.human_step_count} />
       </div>
 
-      {/* Senior Agent */}
-      <div className="bg-white rounded-xl border-2 p-5" style={{ borderColor: PWC.primary }}>
-        <div className="flex items-center gap-2 mb-3">
-          <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold" style={{ backgroundColor: PWC.primary }}>
-            S
+      {/* ═══ Swim Lane 워크플로우 맵 ═══ */}
+      <div className="overflow-x-auto">
+        <div className="border border-gray-200 rounded-xl bg-white" style={{ minWidth: Math.max(junior_agents.length * 260 + 120, 600) }}>
+          {/* 범례 */}
+          <div className="flex items-center gap-6 px-4 py-2 border-b border-gray-100 bg-gray-50 rounded-t-xl text-[11px]">
+            <span className="font-medium text-gray-500">수행 주체</span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded" style={{ backgroundColor: PWC.primary }} />
+              Senior AI
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded" style={{ backgroundColor: "#FEF3C7", border: "1px solid #FCD34D" }} />
+              Junior AI
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded bg-gray-200 border border-gray-300" />
+              HR 담당자
+            </span>
           </div>
-          <div>
-            <div className="text-sm font-bold" style={{ color: PWC.primary }}>{summary.senior_agent.name}</div>
-            <div className="text-xs text-gray-500">{summary.senior_agent.description}</div>
-          </div>
-        </div>
 
-        {/* Junior Agents */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mt-4">
-          {summary.junior_agents.map((agent) => (
-            <div key={agent.id} className="rounded-lg border border-gray-200 p-3 bg-gray-50">
-              <div className="flex items-center gap-2 mb-2">
-                <div className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold" style={{ backgroundColor: PWC.primaryLight }}>
-                  J
+          <div className="flex">
+            {/* 왼쪽 라벨 컬럼 */}
+            <div className="w-[80px] flex-shrink-0 border-r border-gray-200 bg-gray-50">
+              {/* L4 헤더 행 */}
+              <div className="h-[56px] flex items-center justify-center border-b border-gray-200" />
+              {/* Senior AI 행 */}
+              <div className="flex items-center justify-center border-b border-gray-200 py-4">
+                <div className="text-center">
+                  <div className="w-8 h-8 mx-auto rounded-full flex items-center justify-center text-white text-xs font-bold" style={{ backgroundColor: PWC.primary }}>S</div>
+                  <div className="text-[10px] font-bold mt-1" style={{ color: PWC.primary }}>Senior</div>
+                  <div className="text-[10px]" style={{ color: PWC.primary }}>AI</div>
                 </div>
-                <span className="text-sm font-semibold text-gray-800">{agent.name}</span>
               </div>
-              <div className="text-[10px] px-2 py-0.5 rounded bg-blue-50 text-blue-700 inline-block mb-2">
-                {agent.technique}
+              {/* Junior AI 행 */}
+              <div className="flex items-center justify-center border-b border-gray-200 py-4">
+                <div className="text-center">
+                  <div className="w-8 h-8 mx-auto rounded-full flex items-center justify-center text-white text-xs font-bold" style={{ backgroundColor: "#D97706" }}>J</div>
+                  <div className="text-[10px] font-bold mt-1 text-amber-700">Junior</div>
+                  <div className="text-[10px] text-amber-700">AI</div>
+                </div>
               </div>
-              <div className="space-y-1">
-                {agent.tasks.map((t) => (
-                  <div key={t.task_id} className="text-xs text-gray-600 flex items-center gap-1.5">
-                    <span className="w-1 h-1 rounded-full bg-gray-400" />
-                    <span className="font-mono text-gray-400">{t.task_id}</span>
-                    <span>{t.label}</span>
-                  </div>
-                ))}
+              {/* Human 행 */}
+              <div className="flex items-center justify-center py-4">
+                <div className="text-center">
+                  <div className="text-xl">&#128100;</div>
+                  <div className="text-[10px] font-bold text-gray-600">HR</div>
+                  <div className="text-[10px] text-gray-600">담당자</div>
+                </div>
               </div>
             </div>
-          ))}
-        </div>
 
-        {/* Human Steps */}
-        {summary.human_steps.length > 0 && (
-          <div className="mt-4">
-            <h4 className="text-xs font-bold text-gray-500 uppercase mb-2">Human 스텝</h4>
-            <div className="space-y-2">
-              {summary.human_steps.map((h) => (
-                <div key={h.id} className="flex items-center gap-3 bg-amber-50 rounded-lg px-3 py-2 border border-amber-200">
-                  <div className="w-6 h-6 rounded-full bg-amber-500 flex items-center justify-center text-white text-[10px] font-bold">
-                    H
-                  </div>
-                  <span className="text-sm text-gray-800">{h.label}</span>
-                  {h.is_hybrid_part && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-200 text-amber-800">
-                      AI+Human 분할
-                    </span>
-                  )}
-                  {h.reason && <span className="text-xs text-gray-400">— {h.reason}</span>}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
+            {/* Agent 컬럼들 */}
+            <div className="flex flex-1 divide-x divide-gray-200">
+              {junior_agents.map((agent, agentIdx) => {
+                // 이 agent에 대응하는 human steps 찾기
+                const agentTaskIds = new Set(agent.tasks.map((t) => t.task_id));
+                const relatedHumans = human_steps.filter((h) => {
+                  // 같은 L4 내 human step인지 확인 (task_id 앞 3자리)
+                  const hPrefix = h.label.split(" ")[0]; // 번호 추출 시도
+                  return agentTaskIds.has(hPrefix) ||
+                    agent.tasks.some((t) => {
+                      const tp = t.task_id.split(".").slice(0, 3).join(".");
+                      return h.label.includes(tp);
+                    });
+                });
 
-      {/* 실행 순서 */}
-      <div>
-        <h2 className="text-lg font-bold text-gray-800 mb-4">To-Be 실행 순서</h2>
-        <div className="relative">
-          {execution_steps.map((step, idx) => (
-            <div key={step.step} className="flex items-start gap-4 mb-3">
-              <div className="flex flex-col items-center w-10 shrink-0">
-                <div
-                  className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white"
-                  style={{ backgroundColor: step.is_parallel ? PWC.primaryLight : PWC.primary }}
-                >
-                  {step.step}
-                </div>
-                {idx < execution_steps.length - 1 && (
-                  <div className="w-0.5 flex-1 min-h-[20px] bg-gray-200" />
-                )}
-              </div>
-
-              <div className={`flex-1 flex gap-2 ${step.is_parallel ? "flex-row" : "flex-col"}`}>
-                {step.is_parallel && (
-                  <div className="self-center text-[10px] font-bold text-white px-2 py-0.5 rounded-full mr-1" style={{ backgroundColor: PWC.primaryLight }}>
-                    병렬
-                  </div>
-                )}
-                {step.actors.map((actor, ai) => (
-                  <div
-                    key={ai}
-                    className="bg-white border rounded-lg px-4 py-2.5 flex items-center gap-3 shadow-sm"
-                    style={{
-                      borderColor: actor.type === "junior_ai" ? PWC.primaryLight : "#F59E0B",
-                      borderLeftWidth: 3,
-                    }}
-                  >
-                    <div
-                      className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold shrink-0"
-                      style={{ backgroundColor: actor.type === "junior_ai" ? PWC.primaryLight : "#F59E0B" }}
-                    >
-                      {actor.type === "junior_ai" ? "J" : "H"}
-                    </div>
-                    <div>
-                      <div className="text-sm font-medium text-gray-800">
-                        {actor.agent_name || actor.label}
+                return (
+                  <div key={agent.id} className="flex-1 min-w-[220px]">
+                    {/* L4 헤더 */}
+                    <div className="h-[56px] flex items-center justify-center px-3 border-b border-gray-200 bg-gray-50">
+                      <div className="text-center">
+                        <div className="text-xs font-bold text-gray-800">
+                          {agent.name.replace(/^Agent \d+:\s*/, "").split(" 외")[0]}
+                        </div>
+                        <div className="text-[10px] text-gray-400">
+                          Agent {agentIdx + 1}
+                          {agent.task_count > 1 && ` · ${agent.task_count}개 태스크`}
+                        </div>
                       </div>
-                      {actor.technique && (
-                        <div className="text-[10px] text-gray-400">{actor.technique}</div>
+                    </div>
+
+                    {/* Senior AI 기동 지시 */}
+                    <div className="flex items-center justify-center border-b border-gray-200 py-4 px-3">
+                      <div className="rounded-lg px-3 py-2 text-center text-xs" style={{ backgroundColor: "#FFF5F7", border: `1px solid ${PWC.primaryLight}` }}>
+                        <div className="font-bold" style={{ color: PWC.primary }}>
+                          Agent {agentIdx + 1} 기동 지시
+                        </div>
+                        <div className="text-[10px] text-gray-500 mt-0.5">
+                          {agent.technique.split(" + ").map((t) => t.trim()).join(" · ")}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Junior AI 태스크 그룹 */}
+                    <div className="border-b border-gray-200 py-4 px-3">
+                      <div className="rounded-lg border-2 p-3" style={{ backgroundColor: "#FFFBEB", borderColor: "#FCD34D" }}>
+                        {/* Agent 헤더 */}
+                        <div className="flex items-center gap-2 mb-3 pb-2 border-b border-amber-200">
+                          <span className="text-xs font-bold text-amber-800">Agent {agentIdx + 1}</span>
+                          {agent.task_count > 1 && (
+                            <span className="text-[10px] text-amber-600">순차 파이프라인</span>
+                          )}
+                        </div>
+
+                        {/* L5 태스크 목록 */}
+                        <div className="space-y-2">
+                          {agent.tasks.map((task, ti) => {
+                            const techniques = agent.technique.split(" + ").map((t) => t.trim());
+                            return (
+                              <div key={`${task.task_id}-${ti}`}>
+                                <div className="rounded-lg bg-white border border-gray-200 px-3 py-2">
+                                  <div className="text-[11px] font-mono text-gray-400 mb-0.5">{task.task_id}</div>
+                                  <div className="text-xs font-medium text-gray-800 mb-1.5">{task.label}</div>
+                                  <div className="flex flex-wrap gap-1">
+                                    {techniques.map((t, i) => {
+                                      const tc = techColor(t);
+                                      return (
+                                        <span
+                                          key={i}
+                                          className="text-[10px] px-1.5 py-0.5 rounded-full border font-medium"
+                                          style={{ backgroundColor: tc.bg, color: tc.text, borderColor: tc.border }}
+                                        >
+                                          {t}
+                                        </span>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                                {/* 순차 화살표 */}
+                                {ti < agent.tasks.length - 1 && (
+                                  <div className="flex justify-center py-1">
+                                    <span className="text-gray-300 text-sm">&#8595;</span>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Human 행 */}
+                    <div className="py-4 px-3 flex items-center justify-center min-h-[60px]">
+                      {relatedHumans.length > 0 ? (
+                        <div className="space-y-2 w-full">
+                          {relatedHumans.map((h) => (
+                            <div key={h.id} className="rounded-lg bg-gray-100 border border-gray-300 px-3 py-2 text-center">
+                              <div className="text-xs font-medium text-gray-700">{h.label}</div>
+                              {h.is_hybrid_part && (
+                                <div className="text-[10px] text-orange-600 mt-0.5">AI+Human 분할</div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-gray-300 text-sm">—</span>
                       )}
                     </div>
                   </div>
-                ))}
-              </div>
+                );
+              })}
+
+              {/* 독립 Human 스텝 (Agent에 매칭되지 않은) 컬럼 */}
+              {human_steps.length > 0 && (
+                <div className="flex-1 min-w-[220px]">
+                  <div className="h-[56px] flex items-center justify-center px-3 border-b border-gray-200 bg-gray-50">
+                    <div className="text-xs font-bold text-gray-600">인간 수행 영역</div>
+                  </div>
+                  <div className="flex items-center justify-center border-b border-gray-200 py-4 px-3">
+                    <span className="text-gray-300 text-sm">—</span>
+                  </div>
+                  <div className="flex items-center justify-center border-b border-gray-200 py-4 px-3">
+                    <span className="text-gray-300 text-sm">—</span>
+                  </div>
+                  <div className="py-4 px-3">
+                    <div className="space-y-2">
+                      {human_steps.map((h) => (
+                        <div key={h.id} className="rounded-lg bg-gray-100 border border-gray-300 px-3 py-2 text-center">
+                          <div className="text-xs font-medium text-gray-700">{h.label}</div>
+                          {h.reason && <div className="text-[10px] text-gray-500 mt-0.5">{h.reason}</div>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
-          ))}
+          </div>
         </div>
       </div>
 
-      {/* React Flow JSON 다운로드 */}
+      {/* Senior Agent 설명 */}
+      <div className="bg-white rounded-xl border-2 p-4" style={{ borderColor: PWC.primary }}>
+        <div className="flex items-center gap-2">
+          <div className="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold" style={{ backgroundColor: PWC.primary }}>S</div>
+          <div>
+            <div className="text-sm font-bold" style={{ color: PWC.primary }}>{senior_agent.name}</div>
+            <div className="text-xs text-gray-500">{senior_agent.description}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* To-Be JSON 다운로드 */}
       <div className="flex gap-2">
         <button
           onClick={() => {

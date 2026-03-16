@@ -211,24 +211,39 @@ def _analyze_execution_order(sheet: WorkflowSheet) -> list[ExecutionStep]:
     """
     l4_ids = {n.id for n in sheet.nodes.values() if n.level == "L4"}
     if not l4_ids:
+        # L4가 없으면 L5 노드로 실행 순서 분석
+        l5_ids = {n.id for n in sheet.nodes.values() if n.level == "L5"}
+        if l5_ids:
+            return _analyze_execution_order_for_level(sheet, l5_ids)
+        # L5도 없으면 모든 노드 사용
+        all_ids = set(sheet.nodes.keys())
+        if all_ids:
+            return _analyze_execution_order_for_level(sheet, all_ids)
         return []
 
-    # L4 → L4 엣지만 추출
+    return _analyze_execution_order_for_level(sheet, l4_ids)
+
+
+def _analyze_execution_order_for_level(
+    sheet: WorkflowSheet, target_ids: set[str]
+) -> list[ExecutionStep]:
+    """특정 레벨의 노드들로 실행 순서를 분석합니다."""
+    # 해당 레벨 간 엣지만 추출
     adj: dict[str, list[str]] = defaultdict(list)
-    in_degree: dict[str, int] = {nid: 0 for nid in l4_ids}
+    in_degree: dict[str, int] = {nid: 0 for nid in target_ids}
 
     for edge in sheet.edges:
-        if edge.source in l4_ids and edge.target in l4_ids:
+        if edge.source in target_ids and edge.target in target_ids:
             adj[edge.source].append(edge.target)
             in_degree[edge.target] = in_degree.get(edge.target, 0) + 1
 
     # 엣지가 없으면 Y좌표 기반 순서로 fallback
     if not any(adj.values()):
-        return _fallback_position_order(sheet, l4_ids)
+        return _fallback_position_order(sheet, target_ids)
 
     # Kahn's algorithm (BFS 위상 정렬) — 레벨별로 그룹핑
     steps: list[ExecutionStep] = []
-    queue = [nid for nid in l4_ids if in_degree[nid] == 0]
+    queue = [nid for nid in target_ids if in_degree[nid] == 0]
     step_num = 1
 
     while queue:
@@ -252,7 +267,7 @@ def _analyze_execution_order(sheet: WorkflowSheet) -> list[ExecutionStep]:
 
     # 엣지에 연결되지 않은 고립 노드 처리
     visited = {nid for step in steps for nid in step.node_ids}
-    orphans = l4_ids - visited
+    orphans = target_ids - visited
     if orphans:
         orphan_nodes = sorted(orphans, key=lambda x: sheet.nodes[x].y if x in sheet.nodes else 0)
         steps.append(ExecutionStep(

@@ -1,6 +1,10 @@
 # ── 민감 정보 ──────────────────────────────────────────
 backend/.env
 backend/results.json
+backend/results_openai.json
+backend/results_anthropic.json
+backend/usage.json
+backend/workflow.json
 backend/settings.json
 
 # ── 업로드된 파일 / 클라이언트 데이터 ──────────────────

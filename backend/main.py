@@ -987,9 +987,9 @@ async def generate_tobe_workflow(
     provider: str = Query("openai", description="분류 결과 제공자 (openai | anthropic)"),
     process_name: str = Query("", description="프로세스 이름 (빈 값이면 시트 이름 사용)"),
 ):
-    """As-Is 워크플로우 + 분류 결과 → To-Be Workflow 초안을 생성합니다."""
+    """As-Is 워크플로우 + 분류 결과 → To-Be Workflow 초안을 생성합니다 (Claude 기반)."""
     from workflow_parser import parse_workflow_json, get_workflow_summary
-    from tobe_generator import generate_tobe
+    from tobe_generator import generate_tobe, generate_tobe_with_llm
 
     # 워크플로우 로드
     global _workflow_cache
@@ -1047,8 +1047,8 @@ async def generate_tobe_workflow(
             "task_name": task.name if task else "",
         }
 
-    # To-Be 생성
-    tobe = generate_tobe(
+    # To-Be 생성 (Claude LLM 기반)
+    tobe = await generate_tobe_with_llm(
         as_is_sheet=sheet,
         classification_results=classification_dict,
         process_name=process_name or sheet.name,
