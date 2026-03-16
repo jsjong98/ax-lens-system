@@ -684,20 +684,20 @@ async def get_workflow():
     """업로드된 워크플로우의 요약 정보를 반환합니다."""
     from workflow_parser import parse_workflow_json, get_workflow_summary
 
-    if not _workflow_cache:
+    global _workflow_cache
+    if "summary" not in _workflow_cache:
         # 파일에서 로드 시도
         save_path = Path(__file__).parent / "workflow.json"
         if save_path.exists():
             data = json.loads(save_path.read_text(encoding="utf-8"))
             parsed = parse_workflow_json(data)
             summary = get_workflow_summary(parsed)
-            global _workflow_cache
-            _workflow_cache = {
+            _workflow_cache.update({
                 "filename": save_path.name,
                 "parsed": parsed,
                 "summary": summary,
                 "raw": data,
-            }
+            })
         else:
             raise HTTPException(404, "업로드된 워크플로우가 없습니다.")
 
@@ -707,8 +707,8 @@ async def get_workflow():
 @app.get("/api/workflow/sheets", tags=["Workflow"])
 async def list_workflow_sheets():
     """워크플로우 시트 목록을 반환합니다."""
-    if not _workflow_cache:
-        raise HTTPException(404, "업로드된 워크플로우가 없습니다.")
+    if "parsed" not in _workflow_cache:
+        raise HTTPException(404, "업로드된 워크플로우가 없습니다. JSON 파일을 먼저 업로드하세요.")
 
     parsed = _workflow_cache["parsed"]
     return {
@@ -729,8 +729,8 @@ async def list_workflow_sheets():
 @app.get("/api/workflow/sheets/{sheet_id}", tags=["Workflow"])
 async def get_workflow_sheet_detail(sheet_id: str):
     """특정 시트의 상세 정보 (노드, 엣지, 실행 순서)를 반환합니다."""
-    if not _workflow_cache:
-        raise HTTPException(404, "업로드된 워크플로우가 없습니다.")
+    if "parsed" not in _workflow_cache:
+        raise HTTPException(404, "업로드된 워크플로우가 없습니다. JSON 파일을 먼저 업로드하세요.")
 
     parsed = _workflow_cache["parsed"]
     sheet = next((s for s in parsed.sheets if s.sheet_id == sheet_id), None)
@@ -784,8 +784,8 @@ async def get_workflow_sheet_detail(sheet_id: str):
 @app.get("/api/workflow/execution-order/{sheet_id}", tags=["Workflow"])
 async def get_execution_order(sheet_id: str):
     """특정 시트의 실행 순서만 간결하게 반환합니다."""
-    if not _workflow_cache:
-        raise HTTPException(404, "업로드된 워크플로우가 없습니다.")
+    if "parsed" not in _workflow_cache:
+        raise HTTPException(404, "업로드된 워크플로우가 없습니다. JSON 파일을 먼저 업로드하세요.")
 
     parsed = _workflow_cache["parsed"]
     sheet = next((s for s in parsed.sheets if s.sheet_id == sheet_id), None)
@@ -826,7 +826,7 @@ async def get_execution_order(sheet_id: str):
 @app.post("/api/workflow/upload-ppt", tags=["Workflow"])
 async def upload_ppt_workflow(file: UploadFile = File(...)):
     """PPT 파일을 업로드하여 슬라이드별 노드를 추출하고 태스크와 매칭합니다."""
-    from ppt_parser import parse_ppt, match_nodes_to_tasks, ppt_slide_to_react_flow
+    from ppt_parser import parse_ppt, match_nodes_to_tasks, ppt_slide_to_react_flow, ppt_to_parsed_workflow
 
     content = await file.read()
     try:
@@ -871,13 +871,22 @@ async def upload_ppt_workflow(file: UploadFile = File(...)):
             "react_flow": react_flow,
         })
 
-    # 워크플로우 캐시에 PPT 결과도 저장
+    # PPT → ParsedWorkflow 변환 (To-Be 생성에서 사용)
+    all_matches = [
+        match_nodes_to_tasks(slide.nodes, task_list)
+        for slide in parsed.slides
+    ]
+    ppt_workflow = ppt_to_parsed_workflow(parsed, all_matches)
+
+    # 워크플로우 캐시에 PPT 결과 + 변환된 워크플로우 저장
     global _workflow_cache
     _workflow_cache["ppt"] = {
         "filename": file.filename,
         "parsed": parsed,
         "slides": slides_result,
     }
+    # JSON 워크플로우와 동일한 키로 저장 → generate-tobe에서 사용 가능
+    _workflow_cache["parsed"] = ppt_workflow
 
     return {
         "ok": True,
@@ -902,7 +911,8 @@ async def generate_tobe_workflow(
     from tobe_generator import generate_tobe
 
     # 워크플로우 로드
-    if not _workflow_cache:
+    global _workflow_cache
+    if "parsed" not in _workflow_cache:
         save_path = Path(__file__).parent / "workflow.json"
         if save_path.exists():
             data = json.loads(save_path.read_text(encoding="utf-8"))

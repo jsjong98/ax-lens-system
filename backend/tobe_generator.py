@@ -117,14 +117,20 @@ def generate_tobe(
     # 4. Human 스텝 추출
     human_steps = _extract_human_steps(split_tasks)
 
-    # 5. Senior Agent 정의
+    # 5. Senior Agent 정의 — 기존 노드가 아닌 새로 생성되는 오케스트레이터
     senior = SeniorAgent(
         id="senior-ai-1",
-        name=f"{process_name or as_is_sheet.name} 오케스트레이터",
+        name=f"{process_name or as_is_sheet.name} Senior AI Orchestrator",
         junior_agents=junior_agents,
         human_steps=human_steps,
-        description=f"{len(junior_agents)}개 Junior Agent를 관장하며, "
-                    f"산출물 정합성 검토 및 Human 핸드오프를 담당합니다.",
+        description=(
+            f"신규 생성된 오케스트레이터 Agent입니다. "
+            f"{len(junior_agents)}개 Junior AI Agent의 실행 순서를 관리하고, "
+            f"각 Agent 간 산출물 정합성을 검증하며, "
+            f"Human 수행 단계({len(human_steps)}건)로의 핸드오프를 제어합니다. "
+            f"이 Agent는 As-Is 워크플로우에 존재하지 않으며, "
+            f"To-Be 자동화 아키텍처를 위해 새로 정의됩니다."
+        ),
     )
 
     # 6. 오케스트레이션 흐름 정의
@@ -248,49 +254,82 @@ def _group_junior_agents(
     """
     AI 수행 가능 + AI+Human의 AI 파트를 Junior Agent로 그루핑합니다.
 
-    그루핑 전략:
-      - 같은 실행 스텝(ExecutionStep) 내 연속 AI 태스크 = 1 Junior Agent
-      - 병렬 스텝의 각 브랜치도 별도 Junior Agent
+    그루핑 전략 (같은 L4 내에서 연속 AI L5 태스크를 묶음):
+      1. L5 태스크를 상위 L4 ID별로 그루핑
+      2. 각 L4 내에서 실행 순서대로 정렬
+      3. 연속된 AI 가능 L5 태스크를 하나의 Junior Agent로 묶음
+      4. Human 태스크가 중간에 끼면 그룹을 끊고 새 그룹 시작
+      5. L4 레벨 독립 AI 태스크는 단독 Junior Agent
     """
-    # AI 처리 가능한 태스크만 필터
-    ai_tasks = [
-        t for t in split_tasks
-        if t["classification"] == "AI 수행 가능"
-        or (t["classification"] == "AI + Human" and t.get("split_type") == "ai_part")
-    ]
-
-    if not ai_tasks:
+    if not split_tasks:
         return []
 
-    # 실행 순서 기반 그루핑
-    # As-Is 실행 순서에서 연속된 AI 태스크를 하나의 Junior Agent로
-    agents: list[JuniorAgent] = []
-
-    # 노드 ID → 실행 스텝 매핑
+    # ── 실행 순서 매핑 ──
     node_to_step: dict[str, int] = {}
     for step in sheet.execution_order:
         for nid in step.node_ids:
             node_to_step[nid] = step.step_number
 
-    # 같은 L4 그룹 내의 AI 태스크를 묶기
-    l4_groups: dict[str, list[dict]] = defaultdict(list)
-    standalone: list[dict] = []
+    def _task_sort_key(task: dict) -> tuple:
+        nid = task.get("node_id", "")
+        step_num = node_to_step.get(nid, 9999)
+        parts = re.split(r'(\d+)', task.get("task_id", ""))
+        natural = tuple(int(p) if p.isdigit() else p for p in parts if p)
+        return (step_num, natural)
 
-    for task in ai_tasks:
-        if task["level"] == "L5":
-            # L5는 상위 L4 ID로 그루핑
-            l4_id = ".".join(task["task_id"].split(".")[:3]) if task["task_id"] else ""
-            if l4_id:
-                l4_groups[l4_id].append(task)
-            else:
-                standalone.append(task)
-        else:
+    def _is_ai_capable(task: dict) -> bool:
+        cls = task["classification"]
+        split_type = task.get("split_type", "original")
+        if cls == "AI 수행 가능":
+            return True
+        if cls == "AI + Human" and split_type == "ai_part":
+            return True
+        return False
+
+    def _l4_id_of(task: dict) -> str:
+        """L5 태스크의 상위 L4 ID를 추출 (예: 1.1.1.2.3 → 1.1.1.2)"""
+        tid = task.get("task_id", "")
+        parts = tid.split(".")
+        if len(parts) >= 4:
+            return ".".join(parts[:4])
+        return tid
+
+    # ── L4별로 L5 태스크 그루핑 ──
+    l4_groups: dict[str, list[dict]] = defaultdict(list)
+    standalone: list[dict] = []  # L4 레벨 독립 태스크
+
+    for task in split_tasks:
+        if task.get("level") == "L5":
+            l4_id = _l4_id_of(task)
+            l4_groups[l4_id].append(task)
+        elif _is_ai_capable(task):
             standalone.append(task)
 
+    # ── 각 L4 내에서 연속 AI 태스크 묶기 ──
+    all_groups: list[list[dict]] = []
+
+    for l4_id in sorted(l4_groups.keys(), key=lambda k: _task_sort_key(l4_groups[k][0])):
+        tasks_in_l4 = sorted(l4_groups[l4_id], key=_task_sort_key)
+        current_group: list[dict] = []
+
+        for task in tasks_in_l4:
+            if _is_ai_capable(task):
+                current_group.append(task)
+            else:
+                # Human 태스크를 만나면 현재 그룹 확정, 새 그룹 시작
+                if current_group:
+                    all_groups.append(current_group)
+                    current_group = []
+
+        if current_group:
+            all_groups.append(current_group)
+
+    # ── Junior Agent 생성 ──
+    agents: list[JuniorAgent] = []
     agent_idx = 1
 
-    # L4 그룹별 Junior Agent 생성
-    for l4_id, tasks in sorted(l4_groups.items()):
+    # L4 내 그루핑된 Agent 생성
+    for group_tasks in all_groups:
         agent_tasks = [
             AgentTask(
                 task_id=t["task_id"],
@@ -300,23 +339,29 @@ def _group_junior_agents(
                 ai_part=t.get("split_description", ""),
                 node_id=t["node_id"],
             )
-            for t in tasks
+            for t in group_tasks
         ]
 
-        # 기법 추론
-        technique = _infer_technique(tasks, classification_results)
+        technique = _infer_technique(group_tasks, classification_results)
+
+        first_label = group_tasks[0]["label"].split("(")[0].strip()
+        if len(group_tasks) > 1:
+            name = f"Agent {agent_idx}: {first_label} 외 {len(group_tasks)-1}건 파이프라인"
+        else:
+            name = f"Agent {agent_idx}: {first_label}"
 
         agents.append(JuniorAgent(
             id=f"junior-ai-{agent_idx}",
-            name=f"Agent {agent_idx}: {tasks[0]['label'].split('(')[0].strip()}",
+            name=name,
             tasks=agent_tasks,
             technique=technique,
-            input_types=tasks[0].get("input_types", ""),
-            output_types=tasks[-1].get("output_types", ""),
+            input_types=group_tasks[0].get("input_types", ""),
+            output_types=group_tasks[-1].get("output_types", ""),
+            description=f"{len(agent_tasks)}개 L5 태스크의 순차 처리 파이프라인",
         ))
         agent_idx += 1
 
-    # 독립 태스크 (L4 레벨 AI 태스크)
+    # L4 레벨 독립 AI 태스크
     for task in standalone:
         agent_tasks = [
             AgentTask(
@@ -328,7 +373,6 @@ def _group_junior_agents(
                 node_id=task["node_id"],
             )
         ]
-
         technique = _infer_technique([task], classification_results)
 
         agents.append(JuniorAgent(
@@ -338,6 +382,7 @@ def _group_junior_agents(
             technique=technique,
             input_types=task.get("input_types", ""),
             output_types=task.get("output_types", ""),
+            description="단독 L4 태스크 처리",
         ))
         agent_idx += 1
 

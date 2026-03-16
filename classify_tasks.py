@@ -107,13 +107,23 @@ SYSTEM_PROMPT = """당신은 HR 업무 프로세스 자동화 전문가입니다
 - 예외 상황 처리 및 창의적 문제 해결
 - 보상(안) 수립, 기준 변경 협의, 내부 보고 등 정책 결정
 
+## AI 수행 필요 여건 작성 지침
+label이 "AI 수행 가능"인 Task에 대해, AI가 실제로 해당 업무를 수행하기 위해
+필요한 전제조건·인프라·데이터 요건을 구체적으로 기술합니다.
+- Description, Pain point, Input/Output data, 수행주체 정보를 종합적으로 분석
+- 예시: "자회사 의견의 배경·맥락을 파악할 수 있는 히스토리 DB 필요",
+        "공동 데이터베이스와 표준 Template 구축 필요",
+        "기준정보 시스템 연동 및 실시간 데이터 접근 권한 필요"
+- "인간 수행 필요" Task는 빈 문자열("")로 출력
+
 ## 출력 형식 (JSON만 출력, 다른 텍스트 없이)
 {
   "tasks": [
     {
       "id": "L5_ID",
       "label": "AI 수행 가능" 또는 "인간 수행 필요",
-      "reason": "30자 이내 근거"
+      "reason": "30자 이내 근거",
+      "ai_prerequisites": "AI 수행 시 필요한 여건 (AI 수행 가능인 경우만)"
     },
     ...
   ]
@@ -255,6 +265,7 @@ def classify_all(tasks: list[dict], resume_path: str | None = None) -> pd.DataFr
                     "수행주체":        t["performer"][:100] if t["performer"] else "",
                     "분류결과":        label,
                     "분류근거":        r.get("reason", ""),
+                    "AI수행필요여건":   r.get("ai_prerequisites", "") if label == LABEL_AI else "",
                     "AI수행가능":      1 if label == LABEL_AI else 0,
                 })
             print(f"완료")
@@ -268,6 +279,7 @@ def classify_all(tasks: list[dict], resume_path: str | None = None) -> pd.DataFr
                     "L5_Description": t["desc"],
                     "수행주체": t["performer"][:100],
                     "분류결과": LABEL_HUMAN, "분류근거": f"오류: {e}",
+                    "AI수행필요여건": "",
                     "AI수행가능": 0,
                 })
 
@@ -280,6 +292,7 @@ def classify_all(tasks: list[dict], resume_path: str | None = None) -> pd.DataFr
                     "L5_Description": t["desc"],
                     "수행주체": t["performer"][:100],
                     "분류결과": LABEL_HUMAN, "분류근거": f"API 오류: {e}",
+                    "AI수행필요여건": "",
                     "AI수행가능": 0,
                 })
 
@@ -302,7 +315,7 @@ def save_results(df: pd.DataFrame, output_path: str) -> None:
         # 열 너비 자동 조정
         col_widths = {
             "A": 12, "B": 10, "C": 14, "D": 14,
-            "E": 28, "F": 45, "G": 35, "H": 16, "I": 35, "J": 8,
+            "E": 28, "F": 45, "G": 35, "H": 16, "I": 35, "J": 50, "K": 8,
         }
         for col_letter, width in col_widths.items():
             ws_main.column_dimensions[col_letter].width = width

@@ -43,6 +43,7 @@ export default function WorkflowPage() {
       if (file.name.endsWith(".pptx") || file.name.endsWith(".ppt")) {
         const result = await uploadPptWorkflow(file);
         setPptResult(result);
+        setSummary(null);
       } else {
         const result = await uploadWorkflow(file);
         setSummary(result);
@@ -309,12 +310,30 @@ export default function WorkflowPage() {
                 </>
               )}
             </div>
-            <button
-              onClick={() => { setPptResult(null); setSummary(null); }}
-              className="text-sm text-gray-400 hover:text-red-500 transition"
-            >
-              초기화
-            </button>
+            <div className="flex items-center gap-2">
+              <select
+                value={provider}
+                onChange={(e) => setProvider(e.target.value as ProviderType)}
+                className="text-xs border border-gray-200 rounded-lg px-2 py-2"
+              >
+                <option value="openai">Model A 기준</option>
+                <option value="anthropic">Model B 기준</option>
+              </select>
+              <button
+                onClick={handleGenerateToBe}
+                disabled={tobeLoading}
+                className="px-4 py-2 rounded-lg text-sm font-bold text-white transition disabled:opacity-50"
+                style={{ backgroundColor: PWC.primary }}
+              >
+                {tobeLoading ? "생성 중..." : "To-Be 초안 생성"}
+              </button>
+              <button
+                onClick={() => { setPptResult(null); setSummary(null); setTobeResult(null); }}
+                className="text-sm text-gray-400 hover:text-red-500 transition"
+              >
+                초기화
+              </button>
+            </div>
           </div>
 
           {/* 슬라이드 탭 */}
