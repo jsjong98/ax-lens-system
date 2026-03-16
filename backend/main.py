@@ -38,7 +38,7 @@ def _load_dotenv() -> None:
 
 _load_dotenv()
 
-from fastapi import FastAPI, HTTPException, Query, UploadFile, File
+from fastapi import FastAPI, HTTPException, Query, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 import openpyxl
@@ -580,7 +580,9 @@ async def get_current_file():
 
 @app.post("/api/upload", tags=["Upload"])
 async def upload_excel(file: UploadFile = File(...)):
+    """엑셀 파일 업로드 — 시트 목록을 반환합니다. 시트 선택은 /api/upload/select-sheet로."""
     global _tasks_cache, _current_excel_path
+    from excel_reader import list_sheets
 
     if not file.filename or not file.filename.endswith(".xlsx"):
         raise HTTPException(status_code=400, detail=".xlsx 파일만 업로드 가능합니다.")
@@ -592,18 +594,65 @@ async def upload_excel(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"파일 저장 실패: {e}")
 
+    # 시트 목록 조회
     try:
-        new_tasks = load_tasks(save_path)
+        sheets = list_sheets(save_path)
     except Exception as e:
         save_path.unlink(missing_ok=True)
         raise HTTPException(status_code=422, detail=f"엑셀 파싱 실패: {e}")
 
-    _tasks_cache = new_tasks
     _current_excel_path = save_path
+
+    # 추천 시트가 있으면 자동 로드
+    recommended = next((s for s in sheets if s["recommended"]), None)
+    if recommended:
+        try:
+            new_tasks = load_tasks(save_path, sheet_name=recommended["name"])
+            _tasks_cache = new_tasks
+        except Exception:
+            pass
 
     return {
         "message": "업로드 성공",
         "filename": file.filename,
+        "task_count": len(_tasks_cache),
+        "sheets": sheets,
+    }
+
+
+@app.get("/api/upload/sheets", tags=["Upload"])
+async def get_excel_sheets():
+    """현재 업로드된 엑셀 파일의 시트 목록을 반환합니다."""
+    from excel_reader import list_sheets
+
+    if not _current_excel_path or not _current_excel_path.exists():
+        raise HTTPException(404, "업로드된 엑셀 파일이 없습니다.")
+
+    sheets = list_sheets(_current_excel_path)
+    return {"filename": _current_excel_path.name, "sheets": sheets}
+
+
+@app.post("/api/upload/select-sheet", tags=["Upload"])
+async def select_excel_sheet(request: Request):
+    """특정 시트를 선택하여 Task를 로드합니다. Body: {"sheet_name": "시트명"}"""
+    global _tasks_cache
+
+    body = await request.json()
+    sheet_name = body.get("sheet_name", "")
+
+    if not _current_excel_path or not _current_excel_path.exists():
+        raise HTTPException(404, "업로드된 엑셀 파일이 없습니다.")
+
+    try:
+        new_tasks = load_tasks(_current_excel_path, sheet_name=sheet_name)
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"시트 파싱 실패: {e}")
+
+    _tasks_cache = new_tasks
+
+    return {
+        "message": f"시트 '{sheet_name}' 로드 완료",
+        "sheet_name": sheet_name,
         "task_count": len(_tasks_cache),
     }
 
@@ -901,6 +950,37 @@ async def upload_ppt_workflow(file: UploadFile = File(...)):
 # To-Be Workflow 생성
 # ─────────────────────────────────────────────────────────────────────────────
 
+@app.post("/api/workflow/slide-l4-mapping", tags=["Workflow"])
+async def save_slide_l4_mapping(request: Request):
+    """
+    슬라이드별 L4 매핑을 저장합니다.
+    Body: { "mappings": { "0": "1.1.1", "1": "1.1.2", ... } }
+    key = 슬라이드 인덱스, value = L4 ID
+    """
+    body = await request.json()
+    mappings = body.get("mappings", {})
+
+    global _workflow_cache
+    _workflow_cache["slide_l4_mapping"] = mappings
+
+    # PPT 결과가 있으면 매핑 반영하여 ParsedWorkflow 재생성
+    if "ppt" in _workflow_cache:
+        from ppt_parser import ppt_to_parsed_workflow
+        ppt_data = _workflow_cache["ppt"]
+        parsed_ppt = ppt_data["parsed"]
+
+        # 매칭 정보 재구성
+        slides_result = ppt_data["slides"]
+        all_matches = [s.get("matches", []) for s in slides_result]
+
+        ppt_workflow = ppt_to_parsed_workflow(
+            parsed_ppt, all_matches, slide_l4_mapping=mappings
+        )
+        _workflow_cache["parsed"] = ppt_workflow
+
+    return {"ok": True, "mappings": mappings}
+
+
 @app.post("/api/workflow/generate-tobe", tags=["Workflow"])
 async def generate_tobe_workflow(
     sheet_id: str = Query("default", description="As-Is 워크플로우 시트 ID"),
@@ -927,7 +1007,6 @@ async def generate_tobe_workflow(
     parsed = _workflow_cache["parsed"]
     sheet = next((s for s in parsed.sheets if s.sheet_id == sheet_id), None)
     if not sheet:
-        # 첫 번째 시트로 fallback
         if parsed.sheets:
             sheet = parsed.sheets[0]
         else:
@@ -941,11 +1020,24 @@ async def generate_tobe_workflow(
             f"'{provider}' 분류 결과가 없습니다. 먼저 분류를 실행하세요.",
         )
 
+    # 슬라이드-L4 매핑이 있으면 해당 L4의 L5 태스크만 필터링
+    slide_l4_mapping = _workflow_cache.get("slide_l4_mapping", {})
+    # sheet_id가 "ppt-slide-N" 형식이면 슬라이드 인덱스 추출
+    mapped_l4_id = ""
+    if sheet_id.startswith("ppt-slide-"):
+        slide_idx = sheet_id.replace("ppt-slide-", "")
+        mapped_l4_id = slide_l4_mapping.get(slide_idx, "")
+
     # ClassificationResult → dict 변환
     classification_dict: dict[str, dict] = {}
     for tid, cr in results_store.items():
-        # 태스크 이름도 포함 (매칭용)
         task = next((t for t in _tasks_cache if t.id == tid), None)
+
+        # L4 필터: 매핑이 설정되어 있으면 해당 L4의 태스크만 포함
+        if mapped_l4_id and task:
+            if task.l4_id != mapped_l4_id:
+                continue
+
         classification_dict[tid] = {
             "label": cr.label,
             "reason": cr.reason,

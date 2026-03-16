@@ -1,10 +1,12 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import {
   uploadWorkflow,
   uploadPptWorkflow,
   getWorkflowSummary,
+  getFilterOptions,
+  saveSlideL4Mapping,
   generateToBe,
   type WorkflowSummary,
   type WorkflowStep,
@@ -32,6 +34,17 @@ export default function WorkflowPage() {
   const [dragOver, setDragOver] = useState(false);
   const [activeTab, setActiveTab] = useState<"asis" | "tobe">("asis");
   const [provider, setProvider] = useState<ProviderType>("openai");
+  const [l4Options, setL4Options] = useState<{ id: string; name: string }[]>([]);
+  const [slideL4Map, setSlideL4Map] = useState<Record<string, string>>({});
+
+  // PPT 업로드 시 L4 목록 로드
+  useEffect(() => {
+    if (pptResult) {
+      getFilterOptions()
+        .then((opts) => setL4Options(opts.l4 || []))
+        .catch(() => {});
+    }
+  }, [pptResult]);
 
   /* ── JSON 업로드 ───────────────────────────────────────── */
   const handleUpload = useCallback(async (file: File) => {
@@ -82,13 +95,30 @@ export default function WorkflowPage() {
     }
   }, []);
 
+  /* ── 슬라이드 L4 매핑 변경 ─────────────────────────────── */
+  const handleSlideL4Change = useCallback(
+    async (slideIdx: number, l4Id: string) => {
+      const newMap = { ...slideL4Map, [String(slideIdx)]: l4Id };
+      if (!l4Id) delete newMap[String(slideIdx)];
+      setSlideL4Map(newMap);
+      try {
+        await saveSlideL4Mapping(newMap);
+      } catch {}
+    },
+    [slideL4Map],
+  );
+
   /* ── To-Be 생성 ────────────────────────────────────────── */
   const handleGenerateToBe = useCallback(async () => {
     setTobeLoading(true);
     setError(null);
     try {
+      // PPT 모드: 현재 슬라이드의 sheet_id 사용
+      const sheetId = pptResult
+        ? `ppt-slide-${activePptSlide}`
+        : activeSheet || undefined;
       const result = await generateToBe({
-        sheet_id: activeSheet || undefined,
+        sheet_id: sheetId,
         provider,
       });
       setTobeResult(result);
@@ -98,7 +128,7 @@ export default function WorkflowPage() {
     } finally {
       setTobeLoading(false);
     }
-  }, [activeSheet, provider]);
+  }, [activeSheet, activePptSlide, pptResult, provider]);
 
   const currentSheet = summary?.sheets.find((s) => s.sheet_id === activeSheet);
   const hasWorkflow = summary || pptResult;
@@ -336,24 +366,54 @@ export default function WorkflowPage() {
             </div>
           </div>
 
-          {/* 슬라이드 탭 */}
-          {pptResult.slides.length > 1 && (
-            <div className="flex gap-1 border-b border-gray-200">
-              {pptResult.slides.map((s, i) => (
-                <button
-                  key={i}
-                  onClick={() => setActivePptSlide(i)}
-                  className={`px-4 py-2 text-sm font-medium border-b-2 transition ${
-                    activePptSlide === i
-                      ? "border-red-600 text-red-700"
-                      : "border-transparent text-gray-500 hover:text-gray-700"
-                  }`}
-                >
-                  {s.title || `슬라이드 ${i + 1}`}
-                </button>
-              ))}
-            </div>
-          )}
+          {/* 슬라이드별 L4 매핑 테이블 */}
+          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-200">
+                  <th className="text-left px-4 py-2 font-medium text-gray-600 w-12">#</th>
+                  <th className="text-left px-4 py-2 font-medium text-gray-600">슬라이드</th>
+                  <th className="text-left px-4 py-2 font-medium text-gray-600">노드</th>
+                  <th className="text-left px-4 py-2 font-medium text-gray-600 min-w-[280px]">L4 Activity 지정</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pptResult.slides.map((s, i) => (
+                  <tr
+                    key={i}
+                    onClick={() => setActivePptSlide(i)}
+                    className={`border-b border-gray-100 cursor-pointer transition ${
+                      activePptSlide === i ? "bg-red-50" : "hover:bg-gray-50"
+                    }`}
+                  >
+                    <td className="px-4 py-2 text-gray-400 font-mono">{i + 1}</td>
+                    <td className="px-4 py-2 font-medium text-gray-800">
+                      {s.title || `슬라이드 ${i + 1}`}
+                    </td>
+                    <td className="px-4 py-2 text-gray-500">{s.node_count}개</td>
+                    <td className="px-4 py-2" onClick={(e) => e.stopPropagation()}>
+                      <select
+                        value={slideL4Map[String(i)] || ""}
+                        onChange={(e) => handleSlideL4Change(i, e.target.value)}
+                        className={`w-full text-xs border rounded-lg px-2 py-1.5 ${
+                          slideL4Map[String(i)]
+                            ? "border-green-300 bg-green-50 text-green-800"
+                            : "border-gray-200 text-gray-500"
+                        }`}
+                      >
+                        <option value="">-- L4 선택 --</option>
+                        {l4Options.map((opt) => (
+                          <option key={opt.id} value={opt.id}>
+                            {opt.id} {opt.name}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
 
           {/* PPT 노드 매칭 결과 */}
           {pptResult.slides[activePptSlide] && (

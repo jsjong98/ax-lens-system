@@ -1,8 +1,15 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Upload, FileSpreadsheet, CheckCircle2, AlertCircle, RefreshCw } from "lucide-react";
-import { getCurrentFile, uploadExcel, type UploadCurrentInfo } from "@/lib/api";
+import { Upload, FileSpreadsheet, CheckCircle2, AlertCircle, RefreshCw, Layers } from "lucide-react";
+import {
+  getCurrentFile,
+  uploadExcel,
+  getExcelSheets,
+  selectExcelSheet,
+  type UploadCurrentInfo,
+  type ExcelSheet,
+} from "@/lib/api";
 
 interface Props {
   onUploaded?: (taskCount: number) => void;
@@ -15,10 +22,24 @@ export default function ExcelUploader({ onUploaded }: Props) {
   const [progress, setProgress] = useState(0);
   const [success, setSuccess]   = useState<string | null>(null);
   const [error, setError]       = useState<string | null>(null);
+  const [sheets, setSheets]     = useState<ExcelSheet[]>([]);
+  const [selectedSheet, setSelectedSheet] = useState<string>("");
+  const [sheetLoading, setSheetLoading]   = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    getCurrentFile().then(setCurrent).catch(() => {});
+    getCurrentFile().then((info) => {
+      setCurrent(info);
+      if (info.filename) {
+        getExcelSheets()
+          .then((res) => {
+            setSheets(res.sheets);
+            const rec = res.sheets.find((s) => s.recommended);
+            if (rec) setSelectedSheet(rec.name);
+          })
+          .catch(() => {});
+      }
+    }).catch(() => {});
   }, []);
 
   const handleFile = async (file: File) => {
@@ -33,14 +54,45 @@ export default function ExcelUploader({ onUploaded }: Props) {
 
     try {
       const res = await uploadExcel(file, setProgress);
-      setSuccess(`"${res.filename}" 업로드 완료 — Task ${res.task_count}개 로드됨`);
       setCurrent({ filename: res.filename, size_kb: Math.round(file.size / 1024), task_count: res.task_count });
+
+      // 시트 목록 설정
+      if (res.sheets && res.sheets.length > 0) {
+        setSheets(res.sheets);
+        const rec = res.sheets.find((s) => s.recommended);
+        if (rec) {
+          setSelectedSheet(rec.name);
+          setSuccess(`"${res.filename}" 업로드 완료 — 시트 "${rec.name}" 자동 선택 (Task ${res.task_count}개)`);
+        } else {
+          setSuccess(`"${res.filename}" 업로드 완료 — 시트를 선택하세요`);
+        }
+      } else {
+        setSuccess(`"${res.filename}" 업로드 완료 — Task ${res.task_count}개 로드됨`);
+      }
+
       onUploaded?.(res.task_count);
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setUploading(false);
       setProgress(0);
+    }
+  };
+
+  const handleSheetSelect = async (sheetName: string) => {
+    setSelectedSheet(sheetName);
+    setSheetLoading(true);
+    setError(null);
+
+    try {
+      const res = await selectExcelSheet(sheetName);
+      setCurrent((prev) => prev ? { ...prev, task_count: res.task_count } : prev);
+      setSuccess(`시트 "${sheetName}" 로드 완료 — Task ${res.task_count}개`);
+      onUploaded?.(res.task_count);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSheetLoading(false);
     }
   };
 
@@ -86,30 +138,78 @@ export default function ExcelUploader({ onUploaded }: Props) {
           <p className="text-xs text-gray-400">로드된 파일 없음</p>
         )}
 
-        {/* 드래그&드롭 업로드 영역 */}
-        <div
-          onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
-          onDragLeave={() => setDragging(false)}
-          onDrop={onDrop}
-          onClick={() => inputRef.current?.click()}
-          className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-6 py-8 transition-colors"
-          style={{
-            borderColor: dragging ? "#D95578" : "#DEDEDE",
-            backgroundColor: dragging ? "#FFF5F7" : "#F5F5F5",
-          }}
-          onMouseEnter={(e) => { if (!dragging) { (e.currentTarget as HTMLElement).style.borderColor = "#F2A0AF"; (e.currentTarget as HTMLElement).style.backgroundColor = "#FFF5F7"; } }}
-          onMouseLeave={(e) => { if (!dragging) { (e.currentTarget as HTMLElement).style.borderColor = "#DEDEDE"; (e.currentTarget as HTMLElement).style.backgroundColor = "#F5F5F5"; } }}
-        >
-          <Upload className="h-8 w-8" style={{ color: dragging ? "#A62121" : "#AAAAAA" }} />
-          <div className="text-center">
-            <p className="text-sm font-medium text-gray-700">
-              클릭하거나 파일을 드래그해서 업로드
-            </p>
-            <p className="mt-0.5 text-xs text-gray-400">
-              HR As-Is 템플릿 형식의 .xlsx 파일
-            </p>
+        {/* 시트 선택 */}
+        {sheets.length > 0 && (
+          <div className="rounded-lg border border-gray-200 overflow-hidden">
+            <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 border-b border-gray-200">
+              <Layers className="h-4 w-4 text-gray-500" />
+              <span className="text-xs font-medium text-gray-600">시트 선택</span>
+              {sheetLoading && (
+                <span className="text-[10px] text-gray-400 ml-auto">로딩 중...</span>
+              )}
+            </div>
+            <div className="divide-y divide-gray-100">
+              {sheets.map((s) => (
+                <button
+                  key={s.name}
+                  onClick={() => !s.is_guide && handleSheetSelect(s.name)}
+                  disabled={s.is_guide || sheetLoading}
+                  className={`w-full flex items-center justify-between px-3 py-2 text-left text-xs transition ${
+                    s.is_guide
+                      ? "opacity-40 cursor-not-allowed bg-gray-50"
+                      : selectedSheet === s.name
+                        ? "bg-red-50 border-l-2 border-red-500"
+                        : "hover:bg-gray-50"
+                  }`}
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className={`font-medium truncate ${
+                      selectedSheet === s.name ? "text-red-700" : "text-gray-700"
+                    }`}>
+                      {s.name}
+                    </span>
+                    {s.is_guide && (
+                      <span className="px-1.5 py-0.5 rounded bg-gray-200 text-gray-500 text-[10px]">가이드</span>
+                    )}
+                    {s.recommended && (
+                      <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 text-[10px]">추천</span>
+                    )}
+                  </div>
+                  <span className="text-gray-400 flex-shrink-0">
+                    {s.is_guide ? "-" : `${s.task_count}개`}
+                  </span>
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
+
+        {/* 드래그&드롭 업로드 영역 */}
+        {!current?.filename && (
+          <div
+            onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={onDrop}
+            onClick={() => inputRef.current?.click()}
+            className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-6 py-8 transition-colors"
+            style={{
+              borderColor: dragging ? "#D95578" : "#DEDEDE",
+              backgroundColor: dragging ? "#FFF5F7" : "#F5F5F5",
+            }}
+            onMouseEnter={(e) => { if (!dragging) { (e.currentTarget as HTMLElement).style.borderColor = "#F2A0AF"; (e.currentTarget as HTMLElement).style.backgroundColor = "#FFF5F7"; } }}
+            onMouseLeave={(e) => { if (!dragging) { (e.currentTarget as HTMLElement).style.borderColor = "#DEDEDE"; (e.currentTarget as HTMLElement).style.backgroundColor = "#F5F5F5"; } }}
+          >
+            <Upload className="h-8 w-8" style={{ color: dragging ? "#A62121" : "#AAAAAA" }} />
+            <div className="text-center">
+              <p className="text-sm font-medium text-gray-700">
+                클릭하거나 파일을 드래그해서 업로드
+              </p>
+              <p className="mt-0.5 text-xs text-gray-400">
+                HR As-Is 템플릿 형식의 .xlsx 파일
+              </p>
+            </div>
+          </div>
+        )}
         <input
           ref={inputRef}
           type="file"

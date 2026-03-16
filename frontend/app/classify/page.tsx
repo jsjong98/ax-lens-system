@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import {
   getTasks, getSettings, classifyTasks, healthCheck,
   type Task, type ClassifierSettings, type SSEEvent, type ClassificationResult,
@@ -321,6 +321,12 @@ export default function ClassifyPage() {
             분류할 Task 선택 (체크하지 않으면 전체 처리)
           </h2>
         </div>
+
+        {/* L2 / L3 / L4 단위 일괄 선택 */}
+        {tasks.length > 0 && (
+          <GroupSelector tasks={tasks} selectedIds={selectedIds} onSelectionChange={setSelectedIds} />
+        )}
+
         <TaskTable
           rows={taskRows}
           showResult={Object.keys(liveResults).length > 0}
@@ -328,6 +334,131 @@ export default function ClassifyPage() {
           selectedIds={selectedIds}
           onSelectionChange={setSelectedIds}
         />
+      </div>
+    </div>
+  );
+}
+
+
+/* ── L2/L3/L4 단위 일괄 선택 컴포넌트 ────────────────────── */
+function GroupSelector({
+  tasks,
+  selectedIds,
+  onSelectionChange,
+}: {
+  tasks: Task[];
+  selectedIds: Set<string>;
+  onSelectionChange: (ids: Set<string>) => void;
+}) {
+  // L2 → L3 → L4 계층 구조 생성
+  const hierarchy = React.useMemo(() => {
+    const l2Map = new Map<string, { name: string; taskIds: string[]; l3s: Map<string, { name: string; taskIds: string[]; l4s: Map<string, { name: string; taskIds: string[] }> }> }>();
+
+    for (const t of tasks) {
+      if (!l2Map.has(t.l2_id)) {
+        l2Map.set(t.l2_id, { name: t.l2, taskIds: [], l3s: new Map() });
+      }
+      const l2 = l2Map.get(t.l2_id)!;
+      l2.taskIds.push(t.id);
+
+      if (!l2.l3s.has(t.l3_id)) {
+        l2.l3s.set(t.l3_id, { name: t.l3, taskIds: [], l4s: new Map() });
+      }
+      const l3 = l2.l3s.get(t.l3_id)!;
+      l3.taskIds.push(t.id);
+
+      if (!l3.l4s.has(t.l4_id)) {
+        l3.l4s.set(t.l4_id, { name: t.l4, taskIds: [] });
+      }
+      l3.l4s.get(t.l4_id)!.taskIds.push(t.id);
+    }
+    return l2Map;
+  }, [tasks]);
+
+  const toggleGroup = (taskIds: string[]) => {
+    const allSelected = taskIds.every((id) => selectedIds.has(id));
+    const next = new Set(selectedIds);
+    if (allSelected) {
+      taskIds.forEach((id) => next.delete(id));
+    } else {
+      taskIds.forEach((id) => next.add(id));
+    }
+    onSelectionChange(next);
+  };
+
+  const isAllSelected = (taskIds: string[]) => taskIds.length > 0 && taskIds.every((id) => selectedIds.has(id));
+  const isSomeSelected = (taskIds: string[]) => taskIds.some((id) => selectedIds.has(id)) && !isAllSelected(taskIds);
+
+  const [expandedL2, setExpandedL2] = React.useState<string | null>(null);
+
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
+      <div className="px-3 py-2 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+        <span className="text-xs font-medium text-gray-600">L2 / L3 / L4 단위 일괄 선택</span>
+        <span className="text-[10px] text-gray-400">
+          {selectedIds.size > 0 ? `${selectedIds.size}개 선택됨` : "전체"}
+        </span>
+      </div>
+      <div className="max-h-[280px] overflow-y-auto divide-y divide-gray-100">
+        {[...hierarchy.entries()].map(([l2Id, l2]) => (
+          <div key={l2Id}>
+            {/* L2 row */}
+            <div className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50">
+              <input
+                type="checkbox"
+                checked={isAllSelected(l2.taskIds)}
+                ref={(el) => { if (el) el.indeterminate = isSomeSelected(l2.taskIds); }}
+                onChange={() => toggleGroup(l2.taskIds)}
+                className="h-3.5 w-3.5 rounded border-gray-300 flex-shrink-0"
+                style={{ accentColor: "#A62121" }}
+              />
+              <button
+                onClick={() => setExpandedL2(expandedL2 === l2Id ? null : l2Id)}
+                className="flex-1 flex items-center gap-2 text-left"
+              >
+                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-red-50 text-red-700">{l2Id}</span>
+                <span className="text-xs font-medium text-gray-800 truncate">{l2.name}</span>
+                <span className="text-[10px] text-gray-400 ml-auto flex-shrink-0">{l2.taskIds.length}개</span>
+                <span className="text-gray-400 text-[10px]">{expandedL2 === l2Id ? "▲" : "▼"}</span>
+              </button>
+            </div>
+
+            {/* L3 rows */}
+            {expandedL2 === l2Id && [...l2.l3s.entries()].map(([l3Id, l3]) => (
+              <div key={l3Id}>
+                <div className="flex items-center gap-2 px-3 py-1.5 pl-8 hover:bg-gray-50">
+                  <input
+                    type="checkbox"
+                    checked={isAllSelected(l3.taskIds)}
+                    ref={(el) => { if (el) el.indeterminate = isSomeSelected(l3.taskIds); }}
+                    onChange={() => toggleGroup(l3.taskIds)}
+                    className="h-3 w-3 rounded border-gray-300 flex-shrink-0"
+                    style={{ accentColor: "#A62121" }}
+                  />
+                  <span className="text-[10px] font-mono text-gray-400">{l3Id}</span>
+                  <span className="text-[11px] text-gray-600 truncate">{l3.name}</span>
+                  <span className="text-[10px] text-gray-400 ml-auto">{l3.taskIds.length}개</span>
+                </div>
+                {/* L4 rows */}
+                {[...l3.l4s.entries()].map(([l4Id, l4]) => (
+                  <div key={l4Id} className="flex items-center gap-2 px-3 py-1 pl-14 hover:bg-gray-50">
+                    <input
+                      type="checkbox"
+                      checked={isAllSelected(l4.taskIds)}
+                      ref={(el) => { if (el) el.indeterminate = isSomeSelected(l4.taskIds); }}
+                      onChange={() => toggleGroup(l4.taskIds)}
+                      className="h-3 w-3 rounded border-gray-300 flex-shrink-0"
+                      style={{ accentColor: "#A62121" }}
+                    />
+                    <span className="text-[10px] font-mono text-gray-400">{l4Id}</span>
+                    <span className="text-[11px] text-gray-500 truncate">{l4.name}</span>
+                    <span className="text-[10px] text-gray-400 ml-auto">{l4.taskIds.length}개</span>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        ))}
       </div>
     </div>
   );

@@ -305,10 +305,30 @@ export async function getCurrentFile(): Promise<UploadCurrentInfo> {
   return apiFetch<UploadCurrentInfo>("/upload/current");
 }
 
+export interface ExcelSheet {
+  name: string;
+  task_count: number;
+  is_guide: boolean;
+  recommended: boolean;
+}
+
+export async function getExcelSheets(): Promise<{ filename: string; sheets: ExcelSheet[] }> {
+  return apiFetch("/upload/sheets");
+}
+
+export async function selectExcelSheet(
+  sheetName: string,
+): Promise<{ message: string; sheet_name: string; task_count: number }> {
+  return apiFetch("/upload/select-sheet", {
+    method: "POST",
+    body: JSON.stringify({ sheet_name: sheetName }),
+  });
+}
+
 export async function uploadExcel(
   file: File,
   onProgress?: (pct: number) => void
-): Promise<{ message: string; filename: string; task_count: number }> {
+): Promise<{ message: string; filename: string; task_count: number; sheets?: ExcelSheet[] }> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     const formData = new FormData();
@@ -521,6 +541,15 @@ export interface ToBeResult {
     }>;
   }>;
   react_flow: { nodes: unknown[]; edges: unknown[]; lanes: string[] };
+}
+
+export async function saveSlideL4Mapping(
+  mappings: Record<string, string>,
+): Promise<{ ok: boolean; mappings: Record<string, string> }> {
+  return apiFetch("/workflow/slide-l4-mapping", {
+    method: "POST",
+    body: JSON.stringify({ mappings }),
+  });
 }
 
 export async function generateToBe(params: {

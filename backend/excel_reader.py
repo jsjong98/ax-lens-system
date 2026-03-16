@@ -175,12 +175,56 @@ def _cell(row: tuple, col: int) -> str:
     return str(val).strip()
 
 
-def load_tasks(excel_path: str | Path | None = None) -> list[Task]:
+def list_sheets(excel_path: str | Path) -> list[dict]:
+    """
+    엑셀 파일의 시트 목록과 각 시트의 L5 Task 개수를 반환합니다.
+
+    Returns:
+        [{"name": "시트1", "task_count": 42, "is_guide": False, "recommended": True}, ...]
+    """
+    excel_path = Path(excel_path)
+    if not excel_path.exists():
+        raise FileNotFoundError(f"파일 없음: {excel_path}")
+
+    wb = openpyxl.load_workbook(str(excel_path), data_only=True, read_only=True)
+
+    best_score = -1
+    best_name = ""
+    sheets = []
+
+    for name in wb.sheetnames:
+        is_guide = _is_guide_sheet(name)
+        ws = wb[name]
+        score = _score_sheet(ws) if not is_guide else 0
+        if score > best_score:
+            best_score = score
+            best_name = name
+        sheets.append({
+            "name": name,
+            "task_count": score,
+            "is_guide": is_guide,
+            "recommended": False,
+        })
+
+    # 추천 시트 마킹
+    for s in sheets:
+        if s["name"] == best_name and best_score > 0:
+            s["recommended"] = True
+
+    wb.close()
+    return sheets
+
+
+def load_tasks(
+    excel_path: str | Path | None = None,
+    sheet_name: str | None = None,
+) -> list[Task]:
     """
     엑셀 파일을 읽어 Task 목록을 반환합니다.
 
     Args:
         excel_path: 엑셀 파일 경로. None이면 현재 파일 기준으로 자동 탐색.
+        sheet_name: 시트 이름. None이면 자동 감지.
     """
     if excel_path is None:
         base_dir = Path(__file__).parent
@@ -192,7 +236,11 @@ def load_tasks(excel_path: str | Path | None = None) -> list[Task]:
 
     wb = openpyxl.load_workbook(str(excel_path), data_only=True, read_only=True)
 
-    ws = _find_data_sheet(wb)
+    if sheet_name and sheet_name in wb.sheetnames:
+        ws = wb[sheet_name]
+        print(f"[sheet] 사용자 지정 시트: '{sheet_name}'")
+    else:
+        ws = _find_data_sheet(wb)
     data_start_row = _find_data_start_row(ws)
 
     # read_only 모드에서는 ws를 재사용할 수 없으므로 다시 열기

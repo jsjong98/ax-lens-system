@@ -656,18 +656,20 @@ def ppt_slide_to_react_flow(slide: PptSlide, scale: float = 100.0) -> dict:
 def ppt_to_parsed_workflow(
     parsed_ppt: ParsedPpt,
     matches_per_slide: list[list[dict]] | None = None,
+    slide_l4_mapping: dict[str, str] | None = None,
 ) -> "ParsedWorkflow":
     """
     PPT 파싱 결과를 workflow_parser의 ParsedWorkflow 형태로 변환합니다.
-    이를 통해 To-Be 생성 등 JSON 워크플로우와 동일한 파이프라인을 사용할 수 있습니다.
 
-    matches_per_slide: 슬라이드별 match_nodes_to_tasks() 결과 (있으면 task_id/level 정보 사용)
+    matches_per_slide: 슬라이드별 match_nodes_to_tasks() 결과
+    slide_l4_mapping: 사용자 지정 슬라이드→L4 매핑 {"0": "1.1.1", ...}
     """
     from workflow_parser import (
         WorkflowNode, WorkflowEdge, ExecutionStep,
         WorkflowSheet, ParsedWorkflow,
     )
 
+    mapping = slide_l4_mapping or {}
     sheets: list[WorkflowSheet] = []
 
     for si, slide in enumerate(parsed_ppt.slides):
@@ -677,6 +679,9 @@ def ppt_to_parsed_workflow(
         matches = matches_per_slide[si] if matches_per_slide and si < len(matches_per_slide) else []
         match_map = {m["node_id"]: m for m in matches} if matches else {}
 
+        # 사용자가 지정한 L4 ID
+        assigned_l4_id = mapping.get(str(si), "")
+
         # 노드 변환
         wf_nodes: dict[str, WorkflowNode] = {}
         for node in slide.nodes:
@@ -684,7 +689,6 @@ def ppt_to_parsed_workflow(
             matched_id = m.get("matched_task_id", "")
             matched_level = m.get("matched_level", "")
 
-            # 매칭된 경우 task_id와 level 사용, 아니면 PPT 텍스트 기반 추정
             task_id = matched_id or node.id
             level = matched_level or _guess_level(matched_id)
 
@@ -712,9 +716,14 @@ def ppt_to_parsed_workflow(
         # 실행 순서 분석
         execution_order = _analyze_ppt_execution_order(slide.nodes, slide.edges)
 
+        # 시트 이름: 사용자 지정 L4 있으면 반영
+        sheet_name = slide.title or f"슬라이드 {si + 1}"
+        if assigned_l4_id:
+            sheet_name = f"{assigned_l4_id} — {sheet_name}"
+
         sheet = WorkflowSheet(
             sheet_id=f"ppt-slide-{si}",
-            name=slide.title or f"슬라이드 {si + 1}",
+            name=sheet_name,
             nodes=wf_nodes,
             edges=wf_edges,
             execution_order=execution_order,
