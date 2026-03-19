@@ -3,6 +3,7 @@ backend/.env
 backend/results.json
 backend/results_openai.json
 backend/results_anthropic.json
+backend/results/
 backend/usage.json
 backend/workflow.json
 backend/settings.json

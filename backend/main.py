@@ -62,6 +62,7 @@ from settings_store import (
     load_settings,
     save_results,
     save_settings,
+    set_current_file,
     upsert_result,
 )
 from usage_store import get_usage, reset_usage
@@ -97,7 +98,7 @@ async def get_tasks(
     l3: Optional[str] = Query(None),
     l4: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=500),
+    page_size: int = Query(50, ge=1, le=10000),
 ):
     tasks = _tasks_cache
 
@@ -223,7 +224,7 @@ async def get_results(
     label: Optional[str] = Query(None),
     provider: str = Query("openai", description="openai | anthropic"),
     page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=500),
+    page_size: int = Query(50, ge=1, le=10000),
 ):
     results_store = load_results(provider)
     results = sorted(results_store.values(), key=lambda r: _natural_key(r.task_id))
@@ -249,7 +250,7 @@ async def get_results(
 @app.get("/api/results/compare", tags=["Results"])
 async def get_comparison_results(
     page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=500),
+    page_size: int = Query(50, ge=1, le=10000),
 ):
     """OpenAI와 Anthropic 분류 결과를 나란히 비교합니다."""
     openai_results    = load_results("openai")
@@ -560,22 +561,15 @@ _current_excel_path: Path | None = None
 
 @app.get("/api/upload/current", tags=["Upload"])
 async def get_current_file():
-    from excel_reader import _find_excel
-    try:
-        if _current_excel_path and _current_excel_path.exists():
-            path = _current_excel_path
-        else:
-            try:
-                path = _find_excel(_UPLOAD_DIR)
-            except FileNotFoundError:
-                path = _find_excel(Path(__file__).parent)
+    """현재 세션에서 업로드한 파일 정보만 반환합니다."""
+    if _current_excel_path and _current_excel_path.exists():
         return {
-            "filename": path.name,
-            "size_kb": round(path.stat().st_size / 1024, 1),
+            "filename": _current_excel_path.name,
+            "size_kb": round(_current_excel_path.stat().st_size / 1024, 1),
             "task_count": len(_tasks_cache),
         }
-    except FileNotFoundError:
-        return {"filename": None, "size_kb": 0, "task_count": 0}
+    # 이 세션에서 업로드한 파일이 없으면 빈 응답
+    return {"filename": None, "size_kb": 0, "task_count": 0}
 
 
 @app.post("/api/upload", tags=["Upload"])
@@ -602,6 +596,9 @@ async def upload_excel(file: UploadFile = File(...)):
         raise HTTPException(status_code=422, detail=f"엑셀 파싱 실패: {e}")
 
     _current_excel_path = save_path
+
+    # 파일별 결과 분리를 위해 현재 파일 설정
+    set_current_file(file.filename)
 
     # 추천 시트가 있으면 자동 로드
     recommended = next((s for s in sheets if s["recommended"]), None)

@@ -55,7 +55,7 @@ export default function ClassifyPage() {
         setOpenaiReady(false);
         setAnthropicReady(false);
       });
-    getTasks({ page_size: 500 }).then((r) => setTasks(r.tasks));
+    getTasks({ page_size: 9999 }).then((r) => setTasks(r.tasks));
     getSettings().then(setSettings);
   }, []);
 

@@ -1,34 +1,62 @@
 """
 settings_store.py — 분류 설정 및 분류 결과를 JSON 파일로 영속화합니다.
 
-파일 위치: backend/ 폴더 내
-  - settings.json          : ClassifierSettings
-  - results_openai.json    : OpenAI 분류 결과 {task_id: ClassificationResult}
-  - results_anthropic.json : Anthropic 분류 결과 {task_id: ClassificationResult}
+파일 위치: backend/results/ 폴더 내
+  - settings.json                     : ClassifierSettings
+  - results/{파일명}_openai.json      : OpenAI 분류 결과
+  - results/{파일명}_anthropic.json   : Anthropic 분류 결과
+
+파일별로 결과를 분리 저장하여, 다른 엑셀을 업로드해도 이전 결과가 누적되지 않습니다.
 """
 from __future__ import annotations
 import json
+import re
 from pathlib import Path
 
 from models import ClassificationResult, ClassifierSettings
 
 _BASE = Path(__file__).parent
-_SETTINGS_FILE         = _BASE / "settings.json"
-_RESULTS_OPENAI_FILE   = _BASE / "results_openai.json"
-_RESULTS_ANTHROPIC_FILE = _BASE / "results_anthropic.json"
+_SETTINGS_FILE = _BASE / "settings.json"
+_RESULTS_DIR = _BASE / "results"
+_RESULTS_DIR.mkdir(exist_ok=True)
+
+# 현재 활성 엑셀 파일명 (확장자 제외)
+_current_file_key: str = "default"
+
+
+def set_current_file(filename: str) -> None:
+    """현재 작업 중인 엑셀 파일명을 설정합니다."""
+    global _current_file_key
+    # 파일명에서 확장자 제거 + 특수문자를 _로 치환
+    name = Path(filename).stem
+    _current_file_key = re.sub(r'[^\w가-힣\-]', '_', name)
+
+
+def get_current_file_key() -> str:
+    return _current_file_key
 
 
 def _results_file(provider: str) -> Path:
-    return _RESULTS_ANTHROPIC_FILE if provider == "anthropic" else _RESULTS_OPENAI_FILE
+    return _RESULTS_DIR / f"{_current_file_key}_{provider}.json"
 
 
 def _migrate_legacy() -> None:
-    """기존 results.json → results_openai.json 1회 마이그레이션."""
-    legacy = _BASE / "results.json"
-    if legacy.exists() and not _RESULTS_OPENAI_FILE.exists():
-        import shutil
-        shutil.copy(legacy, _RESULTS_OPENAI_FILE)
-        print("[settings_store] results.json → results_openai.json 마이그레이션 완료")
+    """기존 results_openai.json → results/ 폴더로 1회 마이그레이션."""
+    for provider in ("openai", "anthropic"):
+        legacy = _BASE / f"results_{provider}.json"
+        if legacy.exists():
+            target = _RESULTS_DIR / f"default_{provider}.json"
+            if not target.exists():
+                import shutil
+                shutil.copy(legacy, target)
+                print(f"[settings_store] {legacy.name} → results/{target.name} 마이그레이션 완료")
+    # 구버전 results.json
+    legacy_old = _BASE / "results.json"
+    if legacy_old.exists():
+        target = _RESULTS_DIR / "default_openai.json"
+        if not target.exists():
+            import shutil
+            shutil.copy(legacy_old, target)
 
 
 _migrate_legacy()
