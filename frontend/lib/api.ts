@@ -631,3 +631,21 @@ export async function getNewWorkflowResult(): Promise<NewWorkflowResult> {
 export async function clearNewWorkflowResult(): Promise<{ ok: boolean }> {
   return apiFetch("/new-workflow/result", { method: "DELETE" });
 }
+
+export async function downloadNewWorkflowAsHrJson(): Promise<void> {
+  const res = await fetch(`${BACKEND_DIRECT}/api/new-workflow/export-hr-json`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "다운로드 실패" }));
+    throw new Error(err.detail ?? "다운로드 실패");
+  }
+  const blob = await res.blob();
+  const disposition = res.headers.get("Content-Disposition") ?? "";
+  const match = disposition.match(/filename="?([^"]+)"?/);
+  const filename = match?.[1] ?? "new_workflow.json";
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}

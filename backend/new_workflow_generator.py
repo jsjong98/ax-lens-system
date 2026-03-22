@@ -484,3 +484,204 @@ def result_to_dict(result: NewWorkflowResult) -> dict[str, Any]:
             for s in result.execution_flow
         ],
     }
+
+
+# ── hr-workflow-ai 호환 JSON 변환 ────────────────────────────────────────────
+
+# 자동화 수준별 노드 색상 (hr-workflow-ai 스타일)
+_LEVEL_COLOR: dict[str, str] = {
+    "Full-Auto":        "#6fcf97",   # 초록
+    "Human-in-Loop":    "#f2c94c",   # 노랑
+    "Human-Supervised": "#eb5757",   # 빨강
+}
+
+# 레인(swimlane) 높이 및 노드 크기 (px)
+_LANE_H   = 220
+_NODE_H   = 80
+_STEP_W   = 280   # 실행 스텝 간격
+_X_OFFSET = 120   # 첫 노드 시작 x
+_Y_PAD    = 70    # 레인 상단 여백
+
+
+def result_to_hr_workflow_json(result: NewWorkflowResult) -> dict[str, Any]:
+    """
+    NewWorkflowResult → hr-workflow-ai v2.0 호환 JSON 변환.
+
+    - 각 AI 에이전트 = 스윔레인 1개
+    - 각 L5 Task = L5 노드
+    - 실행 플로우 순서 = 엣지로 연결
+    """
+    from datetime import datetime, timezone
+
+    if not result.agents:
+        return {
+            "version": "2.0",
+            "sheets": [],
+            "exportedAt": datetime.now(timezone.utc).isoformat(),
+        }
+
+    # ── 레인 목록 (에이전트명) ─────────────────────────────────────────────
+    lanes: list[str] = [a.agent_name for a in result.agents]
+    lane_index: dict[str, int] = {a.agent_id: i for i, a in enumerate(result.agents)}
+
+    # task_id → agent_id 역매핑
+    task_to_agent: dict[str, str] = {}
+    for a in result.agents:
+        for t in a.assigned_tasks:
+            task_to_agent[t.task_id] = a.agent_id
+
+    # task_id → AssignedTask 역매핑
+    task_map: dict[str, AssignedTask] = {}
+    for a in result.agents:
+        for t in a.assigned_tasks:
+            task_map[t.task_id] = t
+
+    # ── 노드 위치 계산 ─────────────────────────────────────────────────────
+    # execution_flow 기반으로 각 task의 x 스텝을 결정
+    task_step: dict[str, int] = {}
+    for step in result.execution_flow:
+        for tid in step.task_ids:
+            task_step[tid] = step.step - 1  # 0-based
+
+    # execution_flow에 없는 task는 맨 뒤 스텝으로
+    max_step = max(task_step.values(), default=0)
+    for a in result.agents:
+        for t in a.assigned_tasks:
+            if t.task_id not in task_step:
+                max_step += 1
+                task_step[t.task_id] = max_step
+
+    # 같은 스텝 + 같은 레인 안에서 y 오프셋 (여러 노드가 겹치지 않도록)
+    step_lane_count: dict[tuple[int, int], int] = {}
+
+    nodes: list[dict] = []
+    node_id_map: dict[str, str] = {}   # task_id → React Flow node id
+
+    for a in result.agents:
+        li = lane_index[a.agent_id]
+        lane_color = _LEVEL_COLOR.get(a.automation_level, "#bdbdbd")
+
+        for t in a.assigned_tasks:
+            step = task_step.get(t.task_id, 0)
+            key = (step, li)
+            offset = step_lane_count.get(key, 0)
+            step_lane_count[key] = offset + 1
+
+            x = _X_OFFSET + step * _STEP_W
+            y = li * _LANE_H + _Y_PAD + offset * (_NODE_H + 20)
+
+            nid = f"nw-{t.task_id.replace('.', '-')}"
+            node_id_map[t.task_id] = nid
+
+            nodes.append({
+                "id": nid,
+                "type": "l5",
+                "position": {"x": x, "y": y},
+                "data": {
+                    "id": t.task_id,
+                    "label": t.task_name,
+                    "level": "L5",
+                    "description": f"[AI] {t.ai_role}" + (f"\n[Human] {t.human_role}" if t.human_role else ""),
+                    "role": a.agent_name,
+                    "l3Id": "",
+                    "l4Id": "",
+                    "isManual": False,
+                    "automationLevel": t.automation_level,
+                    "aiTechnique": a.ai_technique,
+                    "actors": {"exec": "", "hr": "", "teamlead": "", "member": ""},
+                    "systems": {},
+                    "painPoints": {},
+                    "inputs": {d: True for d in t.input_data},
+                    "outputs": {d: True for d in t.output_data},
+                    "logic": {},
+                    "nodeColor": lane_color,
+                },
+            })
+
+    # ── 엣지 생성 ─────────────────────────────────────────────────────────
+    edges: list[dict] = []
+    edge_id = 0
+
+    # 실행 플로우 순서대로 스텝 간 엣지 연결
+    sorted_steps = sorted(result.execution_flow, key=lambda s: s.step)
+    for i in range(len(sorted_steps) - 1):
+        curr_step = sorted_steps[i]
+        next_step = sorted_steps[i + 1]
+
+        # 현재 스텝의 마지막 task → 다음 스텝의 첫 번째 task 연결
+        for src_tid in curr_step.task_ids:
+            for tgt_tid in next_step.task_ids:
+                src_nid = node_id_map.get(src_tid)
+                tgt_nid = node_id_map.get(tgt_tid)
+                if src_nid and tgt_nid:
+                    edges.append({
+                        "id": f"e-{edge_id}",
+                        "source": src_nid,
+                        "target": tgt_nid,
+                        "type": "ortho",
+                        "animated": False,
+                        "style": {"stroke": "#9e9e9e", "strokeWidth": 2},
+                        "markerEnd": {
+                            "type": "ArrowClosed",
+                            "width": 18,
+                            "height": 18,
+                            "color": "#9e9e9e",
+                        },
+                    })
+                    edge_id += 1
+                    break  # 한 연결만 (fan-out 방지)
+            else:
+                continue
+            break
+
+    # 같은 에이전트 내 순차 task 연결 (execution_flow 순서 기반)
+    # task_id 리스트를 실행 스텝 순으로 정렬
+    all_ordered: list[str] = []
+    seen: set[str] = set()
+    for step in sorted_steps:
+        for tid in step.task_ids:
+            if tid not in seen:
+                all_ordered.append(tid)
+                seen.add(tid)
+
+    agent_task_order: dict[str, list[str]] = {a.agent_id: [] for a in result.agents}
+    for tid in all_ordered:
+        aid = task_to_agent.get(tid)
+        if aid:
+            agent_task_order[aid].append(tid)
+
+    for aid, tids in agent_task_order.items():
+        for j in range(len(tids) - 1):
+            src_nid = node_id_map.get(tids[j])
+            tgt_nid = node_id_map.get(tids[j + 1])
+            if src_nid and tgt_nid:
+                edges.append({
+                    "id": f"e-{edge_id}",
+                    "source": src_nid,
+                    "target": tgt_nid,
+                    "type": "ortho",
+                    "animated": False,
+                    "style": {"stroke": "#555", "strokeWidth": 2},
+                    "markerEnd": {
+                        "type": "ArrowClosed",
+                        "width": 18,
+                        "height": 18,
+                        "color": "#555",
+                    },
+                })
+                edge_id += 1
+
+    return {
+        "version": "2.0",
+        "exportedAt": datetime.now(timezone.utc).isoformat(),
+        "sheets": [
+            {
+                "id": "sheet-1",
+                "name": result.process_name or "AI 워크플로우 설계",
+                "type": "swimlane",
+                "lanes": lanes,
+                "nodes": nodes,
+                "edges": edges,
+            }
+        ],
+    }

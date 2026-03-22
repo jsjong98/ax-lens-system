@@ -1130,3 +1130,82 @@ async def clear_new_workflow_result():
     """New Workflow 결과를 초기화합니다."""
     _new_workflow_cache.clear()
     return {"ok": True}
+
+
+@app.get("/api/new-workflow/export-hr-json", tags=["NewWorkflow"])
+async def export_new_workflow_as_hr_json():
+    """
+    New Workflow 결과를 hr-workflow-ai v2.0 호환 JSON으로 변환하여 다운로드합니다.
+    hr-workflow-ai에 직접 Import할 수 있는 형식입니다.
+    """
+    from new_workflow_generator import (
+        result_to_hr_workflow_json,
+        NewWorkflowResult,
+        AIAgent,
+        AssignedTask,
+        ExecutionStep as NWExecutionStep,
+    )
+    import io
+
+    if not _new_workflow_cache:
+        raise HTTPException(404, "생성된 New Workflow 결과가 없습니다. 먼저 생성을 실행하세요.")
+
+    # 캐시 dict → NewWorkflowResult 복원
+    cache = _new_workflow_cache
+    agents = []
+    for a in cache.get("agents", []):
+        assigned = [
+            AssignedTask(
+                task_id=t["task_id"],
+                task_name=t["task_name"],
+                l4=t["l4"],
+                l3=t["l3"],
+                ai_role=t["ai_role"],
+                human_role=t["human_role"],
+                input_data=t["input_data"],
+                output_data=t["output_data"],
+                automation_level=t["automation_level"],
+            )
+            for t in a.get("assigned_tasks", [])
+        ]
+        agents.append(AIAgent(
+            agent_id=a["agent_id"],
+            agent_name=a["agent_name"],
+            agent_type=a["agent_type"],
+            ai_technique=a["ai_technique"],
+            description=a["description"],
+            automation_level=a["automation_level"],
+            assigned_tasks=assigned,
+        ))
+
+    flow = [
+        NWExecutionStep(
+            step=s["step"],
+            step_name=s["step_name"],
+            step_type=s["step_type"],
+            description=s["description"],
+            agent_ids=s["agent_ids"],
+            task_ids=s["task_ids"],
+        )
+        for s in cache.get("execution_flow", [])
+    ]
+
+    result = NewWorkflowResult(
+        blueprint_summary=cache.get("blueprint_summary", ""),
+        process_name=cache.get("process_name", "AI 워크플로우"),
+        total_tasks=cache.get("total_tasks", 0),
+        full_auto_count=cache.get("full_auto_count", 0),
+        human_in_loop_count=cache.get("human_in_loop_count", 0),
+        human_supervised_count=cache.get("human_supervised_count", 0),
+        agents=agents,
+        execution_flow=flow,
+    )
+
+    hr_json = result_to_hr_workflow_json(result)
+    filename = f"{result.process_name or 'new_workflow'}.json"
+
+    return StreamingResponse(
+        io.BytesIO(json.dumps(hr_json, ensure_ascii=False, indent=2).encode("utf-8")),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

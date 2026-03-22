@@ -4,11 +4,12 @@ import { useState, useEffect } from "react";
 import {
   generateNewWorkflow,
   getFilterOptions,
+  downloadNewWorkflowAsHrJson,
   type NewWorkflowResult,
   type NewWorkflowAgent,
   type NewWorkflowAssignedTask,
 } from "@/lib/api";
-import { Sparkles, ChevronDown, ChevronRight, Loader2, RefreshCw, Bot, User, Zap } from "lucide-react";
+import { Sparkles, ChevronDown, ChevronRight, Loader2, RefreshCw, Bot, User, Zap, Download } from "lucide-react";
 
 /* ── 색상 ────────────────────────────────────────────────────────────────── */
 const PWC = {
@@ -242,6 +243,8 @@ export default function NewWorkflowPage() {
       .catch(() => {});
   }, []);
 
+  const [exporting, setExporting] = useState(false);
+
   const handleGenerate = async () => {
     setLoading(true);
     setError(null);
@@ -254,6 +257,17 @@ export default function NewWorkflowPage() {
       setError(e instanceof Error ? e.message : "생성 중 오류가 발생했습니다.");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      await downloadNewWorkflowAsHrJson();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "내보내기 중 오류가 발생했습니다.");
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -346,22 +360,34 @@ export default function NewWorkflowPage() {
               </div>
             </div>
 
-            {/* 탭 */}
-            <div className="flex gap-1 mb-5 rounded-lg p-1 w-fit" style={{ backgroundColor: "#f0e0e0" }}>
-              {(["agents", "flow"] as const).map((tab) => (
-                <button
-                  key={tab}
-                  onClick={() => setActiveTab(tab)}
-                  className="rounded-md px-4 py-1.5 text-sm font-medium transition-colors"
-                  style={
-                    activeTab === tab
-                      ? { backgroundColor: PWC.primary, color: "#fff" }
-                      : { color: PWC.primary }
-                  }
-                >
-                  {tab === "agents" ? `AI 에이전트 (${result.agents.length})` : "실행 플로우"}
-                </button>
-              ))}
+            {/* 탭 + Export 버튼 */}
+            <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
+              <div className="flex gap-1 rounded-lg p-1 w-fit" style={{ backgroundColor: "#f0e0e0" }}>
+                {(["agents", "flow"] as const).map((tab) => (
+                  <button
+                    key={tab}
+                    onClick={() => setActiveTab(tab)}
+                    className="rounded-md px-4 py-1.5 text-sm font-medium transition-colors"
+                    style={
+                      activeTab === tab
+                        ? { backgroundColor: PWC.primary, color: "#fff" }
+                        : { color: PWC.primary }
+                    }
+                  >
+                    {tab === "agents" ? `AI 에이전트 (${result.agents.length})` : "실행 플로우"}
+                  </button>
+                ))}
+              </div>
+
+              <button
+                onClick={handleExport}
+                disabled={exporting}
+                className="flex items-center gap-2 rounded-lg border px-4 py-1.5 text-sm font-medium transition-colors disabled:opacity-60"
+                style={{ borderColor: PWC.primary, color: PWC.primary }}
+              >
+                {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                hr-workflow-ai JSON 내보내기
+              </button>
             </div>
 
             {/* 에이전트 목록 탭 */}
