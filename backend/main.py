@@ -1057,3 +1057,76 @@ async def generate_tobe_workflow(
         "execution_steps": tobe.execution_steps,
         "react_flow": tobe.react_flow,
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# New Workflow 엔드포인트 (엑셀 → AI 워크플로우 설계 초안)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# New Workflow 결과 캐시
+_new_workflow_cache: dict = {}
+
+
+@app.post("/api/new-workflow/generate", tags=["NewWorkflow"])
+async def generate_new_workflow(
+    process_name: str = Query("", description="프로세스 이름 (비우면 자동 추론)"),
+    l3: Optional[str] = Query(None, description="특정 L3 Unit Process로 필터 (비우면 전체)"),
+    l4: Optional[str] = Query(None, description="특정 L4 Activity로 필터 (비우면 전체)"),
+):
+    """
+    현재 로드된 엑셀의 L5 Task를 분석하여 AI 워크플로우 설계 초안을 생성합니다.
+    엑셀 파일만 있으면 되며, As-Is 워크플로우 파일은 필요하지 않습니다.
+    """
+    from new_workflow_generator import generate_new_workflow as _gen, result_to_dict
+
+    if not _tasks_cache:
+        raise HTTPException(400, "로드된 Task가 없습니다. 먼저 엑셀 파일을 업로드하세요.")
+
+    # 필터 적용
+    tasks = _tasks_cache
+    if l3:
+        tasks = [t for t in tasks if t.l3 == l3 or t.l3_id == l3]
+    if l4:
+        tasks = [t for t in tasks if t.l4 == l4 or t.l4_id == l4]
+
+    if not tasks:
+        raise HTTPException(400, "필터 조건에 맞는 Task가 없습니다.")
+
+    # 프로세스명 자동 추론
+    if not process_name:
+        l2_names = list({t.l2 for t in tasks if t.l2})
+        process_name = l2_names[0] if l2_names else "HR 프로세스"
+
+    # 설정에서 API 키 로드
+    settings = load_settings()
+    anthropic_key = os.getenv("ANTHROPIC_API_KEY", "") or settings.anthropic_api_key
+    openai_key = os.getenv("OPENAI_API_KEY", "") or settings.api_key
+
+    result = await _gen(
+        tasks=tasks,
+        process_name=process_name,
+        api_key=anthropic_key,
+        model=settings.anthropic_model or "claude-sonnet-4-6",
+        openai_api_key=openai_key,
+        openai_model=settings.model or "gpt-5.4",
+    )
+
+    result_dict = result_to_dict(result)
+    _new_workflow_cache.update(result_dict)
+
+    return {"ok": True, **result_dict}
+
+
+@app.get("/api/new-workflow/result", tags=["NewWorkflow"])
+async def get_new_workflow_result():
+    """마지막으로 생성된 New Workflow 결과를 반환합니다."""
+    if not _new_workflow_cache:
+        raise HTTPException(404, "생성된 New Workflow 결과가 없습니다. 먼저 생성을 실행하세요.")
+    return {"ok": True, **_new_workflow_cache}
+
+
+@app.delete("/api/new-workflow/result", tags=["NewWorkflow"])
+async def clear_new_workflow_result():
+    """New Workflow 결과를 초기화합니다."""
+    _new_workflow_cache.clear()
+    return {"ok": True}

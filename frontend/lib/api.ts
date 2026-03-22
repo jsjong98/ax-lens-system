@@ -564,3 +564,70 @@ export async function generateToBe(params: {
   const query = qs.toString() ? `?${qs}` : "";
   return apiFetch(`/workflow/generate-tobe${query}`, { method: "POST" });
 }
+
+// ── New Workflow ──────────────────────────────────────────────────────────────
+
+export interface NewWorkflowAssignedTask {
+  task_id: string;
+  task_name: string;
+  l4: string;
+  l3: string;
+  ai_role: string;
+  human_role: string;
+  input_data: string[];
+  output_data: string[];
+  automation_level: "Full-Auto" | "Human-in-Loop" | "Human-Supervised";
+}
+
+export interface NewWorkflowAgent {
+  agent_id: string;
+  agent_name: string;
+  agent_type: string;
+  ai_technique: string;
+  description: string;
+  automation_level: "Full-Auto" | "Human-in-Loop" | "Human-Supervised";
+  task_count: number;
+  assigned_tasks: NewWorkflowAssignedTask[];
+}
+
+export interface NewWorkflowExecutionStep {
+  step: number;
+  step_name: string;
+  step_type: "sequential" | "parallel";
+  description: string;
+  agent_ids: string[];
+  task_ids: string[];
+}
+
+export interface NewWorkflowResult {
+  ok: boolean;
+  blueprint_summary: string;
+  process_name: string;
+  total_tasks: number;
+  full_auto_count: number;
+  human_in_loop_count: number;
+  human_supervised_count: number;
+  agents: NewWorkflowAgent[];
+  execution_flow: NewWorkflowExecutionStep[];
+}
+
+export async function generateNewWorkflow(params: {
+  process_name?: string;
+  l3?: string;
+  l4?: string;
+} = {}): Promise<NewWorkflowResult> {
+  const qs = new URLSearchParams();
+  if (params.process_name) qs.set("process_name", params.process_name);
+  if (params.l3)           qs.set("l3", params.l3);
+  if (params.l4)           qs.set("l4", params.l4);
+  const query = qs.toString() ? `?${qs}` : "";
+  return apiFetch(`/new-workflow/generate${query}`, { method: "POST" });
+}
+
+export async function getNewWorkflowResult(): Promise<NewWorkflowResult> {
+  return apiFetch("/new-workflow/result");
+}
+
+export async function clearNewWorkflowResult(): Promise<{ ok: boolean }> {
+  return apiFetch("/new-workflow/result", { method: "DELETE" });
+}
