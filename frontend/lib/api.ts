@@ -1,12 +1,15 @@
 /**
  * api.ts — FastAPI 백엔드와 통신하는 fetch 래퍼
- * 일반 API: Next.js rewrites 프록시 (/api/* → http://localhost:8000/api/*)
+ * 일반 API: Next.js rewrites 프록시 (/api/* → Backend)
  * SSE 스트리밍: 백엔드 직접 연결 (Next.js 프록시가 SSE를 버퍼링하므로)
+ *
+ * Railway 배포 시 NEXT_PUBLIC_BACKEND_URL 환경변수로 백엔드 주소를 지정합니다.
+ * 로컬 개발 시에는 기존처럼 같은 호스트의 :8000 포트를 사용합니다.
  */
 
 const BACKEND_DIRECT = typeof window !== "undefined"
-  ? `${window.location.protocol}//${window.location.hostname}:8000`
-  : "http://localhost:8000";
+  ? (process.env.NEXT_PUBLIC_BACKEND_URL || `${window.location.protocol}//${window.location.hostname}:8000`)
+  : (process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000");
 
 // ── 타입 정의 ────────────────────────────────────────────────────────────────
 
@@ -676,6 +679,170 @@ export async function downloadNewWorkflowAsHrJson(): Promise<void> {
   const a = document.createElement("a");
   a.href = url;
   a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ── Project Management API ─────────────────────────────────────────────────
+
+export interface MappingProcess {
+  no: string;
+  process_name: string;
+  task_range: string;
+}
+
+export interface Stakeholder {
+  project_owner: string;
+  owner_department: string;
+  collaborating_departments: string[];
+  external_partners: string[];
+}
+
+export interface CurrentVsImprovement {
+  current_issues: string[];
+  improvement_directions: string[];
+}
+
+export interface ExpectedEffects {
+  quantitative: string[];
+  qualitative: string[];
+}
+
+export interface ProjectDefinitionResult {
+  ok: boolean;
+  project_number: string;
+  project_title: string;
+  created_date: string;
+  author: string;
+  overview: string[];
+  mapping_processes: MappingProcess[];
+  stakeholder: Stakeholder;
+  current_vs_improvement: CurrentVsImprovement;
+  expected_effects: ExpectedEffects;
+  considerations: string[];
+}
+
+export async function generateProjectDefinition(params: {
+  provider?: ProviderType;
+  process_name?: string;
+  author?: string;
+  l3?: string;
+  l4?: string;
+} = {}): Promise<ProjectDefinitionResult> {
+  const qs = new URLSearchParams();
+  if (params.provider)     qs.set("provider", params.provider);
+  if (params.process_name) qs.set("process_name", params.process_name);
+  if (params.author)       qs.set("author", params.author);
+  if (params.l3)           qs.set("l3", params.l3);
+  if (params.l4)           qs.set("l4", params.l4);
+  const query = qs.toString() ? `?${qs}` : "";
+  return apiFetch(`/project-management/definition/generate${query}`, { method: "POST" });
+}
+
+export async function getProjectDefinition(): Promise<ProjectDefinitionResult> {
+  return apiFetch("/project-management/definition");
+}
+
+export async function clearProjectDefinition(): Promise<{ ok: boolean }> {
+  return apiFetch("/project-management/definition", { method: "DELETE" });
+}
+
+// ── 과제 설계서 API ────────────────────────────────────────────────────────
+
+export interface AIServiceFlowStep {
+  step_order: number;
+  step_name: string;
+  actor: "Input" | "Senior AI" | "Junior AI" | "HR 담당자";
+  description: string;
+  sub_steps: string[];
+}
+
+export interface AIServiceFlow {
+  inputs: string[];
+  steps: AIServiceFlowStep[];
+}
+
+export interface AITechType {
+  category: string;
+  sub_types: string[];
+  checked: string[];
+}
+
+export interface AITechInfo {
+  tech_types: AITechType[];
+  tech_names: string[];
+}
+
+export interface InputOutputInfo {
+  input_internal: string[];
+  input_external: string[];
+  output: string[];
+}
+
+export interface ProcessingStep {
+  step_number: number;
+  step_name: string;
+  method: string;
+  result: string;
+}
+
+export interface AgentDefinition {
+  agent_id: string;
+  agent_name: string;
+  agent_type: string;
+  roles: string[];
+  input_data: string[];
+  processing_steps: ProcessingStep[];
+  output_data: string[];
+  flow_step_orders: number[];
+}
+
+export interface ProjectDesignResult {
+  ok: boolean;
+  project_title: string;
+  ai_service_flow: AIServiceFlow;
+  ai_tech_info: AITechInfo;
+  input_output: InputOutputInfo;
+  agent_definitions: AgentDefinition[];
+}
+
+export async function generateProjectDesign(params: {
+  provider?: ProviderType;
+  process_name?: string;
+  l3?: string;
+  l4?: string;
+} = {}): Promise<ProjectDesignResult> {
+  const qs = new URLSearchParams();
+  if (params.provider)     qs.set("provider", params.provider);
+  if (params.process_name) qs.set("process_name", params.process_name);
+  if (params.l3)           qs.set("l3", params.l3);
+  if (params.l4)           qs.set("l4", params.l4);
+  const query = qs.toString() ? `?${qs}` : "";
+  return apiFetch(`/project-management/design/generate${query}`, { method: "POST" });
+}
+
+export async function getProjectDesign(): Promise<ProjectDesignResult> {
+  return apiFetch("/project-management/design");
+}
+
+export async function clearProjectDesign(): Promise<{ ok: boolean }> {
+  return apiFetch("/project-management/design", { method: "DELETE" });
+}
+
+export async function downloadProjectPpt(): Promise<void> {
+  const res = await fetch(`${BACKEND_DIRECT}/api/project-management/export-ppt`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "PPT 다운로드 실패" }));
+    throw new Error(err.detail ?? "PPT 다운로드 실패");
+  }
+  const blob = await res.blob();
+  const disposition = res.headers.get("Content-Disposition") ?? "";
+  const match = disposition.match(/filename="?([^"]+)"?/);
+  const filename = match?.[1] ?? "과제정의서.pptx";
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = decodeURIComponent(filename);
   a.click();
   URL.revokeObjectURL(url);
 }

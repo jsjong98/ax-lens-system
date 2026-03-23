@@ -75,9 +75,14 @@ app = FastAPI(
     version="2.0.0",
 )
 
+# CORS: ALLOWED_ORIGINS 환경변수로 추가 origin 허용 (쉼표 구분)
+_default_origins = ["http://localhost:3000", "http://127.0.0.1:3000"]
+_extra_origins = [
+    o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=_default_origins + _extra_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -1207,5 +1212,274 @@ async def export_new_workflow_as_hr_json():
     return StreamingResponse(
         io.BytesIO(json.dumps(hr_json, ensure_ascii=False, indent=2).encode("utf-8")),
         media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Project Management 엔드포인트 (과제 정의서 / 과제 설계서)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# 과제 정의서 캐시
+_project_definition_cache: dict = {}
+
+
+@app.post("/api/project-management/definition/generate", tags=["ProjectManagement"])
+async def generate_project_definition(
+    provider: str = Query("openai", description="분류 결과 제공자 (openai | anthropic)"),
+    process_name: str = Query("", description="프로세스 이름 (빈 값이면 자동 추론)"),
+    author: str = Query("", description="작성자 (빈 값이면 'PwC')"),
+    l3: Optional[str] = Query(None, description="특정 L3로 필터"),
+    l4: Optional[str] = Query(None, description="특정 L4로 필터"),
+):
+    """
+    분류 결과 + To-Be Workflow 결과를 기반으로 과제 정의서를 자동 생성합니다.
+    """
+    from project_definition_generator import (
+        generate_project_definition_with_llm,
+        generate_project_definition_fallback,
+        project_definition_to_dict,
+    )
+
+    if not _tasks_cache:
+        raise HTTPException(400, "로드된 Task가 없습니다. 먼저 엑셀 파일을 업로드하세요.")
+
+    # 필터 적용
+    tasks = _tasks_cache
+    if l3:
+        tasks = [t for t in tasks if t.l3 == l3 or t.l3_id == l3]
+    if l4:
+        tasks = [t for t in tasks if t.l4 == l4 or t.l4_id == l4]
+
+    if not tasks:
+        raise HTTPException(400, "필터 조건에 맞는 Task가 없습니다.")
+
+    # 분류 결과 로드
+    results_store = load_results(provider)
+    if not results_store:
+        raise HTTPException(400, f"'{provider}' 분류 결과가 없습니다. 먼저 분류를 실행하세요.")
+
+    # Task → dict 변환 + 분류 결과 매핑
+    task_dicts = []
+    classification_dict: dict[str, dict] = {}
+    for t in tasks:
+        td = {
+            "id": t.id, "l2": t.l2, "l2_id": t.l2_id,
+            "l3": t.l3, "l3_id": t.l3_id,
+            "l4": t.l4, "l4_id": t.l4_id,
+            "name": t.name, "description": t.description,
+            "performer": t.performer,
+        }
+        # Pain Point 필드 추가
+        for attr in ["pain_time", "pain_accuracy", "pain_repetition",
+                      "pain_data", "pain_system", "pain_communication", "pain_other"]:
+            td[attr] = getattr(t, attr, "")
+        task_dicts.append(td)
+
+        cr = results_store.get(t.id)
+        if cr:
+            classification_dict[t.id] = {
+                "label": cr.label,
+                "reason": cr.reason,
+                "hybrid_note": cr.hybrid_note,
+                "input_types": cr.input_types,
+                "output_types": cr.output_types,
+                "ai_prerequisites": cr.ai_prerequisites,
+            }
+
+    # 프로세스명 자동 추론
+    if not process_name:
+        l2_names = list({t.l2 for t in tasks if t.l2})
+        process_name = l2_names[0] if l2_names else "HR 프로세스"
+
+    # To-Be 데이터 (있으면 활용)
+    tobe_data = None
+    if _new_workflow_cache:
+        tobe_data = _new_workflow_cache
+
+    # 설정에서 API 키 로드
+    settings = load_settings()
+    anthropic_key = os.getenv("ANTHROPIC_API_KEY", "") or settings.anthropic_api_key
+
+    try:
+        result = await generate_project_definition_with_llm(
+            tasks=task_dicts,
+            classification_results=classification_dict,
+            tobe_data=tobe_data,
+            process_name=process_name,
+            api_key=anthropic_key,
+            model=settings.anthropic_model or "claude-sonnet-4-6",
+            author=author,
+        )
+    except Exception as e:
+        print(f"[과제 정의서] LLM 실패, fallback 사용: {e}")
+        result = generate_project_definition_fallback(
+            tasks=task_dicts,
+            classification_results=classification_dict,
+            tobe_data=tobe_data,
+            process_name=process_name,
+            author=author,
+        )
+
+    result_dict = project_definition_to_dict(result)
+    _project_definition_cache.clear()
+    _project_definition_cache.update(result_dict)
+
+    return {"ok": True, **result_dict}
+
+
+@app.get("/api/project-management/definition", tags=["ProjectManagement"])
+async def get_project_definition():
+    """마지막으로 생성된 과제 정의서를 반환합니다."""
+    if not _project_definition_cache:
+        raise HTTPException(404, "생성된 과제 정의서가 없습니다. 먼저 생성을 실행하세요.")
+    return {"ok": True, **_project_definition_cache}
+
+
+@app.delete("/api/project-management/definition", tags=["ProjectManagement"])
+async def clear_project_definition():
+    """과제 정의서 결과를 초기화합니다."""
+    _project_definition_cache.clear()
+    return {"ok": True}
+
+
+# ── 과제 설계서 ───────────────────────────────────────────────────────────────
+
+_project_design_cache: dict = {}
+
+
+@app.post("/api/project-management/design/generate", tags=["ProjectManagement"])
+async def generate_project_design(
+    provider: str = Query("openai", description="분류 결과 제공자 (openai | anthropic)"),
+    process_name: str = Query("", description="프로세스 이름 (빈 값이면 자동 추론)"),
+    l3: Optional[str] = Query(None, description="특정 L3로 필터"),
+    l4: Optional[str] = Query(None, description="특정 L4로 필터"),
+):
+    """
+    분류 결과 + To-Be Workflow 결과를 기반으로 과제 설계서를 자동 생성합니다.
+    """
+    from project_design_generator import (
+        generate_project_design_with_llm,
+        generate_project_design_fallback,
+        project_design_to_dict,
+    )
+
+    if not _tasks_cache:
+        raise HTTPException(400, "로드된 Task가 없습니다. 먼저 엑셀 파일을 업로드하세요.")
+
+    # 필터 적용
+    tasks = _tasks_cache
+    if l3:
+        tasks = [t for t in tasks if t.l3 == l3 or t.l3_id == l3]
+    if l4:
+        tasks = [t for t in tasks if t.l4 == l4 or t.l4_id == l4]
+
+    if not tasks:
+        raise HTTPException(400, "필터 조건에 맞는 Task가 없습니다.")
+
+    # 분류 결과 로드
+    results_store = load_results(provider)
+    if not results_store:
+        raise HTTPException(400, f"'{provider}' 분류 결과가 없습니다. 먼저 분류를 실행하세요.")
+
+    # Task → dict 변환 + 분류 결과 매핑
+    task_dicts = []
+    classification_dict: dict[str, dict] = {}
+    for t in tasks:
+        td = {
+            "id": t.id, "l2": t.l2, "l3": t.l3, "l4": t.l4,
+            "l4_id": t.l4_id, "name": t.name,
+            "description": t.description, "performer": t.performer,
+        }
+        task_dicts.append(td)
+
+        cr = results_store.get(t.id)
+        if cr:
+            classification_dict[t.id] = {
+                "label": cr.label,
+                "reason": cr.reason,
+                "hybrid_note": cr.hybrid_note,
+                "input_types": cr.input_types,
+                "output_types": cr.output_types,
+            }
+
+    # 프로세스명 자동 추론
+    if not process_name:
+        l2_names = list({t.l2 for t in tasks if t.l2})
+        process_name = l2_names[0] if l2_names else "HR 프로세스"
+
+    # To-Be 데이터 (있으면 활용)
+    tobe_data = None
+    if _new_workflow_cache:
+        tobe_data = _new_workflow_cache
+
+    # 과제 정의서의 제목 가져오기
+    project_title = _project_definition_cache.get("project_title", f"{process_name} AI 자동화")
+
+    # 설정에서 API 키 로드
+    settings = load_settings()
+    anthropic_key = os.getenv("ANTHROPIC_API_KEY", "") or settings.anthropic_api_key
+
+    try:
+        result = await generate_project_design_with_llm(
+            tasks=task_dicts,
+            classification_results=classification_dict,
+            tobe_data=tobe_data,
+            process_name=process_name,
+            project_title=project_title,
+            api_key=anthropic_key,
+            model=settings.anthropic_model or "claude-sonnet-4-6",
+        )
+    except Exception as e:
+        print(f"[과제 설계서] LLM 실패, fallback 사용: {e}")
+        result = generate_project_design_fallback(
+            tasks=task_dicts,
+            classification_results=classification_dict,
+            tobe_data=tobe_data,
+            process_name=process_name,
+            project_title=project_title,
+        )
+
+    result_dict = project_design_to_dict(result)
+    _project_design_cache.clear()
+    _project_design_cache.update(result_dict)
+
+    return {"ok": True, **result_dict}
+
+
+@app.get("/api/project-management/design", tags=["ProjectManagement"])
+async def get_project_design():
+    """마지막으로 생성된 과제 설계서를 반환합니다."""
+    if not _project_design_cache:
+        raise HTTPException(404, "생성된 과제 설계서가 없습니다. 먼저 생성을 실행하세요.")
+    return {"ok": True, **_project_design_cache}
+
+
+@app.delete("/api/project-management/design", tags=["ProjectManagement"])
+async def clear_project_design():
+    """과제 설계서 결과를 초기화합니다."""
+    _project_design_cache.clear()
+    return {"ok": True}
+
+
+@app.get("/api/project-management/export-ppt", tags=["ProjectManagement"])
+async def export_project_ppt():
+    """과제 정의서 + 설계서를 PPT 템플릿에 채워서 다운로드합니다."""
+    from ppt_exporter import export_ppt
+
+    definition = _project_definition_cache if _project_definition_cache else None
+    design = _project_design_cache if _project_design_cache else None
+
+    if not definition and not design:
+        raise HTTPException(404, "과제 정의서 또는 설계서가 없습니다. 먼저 생성을 실행하세요.")
+
+    ppt_bytes = export_ppt(definition=definition, design=design)
+
+    title = definition.get("project_title", "과제정의서") if definition else "과제정의서"
+    filename = f"{title}.pptx"
+
+    return StreamingResponse(
+        ppt_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

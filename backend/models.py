@@ -110,7 +110,7 @@ class ClassifierSettings(BaseModel):
     model: str = Field("gpt-5.4", description="사용할 OpenAI 모델명")
     anthropic_api_key: str = Field("", description="Anthropic API 키 (비어있으면 환경변수 사용)")
     anthropic_model: str = Field("claude-sonnet-4-6", description="사용할 Anthropic 모델명")
-    batch_size: int = Field(10, ge=1, le=50, description="배치당 Task 수")
+    batch_size: int = Field(1, ge=1, le=50, description="배치당 Task 수")
     temperature: float = Field(0.0, ge=0.0, le=2.0)
 
 

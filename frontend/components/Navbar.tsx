@@ -2,15 +2,16 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ClipboardList, Play, BarChart3, Settings, GitBranch, Sparkles } from "lucide-react";
+import { ClipboardList, Play, BarChart3, Settings, GitBranch, Sparkles, FolderKanban } from "lucide-react";
 
 const navItems = [
-  { href: "/tasks",        label: "Task 목록",     icon: ClipboardList },
-  { href: "/classify",     label: "분류 실행",     icon: Play          },
-  { href: "/results",      label: "결과 확인",     icon: BarChart3     },
-  { href: "/workflow",     label: "Workflow",      icon: GitBranch     },
-  { href: "/new-workflow", label: "New Workflow",  icon: Sparkles      },
-  { href: "/settings",     label: "설정",          icon: Settings      },
+  { href: "/tasks",              label: "Task 목록",     icon: ClipboardList },
+  { href: "/classify",           label: "분류 실행",     icon: Play          },
+  { href: "/results",            label: "결과 확인",     icon: BarChart3     },
+  { href: "/workflow",           label: "Workflow",      icon: GitBranch     },
+  { href: "/new-workflow",       label: "New Workflow",  icon: Sparkles      },
+  { href: "/project-management", label: "과제 관리",     icon: FolderKanban  },
+  { href: "/settings",           label: "설정",          icon: Settings      },
 ];
 
 export default function Navbar() {

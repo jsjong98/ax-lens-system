@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.env
+uploads/
+results/
+results.json
+results_openai.json
+results_anthropic.json
+usage.json
+workflow.json
+settings.json
+.venv/
+venv/

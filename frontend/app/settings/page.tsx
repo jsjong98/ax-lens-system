@@ -99,7 +99,7 @@ export default function SettingsPage() {
     model: "gpt-5.4",
     anthropic_api_key: "",
     anthropic_model: "claude-sonnet-4-6",
-    batch_size: 5,
+    batch_size: 1,
     temperature: 0.0,
   });
   const [saving, setSaving]       = useState(false);
