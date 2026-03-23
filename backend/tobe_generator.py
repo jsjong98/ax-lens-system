@@ -24,6 +24,16 @@ from workflow_parser import WorkflowSheet, ExecutionStep, WorkflowNode
 # ── 데이터 모델 ───────────────────────────────────────────────────────────────
 
 @dataclass
+class InputSource:
+    """업무 수행에 필요한 입력 데이터/자료원."""
+    id: str
+    name: str               # 입력 자료명 (예: "ERP 시스템 데이터", "교육 니즈 설문")
+    source_type: str = ""   # 시스템, 문서, 외부데이터, 구두/메일 등
+    description: str = ""
+    related_task_ids: list[str] = field(default_factory=list)
+
+
+@dataclass
 class AgentTask:
     """Agent가 처리하는 개별 태스크."""
     task_id: str
@@ -34,6 +44,8 @@ class AgentTask:
     human_part: str = ""    # AI+Human일 때 사람이 하는 부분
     hybrid_note: str = ""
     technique: str = ""     # 개별 태스크의 AI 기법
+    ai_tech_category: str = ""   # AI 기술 대분류 (생성형 모델, 판별·예측 모델 등)
+    ai_tech_type: str = ""       # AI 기술 세부유형 (텍스트 생성, 군집·분류 등)
     node_id: str = ""       # 원본 워크플로우 노드 ID
 
 
@@ -44,8 +56,11 @@ class JuniorAgent:
     name: str
     tasks: list[AgentTask] = field(default_factory=list)
     technique: str = ""     # LLM, RAG, Clustering, 규칙 기반 등
+    ai_tech_category: str = ""   # AI 기술 대분류
+    ai_tech_type: str = ""       # AI 기술 세부유형
     input_types: str = ""
     output_types: str = ""
+    input_sources: list[InputSource] = field(default_factory=list)
     description: str = ""
     senior_instruction: str = ""  # Senior AI가 이 Agent에게 내리는 지시
 
@@ -72,6 +87,7 @@ class SeniorAgent:
     name: str
     junior_agents: list[JuniorAgent] = field(default_factory=list)
     human_steps: list[HumanStep] = field(default_factory=list)
+    input_sources: list[InputSource] = field(default_factory=list)
     orchestration_flow: list[dict] = field(default_factory=list)
     description: str = ""
 
@@ -103,16 +119,22 @@ Step A. 업무 흐름 파악
   — L5 태스크들을 순서대로 읽고, 어떤 업무가 어떤 순서로 흘러가는지 파악합니다.
   — 같은 L4 안에서 어떤 태스크들이 하나의 "업무 묶음"으로 보이는지 판단합니다.
 
-Step B. 역할 분담 설계
+Step B. 입력 데이터(Input) 식별
+  — 각 업무 묶음이 수행되려면 어떤 입력 데이터/자료가 필요한지 식별합니다.
+  — 입력 유형: 시스템 데이터, 문서/서류, 외부 데이터, 구두/메일 요청 등
+  — 동일 입력이 여러 Agent에서 사용될 수 있습니다 (중복 허용).
+
+Step C. 역할 분담 설계
   — 실제 회사에서 사원·주임급 직원이 여러 개의 세부 업무를 순차적으로 처리하듯이,
     Junior AI Agent 하나가 여러 L5 태스크를 순서대로 처리하는 것이 자연스러운지 판단합니다.
   — 사람이 중간에 개입해야 하는 업무(검토·승인·판단)가 있으면 그 지점에서 끊습니다.
 
-Step C. AI 기법 매칭
-  — 각 태스크의 특성(데이터 분석? 문서 작성? 외부 자료 수집?)을 보고
-    가장 적합한 AI 기법을 선택합니다.
+Step D. AI 기술 유형 매칭
+  — 각 태스크의 특성을 보고 아래 【AI 기술 유형 분류 체계】에서
+    가장 적합한 "대분류 > 세부유형"을 선택합니다.
+  — 하나의 태스크에 여러 기술이 조합될 수 있습니다.
 
-Step D. 오케스트레이션 전략
+Step E. 오케스트레이션 전략
   — Senior AI가 각 Junior Agent를 어떤 순서로 기동하고,
     Agent 간 산출물을 어떻게 전달할지 전략을 수립합니다.
   — 독립적인 Agent끼리는 병렬 수행이 가능한지 검토합니다.
@@ -121,62 +143,106 @@ Step D. 오케스트레이션 전략
 (사고 과정 자체는 출력하지 마세요)
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-【역할 정의】 — 실제 조직 구조에 비유
+【4대 범위 정의】 — To-Be 워크플로우의 구성 요소
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-■ Junior AI Agent = 사원·주임급 실무자
-  - 사람이 여러 세부 업무를 순차적으로 처리하듯이,
-    같은 L4 안에서 연속된 AI 수행 가능 L5 태스크 2개 이상을 묶어 순차 파이프라인으로 처리
-  - 예: 사원이 "자료 수집 → 분석 → 보고서 초안 작성"을 연달아 하는 것과 같음
-  - Human 태스크가 중간에 끼면 그룹을 끊고 새 Agent 생성
-  - 각 Agent마다 구체적인 AI 기법을 지정 (아래 참조)
-  - L5 태스크가 1개뿐이면 단독 Agent로 생성
+■ Input (입력 데이터/자료)
+  - 업무 수행에 필요한 입력 데이터, 문서, 시스템 정보 등
+  - 각 Junior Agent 또는 Human이 업무를 시작하기 위해 받아야 하는 자료
+  - 예: ERP 데이터, 설문 결과, 규정 문서, 외부 벤치마크 자료, 이전 단계 산출물
 
 ■ Senior AI Agent (Orchestrator) = 대리·과장급 관리자
   - As-Is에 없던 새로운 엔티티로 신규 생성
   - 팀장이 팀원들에게 업무를 배분하고 진행 상황을 관리하듯이,
     모든 Junior Agent의 실행 순서를 관리
   - Junior Agent 간 산출물 전달 및 정합성 검증
-  - Human 수행 단계로의 핸드오프 제어 ("이 부분은 사람이 확인해야 합니다")
+  - Human 수행 단계로의 핸드오프 제어
   - 각 Junior Agent에게 기동 지시(어떤 범위와 기준으로 수행할지) 전달
+
+■ Junior AI Agent = 사원·주임급 실무자
+  - 같은 L4 안에서 연속된 AI 수행 가능 L5 태스크 2개 이상을 묶어 순차 파이프라인으로 처리
+  - 예: 사원이 "자료 수집 → 분석 → 보고서 초안 작성"을 연달아 하는 것과 같음
+  - Human 태스크가 중간에 끼면 그룹을 끊고 새 Agent 생성
+  - 각 Agent마다 구체적인 AI 기술 유형을 지정 (아래 참조)
+  - L5 태스크가 1개뿐이면 단독 Agent로 생성
 
 ■ Human (HR 담당자) = 사람이 직접 해야 하는 역할
   - "인간 수행 필요" 태스크 수행
   - "AI + Human" 태스크의 Human 파트(검토·승인·판단) 수행
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-【AI 기법 목록】 — 각 태스크에 가장 적합한 기법을 선택
+【AI 기술 유형 분류 체계】 — 대분류 > 세부유형 형식으로 지정
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  · LLM — 텍스트 생성, 요약, 초안 작성, 번역, 질의응답
-  · RAG — 사내 문서/규정/이력 검색 후 답변 생성
-  · Tabular 분석 — 정형 데이터 집계, 통계, 이상치 탐지
-  · Clustering — 유사 그룹 분류, 패턴 발견
-  · 임베딩 유사도 — 텍스트/문서 간 유사도 비교, 매칭
-  · 규칙 기반 — 확정된 기준에 따른 자동 분류/매핑
-  · Web Crawling — 외부 정보 수집 (벤치마크, 법령 등)
-  · LLM 기반 추천 — 데이터 기반 최적 옵션 추천
+1. 생성형 모델 — 학습된 패턴을 바탕으로 새로운 결과물을 생성·변환하는 모델
+   · 텍스트 생성 — 문장, 문서, 메시지, 코드 등을 자동 생성
+     예) 이메일 초안 작성, 보고서 문안 생성, 공지문 초안 작성
+   · 요약·재작성·질의응답 — 입력 내용을 축약·변형하거나 질문에 응답
+     예) 회의록 요약, 문서 재작성, 규정 기반 질의응답
+   · 멀티모달 생성·이해 — 텍스트+이미지+표 등 다양한 형태를 함께 해석·생성
+     예) 이미지 설명 생성, 표·문서 동시 해석 답변, 첨부화면·문의 기반 대응안 작성
+   · 정보 추출 — 비정형 텍스트에서 필요 항목을 구조화된 정보로 정리
+     예) 계약서 핵심 조항 추출, 이력서 경력 항목 정리, VOC 원인/조치 추출
+
+2. 판별·예측 모델 — 데이터 특성을 기반으로 구분·예측·우선순위 판단
+   · 예측 — 과거 데이터 패턴으로 미래 수치/가능성 예측
+     예) 수요 예측, 이탈 가능성 예측, 장애 발생 가능성 예측
+   · 군집·분류 — 속성/유사성에 따라 자동 구분·그룹화
+     예) 문의 유형 분류, 고객 세그먼트 군집화, 문서 카테고리 분류
+   · 추천·랭킹 — 적합도·유사성·우선순위를 계산해 정렬·추천
+     예) 콘텐츠 추천, 우선 검토 대상 문서 랭킹, 후보자 우선순위 추천
+
+3. 인식 모델 — 비정형 입력을 읽고 식별하여 구조화된 데이터로 변환
+   · OCR — 문서/이미지 안의 문자를 텍스트로 변환
+     예) 스캔 문서 텍스트 추출, 영수증 항목 추출, 신청서 필드값 추출
+   · 음성 인식 — 음성을 텍스트로 변환
+     예) 회의 음성 전사, 상담 녹취 텍스트 변환, 음성 명령 텍스트화
+
+4. 의사결정·최적화 모델 — 목표와 제약조건을 반영해 최적 결과 도출
+   · 최적화 — 다양한 제약조건을 반영한 최적의 결과 도출
+     예) 근무 일정 편성, 배송 경로 최적화, 예산/인력 배분 최적화
+
+5. 자동화 — 모델 결과를 업무 흐름과 연결해 시스템 상의 작업을 자동 수행
+   · RPA — 정해진 규칙에 따라 시스템 Action을 자동 수행
+     예) ERP 입력 자동화, 시스템 간 데이터 이관, 승인 요청 등록·결과 발송
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 【출력 형식】 JSON만 출력
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 {
+  "input_sources": [
+    {
+      "id": "input-1",
+      "name": "교육 니즈 설문 데이터",
+      "source_type": "시스템",
+      "description": "전사 교육 니즈 서베이 결과 데이터",
+      "related_agent_ids": ["junior-ai-1"]
+    },
+    {
+      "id": "input-2",
+      "name": "외부 HRD 트렌드 자료",
+      "source_type": "외부데이터",
+      "description": "외부 HRD 매체 및 벤치마크 자료",
+      "related_agent_ids": ["junior-ai-1"]
+    }
+  ],
   "junior_agents": [
     {
       "agent_name": "니즈 분석",
       "l4_id": "1.6.1",
       "task_ids": ["1.6.1.1", "1.6.1.2", "1.6.1.3", "1.6.1.4"],
-      "techniques_per_task": {
-        "1.6.1.1": ["LLM"],
-        "1.6.1.2": ["LLM"],
-        "1.6.1.3": ["Web Crawling", "RAG"],
-        "1.6.1.4": ["LLM"]
+      "ai_tech_per_task": {
+        "1.6.1.1": {"category": "생성형 모델", "type": "요약·재작성·질의응답", "technique": "LLM"},
+        "1.6.1.2": {"category": "판별·예측 모델", "type": "군집·분류", "technique": "Clustering"},
+        "1.6.1.3": {"category": "생성형 모델", "type": "정보 추출", "technique": "RAG"},
+        "1.6.1.4": {"category": "생성형 모델", "type": "텍스트 생성", "technique": "LLM"}
       },
-      "agent_technique_summary": "LLM + RAG + Web Crawling",
-      "description": "교육 니즈를 Top-down/Bottom-up 양방향으로 분석하고 외부 자료를 수집하여 시사점을 도출하는 파이프라인",
+      "agent_technique_summary": "LLM + RAG + Clustering",
+      "description": "교육 니즈를 분석하고 외부 자료를 수집하여 시사점을 도출하는 파이프라인",
       "senior_instruction": "키워드·소스·범위 설정 후 기동. 완료 시 니즈 분석 보고서 수령",
-      "input_description": "외부 HRD 매체, 교육 니즈 자료",
+      "input_source_ids": ["input-1", "input-2"],
+      "input_description": "교육 니즈 설문, 외부 HRD 매체",
       "output_description": "니즈 분석 보고서, Implication 도출"
     }
   ],
@@ -185,12 +251,13 @@ Step D. 오케스트레이션 전략
       "task_id": "1.6.3.6",
       "label": "경영진 보고",
       "reason": "최종 의사결정 및 보고는 인간 고유 영역",
-      "is_hybrid_human_part": false
+      "is_hybrid_human_part": false,
+      "input_source_ids": ["input-3"]
     }
   ],
   "senior_agent": {
     "name": "교육체계 수립 Senior AI Orchestrator",
-    "description": "3개 Junior Agent의 실행을 관리하고, Agent 간 산출물을 전달하며, Human 단계 핸드오프를 제어하는 오케스트레이터",
+    "description": "Junior Agent의 실행을 관리하고, Agent 간 산출물을 전달하며, Human 단계 핸드오프를 제어하는 오케스트레이터",
     "orchestration_strategy": "Agent 1, 2를 병렬 기동 → 산출물 수령 → Agent 3에 전달 → Human 검토·승인 → 보고"
   },
   "workflow_optimization": {
@@ -201,10 +268,11 @@ Step D. 오케스트레이션 전략
 }
 
 ■ 유의사항:
+  - input_sources: 전체 워크플로우에서 사용되는 입력 데이터 목록. related_agent_ids로 어떤 Agent가 사용하는지 연결
+  - ai_tech_per_task: 각 태스크별로 category(대분류), type(세부유형), technique(구현 기법)를 지정
   - task_ids에는 AI 수행 가능 태스크와 AI+Human의 AI 파트만 포함
   - 인간 수행 필요 태스크와 AI+Human의 Human 파트는 human_steps에 포함
   - 같은 L4 안에서만 묶을 것 (L4 경계를 넘지 않음)
-  - techniques_per_task에 각 태스크별 적합한 AI 기법을 1~2개 지정
   - senior_instruction은 Senior AI가 해당 Agent에게 내리는 구체적 지시 내용
   - 기술 용어를 쉽게 풀어서 description을 작성할 것
 """
@@ -334,10 +402,23 @@ def _build_tobe_from_llm_result(
     # 분류 결과 빠른 조회용 맵
     node_by_tid = {n["task_id"]: n for n in classified_nodes}
 
+    # ── Input Sources ──
+    input_sources: list[InputSource] = []
+    for inp_data in llm_result.get("input_sources", []):
+        input_sources.append(InputSource(
+            id=inp_data.get("id", f"input-{len(input_sources)+1}"),
+            name=inp_data.get("name", ""),
+            source_type=inp_data.get("source_type", ""),
+            description=inp_data.get("description", ""),
+            related_task_ids=inp_data.get("related_agent_ids", []),
+        ))
+
     # ── Junior Agents ──
     junior_agents: list[JuniorAgent] = []
     for idx, ja_data in enumerate(llm_result.get("junior_agents", []), 1):
         task_ids = ja_data.get("task_ids", [])
+        ai_tech_map = ja_data.get("ai_tech_per_task", {})
+        # 하위호환: 이전 형식 techniques_per_task도 지원
         techniques_map = ja_data.get("techniques_per_task", {})
 
         agent_tasks = []
@@ -345,27 +426,52 @@ def _build_tobe_from_llm_result(
             node = node_by_tid.get(tid, {})
             if not node:
                 continue
-            tech_list = techniques_map.get(tid, ["LLM"])
+            tech_info = ai_tech_map.get(tid, {})
+            if isinstance(tech_info, dict):
+                category = tech_info.get("category", "")
+                ai_type = tech_info.get("type", "")
+                technique = tech_info.get("technique", "LLM")
+            else:
+                category = ""
+                ai_type = ""
+                tech_list = techniques_map.get(tid, ["LLM"])
+                technique = " + ".join(tech_list) if isinstance(tech_list, list) else str(tech_list)
+
             agent_tasks.append(AgentTask(
                 task_id=tid,
                 label=node.get("label", tid),
                 classification=node.get("classification", "AI 수행 가능"),
                 reason=node.get("reason", ""),
                 ai_part=node.get("hybrid_note", ""),
-                technique=" + ".join(tech_list) if isinstance(tech_list, list) else str(tech_list),
+                technique=technique,
+                ai_tech_category=category,
+                ai_tech_type=ai_type,
                 node_id=node.get("node_id", ""),
             ))
 
         if not agent_tasks:
             continue
 
+        # Agent 레벨의 대표 AI 기술 유형 결정
+        agent_categories = [t.ai_tech_category for t in agent_tasks if t.ai_tech_category]
+        agent_types = [t.ai_tech_type for t in agent_tasks if t.ai_tech_type]
+
+        # Agent에 연결된 Input Sources
+        agent_id = f"junior-ai-{idx}"
+        agent_input_source_ids = ja_data.get("input_source_ids", [])
+        agent_inputs = [s for s in input_sources if agent_id in s.related_task_ids
+                        or s.id in agent_input_source_ids]
+
         junior_agents.append(JuniorAgent(
-            id=f"junior-ai-{idx}",
+            id=agent_id,
             name=ja_data.get("agent_name", f"Agent {idx}"),
             tasks=agent_tasks,
             technique=ja_data.get("agent_technique_summary", "LLM"),
+            ai_tech_category=agent_categories[0] if agent_categories else "",
+            ai_tech_type=" + ".join(dict.fromkeys(agent_types)) if agent_types else "",
             input_types=ja_data.get("input_description", ""),
             output_types=ja_data.get("output_description", ""),
+            input_sources=agent_inputs,
             description=ja_data.get("description", ""),
             senior_instruction=ja_data.get("senior_instruction", ""),
         ))
@@ -409,6 +515,7 @@ def _build_tobe_from_llm_result(
         name=sa_data.get("name", f"{process_name} Senior AI Orchestrator"),
         junior_agents=junior_agents,
         human_steps=human_steps,
+        input_sources=input_sources,
         description=sa_data.get("description", ""),
     )
 
@@ -477,12 +584,18 @@ def generate_tobe(
     # 4. Human 스텝 추출
     human_steps = _extract_human_steps(split_tasks)
 
-    # 5. Senior Agent 정의
+    # 5. 전체 Input Sources 수집
+    all_input_sources: list[InputSource] = []
+    for agent in junior_agents:
+        all_input_sources.extend(agent.input_sources)
+
+    # 6. Senior Agent 정의
     senior = SeniorAgent(
         id="senior-ai-1",
         name=f"{process_name or as_is_sheet.name} Senior AI Orchestrator",
         junior_agents=junior_agents,
         human_steps=human_steps,
+        input_sources=all_input_sources,
         description=(
             f"신규 생성된 오케스트레이터 Agent입니다. "
             f"{len(junior_agents)}개 Junior AI Agent의 실행 순서를 관리하고, "
@@ -672,36 +785,50 @@ def _group_junior_agents(
     agent_idx = 1
 
     for group_tasks in all_groups:
-        agent_tasks = [
-            AgentTask(
+        agent_tasks = []
+        for t in group_tasks:
+            cat, atype, tech = _infer_ai_tech(t)
+            agent_tasks.append(AgentTask(
                 task_id=t["task_id"],
                 label=t.get("split_label", t["label"]),
                 classification=t["classification"],
                 reason=t.get("reason", ""),
                 ai_part=t.get("split_description", ""),
-                technique=_infer_single_technique(t),
+                technique=tech,
+                ai_tech_category=cat,
+                ai_tech_type=atype,
                 node_id=t["node_id"],
-            )
-            for t in group_tasks
-        ]
+            ))
+
         technique = _infer_technique(group_tasks, classification_results)
         first_label = group_tasks[0]["label"].split("(")[0].strip()
         name = (f"Agent {agent_idx}: {first_label} 외 {len(group_tasks)-1}건"
                 if len(group_tasks) > 1
                 else f"Agent {agent_idx}: {first_label}")
 
+        agent_categories = [t.ai_tech_category for t in agent_tasks if t.ai_tech_category]
+        agent_types = [t.ai_tech_type for t in agent_tasks if t.ai_tech_type]
+
+        # 규칙 기반 Input Sources 추론
+        input_sources = _infer_input_sources(group_tasks, f"junior-ai-{agent_idx}")
+
         agents.append(JuniorAgent(
             id=f"junior-ai-{agent_idx}",
             name=name,
             tasks=agent_tasks,
             technique=technique,
+            ai_tech_category=agent_categories[0] if agent_categories else "",
+            ai_tech_type=" + ".join(dict.fromkeys(agent_types)) if agent_types else "",
             input_types=group_tasks[0].get("input_types", ""),
             output_types=group_tasks[-1].get("output_types", ""),
+            input_sources=input_sources,
             description=f"{len(agent_tasks)}개 L5 태스크의 순차 처리 파이프라인",
         ))
         agent_idx += 1
 
     for task in standalone:
+        cat, atype, tech = _infer_ai_tech(task)
+        input_sources = _infer_input_sources([task], f"junior-ai-{agent_idx}")
         agents.append(JuniorAgent(
             id=f"junior-ai-{agent_idx}",
             name=f"Agent {agent_idx}: {task['label'].split('(')[0].strip()}",
@@ -711,12 +838,17 @@ def _group_junior_agents(
                 classification=task["classification"],
                 reason=task.get("reason", ""),
                 ai_part=task.get("split_description", ""),
-                technique=_infer_single_technique(task),
+                technique=tech,
+                ai_tech_category=cat,
+                ai_tech_type=atype,
                 node_id=task["node_id"],
             )],
             technique=_infer_technique([task], classification_results),
+            ai_tech_category=cat,
+            ai_tech_type=atype,
             input_types=task.get("input_types", ""),
             output_types=task.get("output_types", ""),
+            input_sources=input_sources,
             description="단독 L4 태스크 처리",
         ))
         agent_idx += 1
@@ -724,23 +856,92 @@ def _group_junior_agents(
     return agents
 
 
-def _infer_single_technique(task: dict) -> str:
-    """개별 태스크의 AI 기법을 추론합니다."""
+def _infer_ai_tech(task: dict) -> tuple[str, str, str]:
+    """개별 태스크의 AI 기술 대분류, 세부유형, 기법을 추론합니다.
+    Returns: (category, type, technique)
+    """
     text = (task.get("label", "") + " " + task.get("reason", "")).lower()
-    techniques = []
+
+    # 자동화/RPA 패턴
+    if any(kw in text for kw in ["입력", "등록", "이관", "발송", "자동화", "rpa"]):
+        return "자동화", "RPA", "RPA"
+    # 인식 모델
+    if any(kw in text for kw in ["ocr", "스캔", "영수증", "인식"]):
+        return "인식 모델", "OCR", "OCR"
+    if any(kw in text for kw in ["음성", "녹취", "전사", "stt"]):
+        return "인식 모델", "음성 인식", "음성 인식"
+    # 의사결정·최적화
+    if any(kw in text for kw in ["최적화", "편성", "배분", "스케줄"]):
+        return "의사결정·최적화 모델", "최적화", "최적화"
+    # 판별·예측 모델
+    if any(kw in text for kw in ["예측", "이탈", "전망"]):
+        return "판별·예측 모델", "예측", "예측 모델"
+    if any(kw in text for kw in ["군집", "그룹", "클러스터", "세그먼트"]):
+        return "판별·예측 모델", "군집·분류", "Clustering"
+    if any(kw in text for kw in ["분류", "매핑", "카테고리"]):
+        return "판별·예측 모델", "군집·분류", "규칙 기반"
+    if any(kw in text for kw in ["추천", "랭킹", "우선순위"]):
+        return "판별·예측 모델", "추천·랭킹", "추천 모델"
+    # 생성형 모델
+    if any(kw in text for kw in ["추출", "항목", "조항", "정리"]):
+        return "생성형 모델", "정보 추출", "LLM"
+    if any(kw in text for kw in ["요약", "재작성", "질의", "답변", "qa"]):
+        return "생성형 모델", "요약·재작성·질의응답", "RAG"
+    if any(kw in text for kw in ["이미지", "멀티모달", "표", "화면"]):
+        return "생성형 모델", "멀티모달 생성·이해", "멀티모달 LLM"
+    if any(kw in text for kw in ["작성", "생성", "초안", "보고서", "문서", "기안"]):
+        return "생성형 모델", "텍스트 생성", "LLM"
     if any(kw in text for kw in ["수집", "조사", "검색", "외부", "크롤링"]):
-        techniques.append("RAG")
-    if any(kw in text for kw in ["작성", "생성", "초안", "보고서", "요약"]):
-        techniques.append("LLM")
+        return "생성형 모델", "요약·재작성·질의응답", "RAG"
     if any(kw in text for kw in ["분석", "통계", "수치", "집계"]):
-        techniques.append("Tabular 분석")
-    if any(kw in text for kw in ["분류", "매핑", "규칙"]):
-        techniques.append("규칙 기반")
-    if any(kw in text for kw in ["유사", "매칭", "추천"]):
-        techniques.append("임베딩 유사도")
-    if any(kw in text for kw in ["군집", "그룹", "클러스터"]):
-        techniques.append("Clustering")
-    return " + ".join(techniques) if techniques else "LLM"
+        return "생성형 모델", "정보 추출", "LLM"
+
+    # 기본값
+    return "생성형 모델", "텍스트 생성", "LLM"
+
+
+def _infer_input_sources(tasks: list[dict], agent_id: str) -> list[InputSource]:
+    """태스크 그룹의 입력 데이터를 추론합니다 (규칙 기반 fallback용)."""
+    sources: list[InputSource] = []
+    seen: set[str] = set()
+    idx = 1
+
+    for task in tasks:
+        input_types = task.get("input_types", "")
+        if not input_types:
+            continue
+        for inp in input_types.split(","):
+            inp = inp.strip()
+            if not inp or inp in seen:
+                continue
+            seen.add(inp)
+
+            # 입력 유형 추론
+            if any(kw in inp for kw in ["시스템", "ERP", "SAP", "DB"]):
+                source_type = "시스템"
+            elif any(kw in inp for kw in ["문서", "서류", "규정", "매뉴얼"]):
+                source_type = "문서"
+            elif any(kw in inp for kw in ["외부", "벤치마크", "법령"]):
+                source_type = "외부데이터"
+            else:
+                source_type = "기타"
+
+            sources.append(InputSource(
+                id=f"{agent_id}-input-{idx}",
+                name=inp,
+                source_type=source_type,
+                description="",
+                related_task_ids=[agent_id],
+            ))
+            idx += 1
+
+    return sources
+
+
+def _infer_single_technique(task: dict) -> str:
+    """개별 태스크의 AI 기법을 추론합니다 (하위호환)."""
+    _, _, technique = _infer_ai_tech(task)
+    return technique
 
 
 def _infer_technique(
@@ -850,13 +1051,21 @@ def _build_execution_steps(senior: SeniorAgent) -> list[dict]:
                     "agent_id": junior.id,
                     "agent_name": junior.name,
                     "technique": junior.technique,
+                    "ai_tech_category": junior.ai_tech_category,
+                    "ai_tech_type": junior.ai_tech_type,
                     "description": junior.description,
                     "senior_instruction": junior.senior_instruction,
+                    "input_sources": [
+                        {"id": s.id, "name": s.name, "source_type": s.source_type}
+                        for s in junior.input_sources
+                    ],
                     "tasks": [
                         {
                             "task_id": t.task_id,
                             "label": t.label,
                             "technique": t.technique,
+                            "ai_tech_category": t.ai_tech_category,
+                            "ai_tech_type": t.ai_tech_type,
                         }
                         for t in junior.tasks
                     ],
@@ -891,7 +1100,7 @@ def _generate_react_flow(
     nodes = []
     edges = []
 
-    lanes = ["Senior AI", "Junior AI", "Human"]
+    lanes = ["Input", "Senior AI", "Junior AI", "Human"]
 
     LANE_HEIGHT = 300
     NODE_GAP_X = 280
@@ -899,9 +1108,10 @@ def _generate_react_flow(
     START_Y = 50
 
     y_offsets = {
-        "senior": START_Y,
-        "junior": START_Y + LANE_HEIGHT,
-        "human": START_Y + LANE_HEIGHT * 2,
+        "input": START_Y,
+        "senior": START_Y + LANE_HEIGHT,
+        "junior": START_Y + LANE_HEIGHT * 2,
+        "human": START_Y + LANE_HEIGHT * 3,
     }
 
     current_x = START_X
@@ -933,6 +1143,37 @@ def _generate_react_flow(
             if junior:
                 jnode_id = f"tobe-{junior.id}"
 
+                # Input Source 노드 (Junior Agent 위에 배치)
+                for si, src in enumerate(junior.input_sources):
+                    inp_node_id = f"tobe-input-{src.id}"
+                    nodes.append({
+                        "id": inp_node_id,
+                        "type": "l5",
+                        "position": {
+                            "x": branch_x + si * 140,
+                            "y": y_offsets["input"] + 20,
+                        },
+                        "data": {
+                            "label": src.name,
+                            "level": "Input",
+                            "id": src.id,
+                            "description": src.description,
+                            "agentType": "input",
+                            "sourceType": src.source_type,
+                        },
+                    })
+                    # Input → Junior Agent 엣지
+                    edges.append({
+                        "id": f"e-{inp_node_id}-{jnode_id}",
+                        "source": inp_node_id,
+                        "target": jnode_id,
+                        "type": "smoothstep",
+                        "animated": False,
+                        "style": {"stroke": "#60A5FA", "strokeWidth": 1.5},
+                        "markerEnd": {"type": "arrowclosed", "color": "#60A5FA"},
+                        "label": src.source_type,
+                    })
+
                 # Junior Agent 그룹 노드 (컨테이너)
                 task_height = max(len(junior.tasks) * 60, 80)
                 nodes.append({
@@ -946,6 +1187,8 @@ def _generate_react_flow(
                         "description": junior.description,
                         "agentType": "junior",
                         "technique": junior.technique,
+                        "ai_tech_category": junior.ai_tech_category,
+                        "ai_tech_type": junior.ai_tech_type,
                         "taskCount": junior.task_count,
                         "seniorInstruction": junior.senior_instruction,
                     },
@@ -969,6 +1212,8 @@ def _generate_react_flow(
                             "description": task.ai_part,
                             "classification": task.classification,
                             "technique": task.technique,
+                            "ai_tech_category": task.ai_tech_category,
+                            "ai_tech_type": task.ai_tech_type,
                         },
                     })
                     # 태스크 간 순차 엣지
@@ -1070,20 +1315,39 @@ def _build_summary(
         "hybrid_tasks": hybrid_count,
         "human_tasks": human_count,
         "automation_rate": round((ai_count + hybrid_count * 0.5) / max(total, 1) * 100, 1),
+        "input_source_count": len(senior.input_sources),
+        "input_sources": [
+            {
+                "id": s.id,
+                "name": s.name,
+                "source_type": s.source_type,
+                "description": s.description,
+                "related_task_ids": s.related_task_ids,
+            }
+            for s in senior.input_sources
+        ],
         "junior_agent_count": len(senior.junior_agents),
         "junior_agents": [
             {
                 "id": j.id,
                 "name": j.name,
                 "technique": j.technique,
+                "ai_tech_category": j.ai_tech_category,
+                "ai_tech_type": j.ai_tech_type,
                 "task_count": j.task_count,
                 "description": j.description,
                 "senior_instruction": j.senior_instruction,
+                "input_sources": [
+                    {"id": s.id, "name": s.name, "source_type": s.source_type}
+                    for s in j.input_sources
+                ],
                 "tasks": [
                     {
                         "task_id": t.task_id,
                         "label": t.label,
                         "technique": t.technique,
+                        "ai_tech_category": t.ai_tech_category,
+                        "ai_tech_type": t.ai_tech_type,
                     }
                     for t in j.tasks
                 ],

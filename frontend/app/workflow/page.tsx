@@ -473,19 +473,27 @@ export default function WorkflowPage() {
   );
 }
 
-/* ── To-Be 결과 뷰 — Swim Lane 워크플로우 맵 ────────────── */
+/* ── To-Be 결과 뷰 — 4-Lane Swim Lane 워크플로우 맵 ────── */
 function ToBeView({ result }: { result: ToBeResult }) {
   const { summary } = result;
   const { junior_agents, human_steps, senior_agent } = summary;
 
-  // 기법 태그 색상
-  const techColor = (tech: string) => {
-    if (tech.includes("RAG")) return { bg: "#ECFDF5", text: "#065F46", border: "#A7F3D0" };
-    if (tech.includes("Clustering")) return { bg: "#EEF2FF", text: "#3730A3", border: "#C7D2FE" };
-    if (tech.includes("임베딩")) return { bg: "#F0FDF4", text: "#166534", border: "#BBF7D0" };
-    if (tech.includes("데이터")) return { bg: "#FFF7ED", text: "#9A3412", border: "#FDBA74" };
-    if (tech.includes("규칙")) return { bg: "#FEF3C7", text: "#92400E", border: "#FCD34D" };
-    return { bg: "#FFF5F7", text: "#A62121", border: "#F2A0AF" }; // LLM default
+  // AI 기술 대분류별 색상
+  const categoryColor = (category: string) => {
+    if (category.includes("생성형")) return { bg: "#FFF5F7", text: "#A62121", border: "#F2A0AF" };
+    if (category.includes("판별") || category.includes("예측")) return { bg: "#EEF2FF", text: "#3730A3", border: "#C7D2FE" };
+    if (category.includes("인식")) return { bg: "#ECFDF5", text: "#065F46", border: "#A7F3D0" };
+    if (category.includes("의사결정") || category.includes("최적화")) return { bg: "#FFF7ED", text: "#9A3412", border: "#FDBA74" };
+    if (category.includes("자동화")) return { bg: "#FEF3C7", text: "#92400E", border: "#FCD34D" };
+    return { bg: "#F3F4F6", text: "#374151", border: "#D1D5DB" };
+  };
+
+  // Input source 유형별 색상
+  const sourceColor = (sourceType: string) => {
+    if (sourceType.includes("시스템")) return { bg: "#DBEAFE", text: "#1E40AF", border: "#93C5FD" };
+    if (sourceType.includes("문서")) return { bg: "#FEF3C7", text: "#92400E", border: "#FCD34D" };
+    if (sourceType.includes("외부")) return { bg: "#E0E7FF", text: "#3730A3", border: "#A5B4FC" };
+    return { bg: "#F3F4F6", text: "#374151", border: "#D1D5DB" };
   };
 
   return (
@@ -500,16 +508,21 @@ function ToBeView({ result }: { result: ToBeResult }) {
           <div className="text-xs text-gray-500">자동화율</div>
           <div className="text-xl font-bold" style={{ color: PWC.primary }}>{summary.automation_rate}%</div>
         </div>
+        <StatCard label="Input" value={summary.input_source_count || 0} />
         <StatCard label="Junior Agent" value={summary.junior_agent_count} />
         <StatCard label="Human 스텝" value={summary.human_step_count} />
       </div>
 
-      {/* ═══ Swim Lane 워크플로우 맵 ═══ */}
+      {/* ═══ 4-Lane Swim Lane 워크플로우 맵 ═══ */}
       <div className="overflow-x-auto">
         <div className="border border-gray-200 rounded-xl bg-white" style={{ minWidth: Math.max(junior_agents.length * 260 + 120, 600) }}>
           {/* 범례 */}
           <div className="flex items-center gap-6 px-4 py-2 border-b border-gray-100 bg-gray-50 rounded-t-xl text-[11px]">
-            <span className="font-medium text-gray-500">수행 주체</span>
+            <span className="font-medium text-gray-500">범위</span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded" style={{ backgroundColor: "#DBEAFE", border: "1px solid #93C5FD" }} />
+              Input
+            </span>
             <span className="flex items-center gap-1.5">
               <span className="w-3 h-3 rounded" style={{ backgroundColor: PWC.primary }} />
               Senior AI
@@ -520,7 +533,7 @@ function ToBeView({ result }: { result: ToBeResult }) {
             </span>
             <span className="flex items-center gap-1.5">
               <span className="w-3 h-3 rounded bg-gray-200 border border-gray-300" />
-              HR 담당자
+              Human
             </span>
           </div>
 
@@ -529,6 +542,13 @@ function ToBeView({ result }: { result: ToBeResult }) {
             <div className="w-[80px] flex-shrink-0 border-r border-gray-200 bg-gray-50">
               {/* L4 헤더 행 */}
               <div className="h-[56px] flex items-center justify-center border-b border-gray-200" />
+              {/* Input 행 */}
+              <div className="flex items-center justify-center border-b border-gray-200 py-4">
+                <div className="text-center">
+                  <div className="w-8 h-8 mx-auto rounded-full flex items-center justify-center text-white text-xs font-bold" style={{ backgroundColor: "#3B82F6" }}>I</div>
+                  <div className="text-[10px] font-bold mt-1 text-blue-600">Input</div>
+                </div>
+              </div>
               {/* Senior AI 행 */}
               <div className="flex items-center justify-center border-b border-gray-200 py-4">
                 <div className="text-center">
@@ -549,8 +569,7 @@ function ToBeView({ result }: { result: ToBeResult }) {
               <div className="flex items-center justify-center py-4">
                 <div className="text-center">
                   <div className="text-xl">&#128100;</div>
-                  <div className="text-[10px] font-bold text-gray-600">HR</div>
-                  <div className="text-[10px] text-gray-600">담당자</div>
+                  <div className="text-[10px] font-bold text-gray-600">Human</div>
                 </div>
               </div>
             </div>
@@ -561,8 +580,7 @@ function ToBeView({ result }: { result: ToBeResult }) {
                 // 이 agent에 대응하는 human steps 찾기
                 const agentTaskIds = new Set(agent.tasks.map((t) => t.task_id));
                 const relatedHumans = human_steps.filter((h) => {
-                  // 같은 L4 내 human step인지 확인 (task_id 앞 3자리)
-                  const hPrefix = h.label.split(" ")[0]; // 번호 추출 시도
+                  const hPrefix = h.label.split(" ")[0];
                   return agentTaskIds.has(hPrefix) ||
                     agent.tasks.some((t) => {
                       const tp = t.task_id.split(".").slice(0, 3).join(".");
@@ -570,8 +588,11 @@ function ToBeView({ result }: { result: ToBeResult }) {
                     });
                 });
 
+                // Agent의 Input Sources
+                const agentInputs = agent.input_sources || [];
+
                 return (
-                  <div key={agent.id} className="flex-1 min-w-[220px]">
+                  <div key={agent.id} className="flex-1 min-w-[240px]">
                     {/* L4 헤더 */}
                     <div className="h-[56px] flex items-center justify-center px-3 border-b border-gray-200 bg-gray-50">
                       <div className="text-center">
@@ -585,15 +606,42 @@ function ToBeView({ result }: { result: ToBeResult }) {
                       </div>
                     </div>
 
+                    {/* Input 행 */}
+                    <div className="flex items-center justify-center border-b border-gray-200 py-3 px-3 min-h-[60px]">
+                      {agentInputs.length > 0 ? (
+                        <div className="space-y-1.5 w-full">
+                          {agentInputs.map((src, si) => {
+                            const sc = sourceColor(src.source_type);
+                            return (
+                              <div key={src.id || si} className="rounded-lg border px-2.5 py-1.5 text-center"
+                                style={{ backgroundColor: sc.bg, borderColor: sc.border }}>
+                                <div className="text-[10px] font-medium" style={{ color: sc.text }}>{src.name}</div>
+                                {src.source_type && (
+                                  <div className="text-[9px] mt-0.5 opacity-70" style={{ color: sc.text }}>{src.source_type}</div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <span className="text-gray-300 text-sm">—</span>
+                      )}
+                    </div>
+
                     {/* Senior AI 기동 지시 */}
                     <div className="flex items-center justify-center border-b border-gray-200 py-4 px-3">
-                      <div className="rounded-lg px-3 py-2 text-center text-xs" style={{ backgroundColor: "#FFF5F7", border: `1px solid ${PWC.primaryLight}` }}>
+                      <div className="rounded-lg px-3 py-2 text-center text-xs w-full" style={{ backgroundColor: "#FFF5F7", border: `1px solid ${PWC.primaryLight}` }}>
                         <div className="font-bold" style={{ color: PWC.primary }}>
                           Agent {agentIdx + 1} 기동 지시
                         </div>
-                        <div className="text-[10px] text-gray-500 mt-0.5">
-                          {agent.technique.split(" + ").map((t) => t.trim()).join(" · ")}
-                        </div>
+                        {agent.ai_tech_category && (
+                          <div className="text-[10px] mt-1">
+                            <span className="px-1.5 py-0.5 rounded-full border font-medium"
+                              style={categoryColor(agent.ai_tech_category)}>
+                              {agent.ai_tech_category}
+                            </span>
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -601,35 +649,45 @@ function ToBeView({ result }: { result: ToBeResult }) {
                     <div className="border-b border-gray-200 py-4 px-3">
                       <div className="rounded-lg border-2 p-3" style={{ backgroundColor: "#FFFBEB", borderColor: "#FCD34D" }}>
                         {/* Agent 헤더 */}
-                        <div className="flex items-center gap-2 mb-3 pb-2 border-b border-amber-200">
-                          <span className="text-xs font-bold text-amber-800">Agent {agentIdx + 1}</span>
-                          {agent.task_count > 1 && (
-                            <span className="text-[10px] text-amber-600">순차 파이프라인</span>
-                          )}
+                        <div className="flex items-center justify-between mb-3 pb-2 border-b border-amber-200">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold text-amber-800">Agent {agentIdx + 1}</span>
+                            {agent.task_count > 1 && (
+                              <span className="text-[10px] text-amber-600">순차 파이프라인</span>
+                            )}
+                          </div>
                         </div>
 
                         {/* L5 태스크 목록 */}
                         <div className="space-y-2">
                           {agent.tasks.map((task, ti) => {
-                            const techniques = agent.technique.split(" + ").map((t) => t.trim());
+                            const taskCategory = task.ai_tech_category || agent.ai_tech_category || "";
+                            const taskType = task.ai_tech_type || agent.ai_tech_type || "";
+                            const technique = task.technique || agent.technique || "";
+                            const cc = categoryColor(taskCategory);
+
                             return (
                               <div key={`${task.task_id}-${ti}`}>
                                 <div className="rounded-lg bg-white border border-gray-200 px-3 py-2">
                                   <div className="text-[11px] font-mono text-gray-400 mb-0.5">{task.task_id}</div>
                                   <div className="text-xs font-medium text-gray-800 mb-1.5">{task.label}</div>
                                   <div className="flex flex-wrap gap-1">
-                                    {techniques.map((t, i) => {
-                                      const tc = techColor(t);
-                                      return (
-                                        <span
-                                          key={i}
-                                          className="text-[10px] px-1.5 py-0.5 rounded-full border font-medium"
-                                          style={{ backgroundColor: tc.bg, color: tc.text, borderColor: tc.border }}
-                                        >
-                                          {t}
-                                        </span>
-                                      );
-                                    })}
+                                    {taskCategory && (
+                                      <span className="text-[9px] px-1.5 py-0.5 rounded-full border font-medium"
+                                        style={{ backgroundColor: cc.bg, color: cc.text, borderColor: cc.border }}>
+                                        {taskCategory}
+                                      </span>
+                                    )}
+                                    {taskType && (
+                                      <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-600 border border-gray-200 font-medium">
+                                        {taskType}
+                                      </span>
+                                    )}
+                                    {technique && (
+                                      <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-white text-gray-500 border border-gray-200">
+                                        {technique}
+                                      </span>
+                                    )}
                                   </div>
                                 </div>
                                 {/* 순차 화살표 */}
@@ -666,11 +724,14 @@ function ToBeView({ result }: { result: ToBeResult }) {
                 );
               })}
 
-              {/* 독립 Human 스텝 (Agent에 매칭되지 않은) 컬럼 */}
+              {/* 독립 Human 스텝 컬럼 */}
               {human_steps.length > 0 && (
                 <div className="flex-1 min-w-[220px]">
                   <div className="h-[56px] flex items-center justify-center px-3 border-b border-gray-200 bg-gray-50">
                     <div className="text-xs font-bold text-gray-600">인간 수행 영역</div>
+                  </div>
+                  <div className="flex items-center justify-center border-b border-gray-200 py-3 px-3 min-h-[60px]">
+                    <span className="text-gray-300 text-sm">—</span>
                   </div>
                   <div className="flex items-center justify-center border-b border-gray-200 py-4 px-3">
                     <span className="text-gray-300 text-sm">—</span>
@@ -703,6 +764,29 @@ function ToBeView({ result }: { result: ToBeResult }) {
             <div className="text-sm font-bold" style={{ color: PWC.primary }}>{senior_agent.name}</div>
             <div className="text-xs text-gray-500">{senior_agent.description}</div>
           </div>
+        </div>
+      </div>
+
+      {/* AI 기술 유형 범례 */}
+      <div className="bg-white rounded-xl border border-gray-200 p-4">
+        <div className="text-xs font-bold text-gray-700 mb-3">AI 기술 유형 분류</div>
+        <div className="grid grid-cols-5 gap-2 text-[10px]">
+          {[
+            { label: "생성형 모델", sub: "텍스트 생성 / 요약·QA / 멀티모달 / 정보 추출" },
+            { label: "판별·예측 모델", sub: "예측 / 군집·분류 / 추천·랭킹" },
+            { label: "인식 모델", sub: "OCR / 음성 인식" },
+            { label: "의사결정·최적화", sub: "최적화" },
+            { label: "자동화", sub: "RPA" },
+          ].map((item) => {
+            const cc = categoryColor(item.label);
+            return (
+              <div key={item.label} className="rounded-lg border px-2 py-1.5"
+                style={{ backgroundColor: cc.bg, borderColor: cc.border }}>
+                <div className="font-bold" style={{ color: cc.text }}>{item.label}</div>
+                <div className="mt-0.5 opacity-70" style={{ color: cc.text }}>{item.sub}</div>
+              </div>
+            );
+          })}
         </div>
       </div>
 

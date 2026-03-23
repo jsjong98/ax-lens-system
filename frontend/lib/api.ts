@@ -502,6 +502,14 @@ export async function uploadPptWorkflow(file: File): Promise<{
 }
 
 // To-Be 생성
+export interface ToBeInputSource {
+  id: string;
+  name: string;
+  source_type: string;
+  description?: string;
+  related_task_ids?: string[];
+}
+
 export interface ToBeResult {
   ok: boolean;
   summary: {
@@ -511,13 +519,26 @@ export interface ToBeResult {
     hybrid_tasks: number;
     human_tasks: number;
     automation_rate: number;
+    input_source_count: number;
+    input_sources: ToBeInputSource[];
     junior_agent_count: number;
     junior_agents: Array<{
       id: string;
       name: string;
       technique: string;
+      ai_tech_category: string;
+      ai_tech_type: string;
       task_count: number;
-      tasks: Array<{ task_id: string; label: string }>;
+      description?: string;
+      senior_instruction?: string;
+      input_sources: Array<{ id: string; name: string; source_type: string }>;
+      tasks: Array<{
+        task_id: string;
+        label: string;
+        technique?: string;
+        ai_tech_category?: string;
+        ai_tech_type?: string;
+      }>;
     }>;
     human_step_count: number;
     human_steps: Array<{
@@ -536,8 +557,17 @@ export interface ToBeResult {
       agent_id?: string;
       agent_name?: string;
       technique?: string;
+      ai_tech_category?: string;
+      ai_tech_type?: string;
       label?: string;
-      tasks?: Array<{ task_id: string; label: string }>;
+      input_sources?: Array<{ id: string; name: string; source_type: string }>;
+      tasks?: Array<{
+        task_id: string;
+        label: string;
+        technique?: string;
+        ai_tech_category?: string;
+        ai_tech_type?: string;
+      }>;
     }>;
   }>;
   react_flow: { nodes: unknown[]; edges: unknown[]; lanes: string[] };
