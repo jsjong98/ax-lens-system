@@ -44,8 +44,12 @@ def init_default_users() -> None:
     """기본 계정이 없으면 생성"""
     users = _load_users()
     defaults = [
-        {"email": "jong-hwan.oh@pwc.com", "name": "Oh Jonghwan", "password": "strategy&"},
-        {"email": "jidong.kim@pwc.com", "name": "Kim Jidong", "password": "strategy&"},
+        {"email": "jong-hwan.oh@pwc.com", "name": "오종환", "password": "strategy&"},
+        {"email": "jidong.kim@pwc.com", "name": "김지동", "password": "strategy&"},
+        {"email": "hee-jin.jung@pwc.com", "name": "정희진", "password": "strategy&"},
+        {"email": "hyesoo.cho@pwc.com", "name": "조혜수", "password": "strategy&"},
+        {"email": "solee.yoon@pwc.com", "name": "윤솔이", "password": "strategy&"},
+        {"email": "soyeon.s.back@pwc.com", "name": "백소연", "password": "strategy&"},
     ]
     changed = False
     for d in defaults:

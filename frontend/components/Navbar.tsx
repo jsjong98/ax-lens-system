@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ClipboardList, Play, BarChart3, Settings, GitBranch, Sparkles, FolderKanban, LogOut, KeyRound } from "lucide-react";
@@ -21,6 +21,22 @@ export default function Navbar() {
   const pathname = usePathname();
   const { user, logout } = useAuth();
   const [showPwModal, setShowPwModal] = useState(false);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // 드롭다운 외부 클릭 시 닫기
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setShowDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  // 이름의 첫 글자 (아바타용)
+  const initial = user?.name?.charAt(0) || "?";
 
   return (
     <>
@@ -41,7 +57,7 @@ export default function Navbar() {
               </span>
             </Link>
 
-            {/* 메뉴 */}
+            {/* 메뉴 + 사용자 */}
             <div className="flex items-center gap-1">
               {navItems.map(({ href, label, icon: Icon }) => {
                 const active = pathname.startsWith(href);
@@ -66,26 +82,55 @@ export default function Navbar() {
                 );
               })}
 
-              {/* 사용자 메뉴 */}
+              {/* 사용자 아바타 + 드롭다운 */}
               {user && (
-                <>
-                  <div className="ml-3 h-5 w-px bg-gray-300" />
-                  <span className="ml-2 text-xs text-gray-500">{user.email}</span>
+                <div className="relative ml-3" ref={dropdownRef}>
                   <button
-                    onClick={() => setShowPwModal(true)}
-                    className="ml-1 rounded-md p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-                    title="비밀번호 변경"
+                    onClick={() => setShowDropdown((v) => !v)}
+                    className="flex items-center justify-center w-9 h-9 rounded-full text-sm font-bold text-white transition-transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#A62121]"
+                    style={{ backgroundColor: "#A62121" }}
+                    title={user.name}
                   >
-                    <KeyRound className="h-4 w-4" />
+                    {initial}
                   </button>
-                  <button
-                    onClick={logout}
-                    className="rounded-md p-2 text-gray-400 hover:bg-gray-100 hover:text-red-600"
-                    title="로그아웃"
-                  >
-                    <LogOut className="h-4 w-4" />
-                  </button>
-                </>
+
+                  {showDropdown && (
+                    <div className="absolute right-0 mt-2 w-64 rounded-xl bg-white shadow-xl ring-1 ring-black/5 py-1 z-[60]">
+                      {/* 사용자 정보 */}
+                      <div className="px-4 py-3 border-b border-gray-100">
+                        <div className="flex items-center gap-3">
+                          <div
+                            className="flex items-center justify-center w-10 h-10 rounded-full text-sm font-bold text-white shrink-0"
+                            style={{ backgroundColor: "#A62121" }}
+                          >
+                            {initial}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-gray-900 truncate">{user.name}</p>
+                            <p className="text-xs text-gray-500 truncate">{user.email}</p>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* 메뉴 항목 */}
+                      <button
+                        onClick={() => { setShowDropdown(false); setShowPwModal(true); }}
+                        className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                      >
+                        <KeyRound className="h-4 w-4 text-gray-400" />
+                        비밀번호 변경
+                      </button>
+                      <div className="border-t border-gray-100" />
+                      <button
+                        onClick={() => { setShowDropdown(false); logout(); }}
+                        className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors"
+                      >
+                        <LogOut className="h-4 w-4" />
+                        로그아웃
+                      </button>
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           </div>
