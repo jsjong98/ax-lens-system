@@ -1180,8 +1180,101 @@ async def generate_tobe_workflow(
 # New Workflow 엔드포인트 (엑셀 → AI 워크플로우 설계 초안)
 # ─────────────────────────────────────────────────────────────────────────────
 
-# New Workflow 결과 캐시
+# New Workflow 전용 캐시 (독립 운영)
+_nw_tasks_cache: list[Task] = []
+_nw_excel_path: Path | None = None
 _new_workflow_cache: dict = {}
+
+
+@app.post("/api/new-workflow/upload", tags=["NewWorkflow"])
+async def upload_new_workflow_excel(file: UploadFile = File(...)):
+    """New Workflow 전용 엑셀 업로드 — 독립적으로 운영됩니다."""
+    global _nw_tasks_cache, _nw_excel_path
+    from excel_reader import list_sheets
+
+    if not file.filename or not file.filename.endswith(".xlsx"):
+        raise HTTPException(400, ".xlsx 파일만 업로드 가능합니다.")
+
+    save_path = _UPLOAD_DIR / f"nw_{file.filename}"
+    try:
+        contents = await file.read()
+        save_path.write_bytes(contents)
+    except Exception as e:
+        raise HTTPException(500, f"파일 저장 실패: {e}")
+
+    try:
+        sheets = list_sheets(save_path)
+    except Exception as e:
+        save_path.unlink(missing_ok=True)
+        raise HTTPException(422, f"엑셀 파싱 실패: {e}")
+
+    _nw_excel_path = save_path
+
+    # 추천 시트 자동 로드
+    recommended = next((s for s in sheets if s["recommended"]), None)
+    if recommended:
+        try:
+            _nw_tasks_cache = load_tasks(save_path, sheet_name=recommended["name"])
+        except Exception:
+            pass
+
+    return {
+        "message": "업로드 성공",
+        "filename": file.filename,
+        "task_count": len(_nw_tasks_cache),
+        "sheets": sheets,
+    }
+
+
+@app.post("/api/new-workflow/select-sheet", tags=["NewWorkflow"])
+async def select_new_workflow_sheet(request: Request):
+    """New Workflow 전용 시트 선택."""
+    global _nw_tasks_cache
+
+    body = await request.json()
+    sheet_name = body.get("sheet_name", "")
+
+    if not _nw_excel_path or not _nw_excel_path.exists():
+        raise HTTPException(404, "업로드된 엑셀 파일이 없습니다.")
+
+    try:
+        _nw_tasks_cache = load_tasks(_nw_excel_path, sheet_name=sheet_name)
+    except Exception as e:
+        raise HTTPException(422, f"시트 파싱 실패: {e}")
+
+    return {
+        "message": f"시트 '{sheet_name}' 로드 완료",
+        "sheet_name": sheet_name,
+        "task_count": len(_nw_tasks_cache),
+    }
+
+
+@app.get("/api/new-workflow/tasks", tags=["NewWorkflow"])
+async def get_new_workflow_tasks():
+    """New Workflow에 로드된 Task 목록 반환."""
+    if not _nw_tasks_cache:
+        return {"total": 0, "tasks": []}
+    tasks = [
+        {
+            "id": t.id, "l2": t.l2, "l3": t.l3, "l3_id": t.l3_id,
+            "l4": t.l4, "l4_id": t.l4_id, "name": t.name,
+            "description": t.description, "performer": t.performer,
+        }
+        for t in _nw_tasks_cache
+    ]
+    return {"total": len(tasks), "tasks": tasks}
+
+
+@app.get("/api/new-workflow/filters", tags=["NewWorkflow"])
+async def get_new_workflow_filters():
+    """New Workflow Task에서 L3 필터 옵션 반환."""
+    l3_set: dict[str, str] = {}
+    for t in _nw_tasks_cache:
+        if t.l3 and t.l3_id:
+            l3_set[t.l3_id] = t.l3
+    return {
+        "l3_options": [{"id": k, "name": v} for k, v in sorted(l3_set.items(), key=lambda x: _natural_key(x[0]))],
+    }
 
 
 @app.post("/api/new-workflow/generate", tags=["NewWorkflow"])
@@ -1191,16 +1284,17 @@ async def generate_new_workflow(
     l4: Optional[str] = Query(None, description="특정 L4 Activity로 필터 (비우면 전체)"),
 ):
     """
-    현재 로드된 엑셀의 L5 Task를 분석하여 AI 워크플로우 설계 초안을 생성합니다.
-    엑셀 파일만 있으면 되며, As-Is 워크플로우 파일은 필요하지 않습니다.
+    New Workflow 전용 Task를 분석하여 AI 워크플로우 설계 초안을 생성합니다.
+    _nw_tasks_cache 우선, 없으면 _tasks_cache fallback.
     """
     from new_workflow_generator import generate_new_workflow as _gen, result_to_dict
 
-    if not _tasks_cache:
+    source_tasks = _nw_tasks_cache if _nw_tasks_cache else _tasks_cache
+    if not source_tasks:
         raise HTTPException(400, "로드된 Task가 없습니다. 먼저 엑셀 파일을 업로드하세요.")
 
     # 필터 적용
-    tasks = _tasks_cache
+    tasks = source_tasks
     if l3:
         tasks = [t for t in tasks if t.l3 == l3 or t.l3_id == l3]
     if l4:
@@ -1336,9 +1430,33 @@ async def export_new_workflow_as_hr_json():
 _project_definition_cache: dict = {}
 
 
+def _build_classification_from_workflow(workflow_cache: dict) -> dict[str, dict]:
+    """New Workflow 결과에서 분류 데이터를 합성합니다."""
+    classification: dict[str, dict] = {}
+    for agent in workflow_cache.get("agents", []):
+        for task in agent.get("assigned_tasks", []):
+            level = task.get("automation_level", "")
+            if "Full-Auto" in level:
+                label = "AI 수행 가능"
+            elif "Human-in-Loop" in level:
+                label = "AI + Human"
+            else:
+                label = "인간 수행 필요"
+            classification[task["task_id"]] = {
+                "label": label,
+                "reason": task.get("ai_role", ""),
+                "hybrid_note": task.get("human_role", ""),
+                "input_types": ", ".join(task.get("input_data", [])),
+                "output_types": ", ".join(task.get("output_data", [])),
+                "ai_prerequisites": "",
+            }
+    return classification
+
+
 @app.post("/api/project-management/definition/generate", tags=["ProjectManagement"])
 async def generate_project_definition(
     provider: str = Query("openai", description="분류 결과 제공자 (openai | anthropic)"),
+    source: str = Query("", description="데이터 소스 (new-workflow이면 NW 캐시 사용)"),
     process_name: str = Query("", description="프로세스 이름 (빈 값이면 자동 추론)"),
     author: str = Query("", description="작성자 (빈 값이면 'PwC')"),
     l3: Optional[str] = Query(None, description="특정 L3로 필터"),
@@ -1346,6 +1464,7 @@ async def generate_project_definition(
 ):
     """
     분류 결과 + To-Be Workflow 결과를 기반으로 과제 정의서를 자동 생성합니다.
+    source=new-workflow이면 New Workflow 캐시에서 데이터를 사용합니다.
     """
     from project_definition_generator import (
         generate_project_definition_with_llm,
@@ -1353,11 +1472,15 @@ async def generate_project_definition(
         project_definition_to_dict,
     )
 
-    if not _tasks_cache:
+    # 데이터 소스 선택
+    use_nw = source == "new-workflow"
+    src_tasks = _nw_tasks_cache if use_nw else _tasks_cache
+
+    if not src_tasks:
         raise HTTPException(400, "로드된 Task가 없습니다. 먼저 엑셀 파일을 업로드하세요.")
 
     # 필터 적용
-    tasks = _tasks_cache
+    tasks = src_tasks
     if l3:
         tasks = [t for t in tasks if t.l3 == l3 or t.l3_id == l3]
     if l4:
@@ -1367,13 +1490,19 @@ async def generate_project_definition(
         raise HTTPException(400, "필터 조건에 맞는 Task가 없습니다.")
 
     # 분류 결과 로드
-    results_store = load_results(provider)
-    if not results_store:
-        raise HTTPException(400, f"'{provider}' 분류 결과가 없습니다. 먼저 분류를 실행하세요.")
+    if use_nw:
+        if not _new_workflow_cache:
+            raise HTTPException(400, "New Workflow 결과가 없습니다. 먼저 생성을 실행하세요.")
+        classification_dict = _build_classification_from_workflow(_new_workflow_cache)
+    else:
+        results_store = load_results(provider)
+        if not results_store:
+            raise HTTPException(400, f"'{provider}' 분류 결과가 없습니다. 먼저 분류를 실행하세요.")
 
     # Task → dict 변환 + 분류 결과 매핑
     task_dicts = []
-    classification_dict: dict[str, dict] = {}
+    if not use_nw:
+        classification_dict = {}
     for t in tasks:
         td = {
             "id": t.id, "l2": t.l2, "l2_id": t.l2_id,
@@ -1388,16 +1517,17 @@ async def generate_project_definition(
             td[attr] = getattr(t, attr, "")
         task_dicts.append(td)
 
-        cr = results_store.get(t.id)
-        if cr:
-            classification_dict[t.id] = {
-                "label": cr.label,
-                "reason": cr.reason,
-                "hybrid_note": cr.hybrid_note,
-                "input_types": cr.input_types,
-                "output_types": cr.output_types,
-                "ai_prerequisites": cr.ai_prerequisites,
-            }
+        if not use_nw:
+            cr = results_store.get(t.id)
+            if cr:
+                classification_dict[t.id] = {
+                    "label": cr.label,
+                    "reason": cr.reason,
+                    "hybrid_note": cr.hybrid_note,
+                    "input_types": cr.input_types,
+                    "output_types": cr.output_types,
+                    "ai_prerequisites": cr.ai_prerequisites,
+                }
 
     # 프로세스명 자동 추론
     if not process_name:
