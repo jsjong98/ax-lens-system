@@ -211,6 +211,43 @@ export async function apiLogout(): Promise<void> {
   clearAuthToken();
 }
 
+// ── 비밀번호 재설정 API ────────────────────────────────────────────────────
+
+export async function requestResetCode(email: string): Promise<string> {
+  const res = await fetch(`${BACKEND_DIRECT}/api/auth/reset/request`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "요청 실패");
+  return data.message;
+}
+
+export async function verifyResetCode(email: string, code: string): Promise<void> {
+  const res = await fetch(`${BACKEND_DIRECT}/api/auth/reset/verify`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, code }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ detail: "인증 실패" }));
+    throw new Error(data.detail || "인증 실패");
+  }
+}
+
+export async function confirmResetPassword(email: string, code: string, newPassword: string): Promise<void> {
+  const res = await fetch(`${BACKEND_DIRECT}/api/auth/reset/confirm`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, code, new_password: newPassword }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ detail: "재설정 실패" }));
+    throw new Error(data.detail || "재설정 실패");
+  }
+}
+
 // ── Task API ─────────────────────────────────────────────────────────────────
 
 export interface TaskListParams {

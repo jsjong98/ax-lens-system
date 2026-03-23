@@ -72,6 +72,10 @@ from auth_store import (
     get_session_user,
     change_password,
     logout,
+    generate_reset_code,
+    verify_reset_code,
+    reset_password,
+    send_reset_email,
 )
 
 # ── 앱 초기화 ────────────────────────────────────────────────────────────────
@@ -148,6 +152,52 @@ async def api_logout(request: Request):
     token = request.headers.get("Authorization", "").replace("Bearer ", "")
     logout(token)
     return {"ok": True}
+
+
+class _ResetRequestBody(_BaseModel):
+    email: str
+
+
+class _ResetVerifyBody(_BaseModel):
+    email: str
+    code: str
+
+
+class _ResetPasswordBody(_BaseModel):
+    email: str
+    code: str
+    new_password: str
+
+
+@app.post("/api/auth/reset/request", tags=["Auth"])
+async def api_reset_request(body: _ResetRequestBody):
+    """비밀번호 재설정 인증번호를 이메일로 발송합니다."""
+    code = generate_reset_code(body.email)
+    if not code:
+        # 보안상 등록되지 않은 이메일도 동일한 응답
+        return {"ok": True, "message": "등록된 이메일이면 인증번호가 발송됩니다."}
+    sent = await send_reset_email(body.email, code)
+    if not sent:
+        raise HTTPException(500, "이메일 발송에 실패했습니다. 잠시 후 다시 시도해 주세요.")
+    return {"ok": True, "message": "인증번호가 이메일로 발송되었습니다."}
+
+
+@app.post("/api/auth/reset/verify", tags=["Auth"])
+async def api_reset_verify(body: _ResetVerifyBody):
+    """인증번호를 검증합니다."""
+    valid = verify_reset_code(body.email, body.code)
+    if not valid:
+        raise HTTPException(400, "인증번호가 올바르지 않거나 만료되었습니다.")
+    return {"ok": True}
+
+
+@app.post("/api/auth/reset/confirm", tags=["Auth"])
+async def api_reset_confirm(body: _ResetPasswordBody):
+    """인증번호 확인 후 새 비밀번호를 설정합니다."""
+    ok = reset_password(body.email, body.code, body.new_password)
+    if not ok:
+        raise HTTPException(400, "인증번호가 올바르지 않거나 만료되었습니다.")
+    return {"ok": True, "message": "비밀번호가 재설정되었습니다."}
 
 
 # ── 인메모리 Task 캐시 ────────────────────────────────────────────────────────

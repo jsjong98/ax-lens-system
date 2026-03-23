@@ -38,17 +38,19 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     refresh();
   }, []);
 
+  const isPublicPage = pathname === "/login" || pathname === "/reset-password";
+
   useEffect(() => {
     if (loading) return;
     // 로그인 안 되어있으면 로그인 페이지로 이동
-    if (!user && pathname !== "/login") {
+    if (!user && !isPublicPage) {
       router.replace("/login");
     }
     // 로그인 되어있는데 로그인 페이지면 메인으로
     if (user && pathname === "/login") {
       router.replace("/tasks");
     }
-  }, [user, loading, pathname, router]);
+  }, [user, loading, pathname, isPublicPage, router]);
 
   const handleLogout = async () => {
     await apiLogout();
@@ -56,8 +58,8 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
     router.replace("/login");
   };
 
-  // 로그인 페이지는 보호하지 않음
-  if (pathname === "/login") {
+  // 공개 페이지는 보호하지 않음
+  if (isPublicPage) {
     return (
       <AuthContext.Provider value={{ user, loading, logout: handleLogout, refresh }}>
         {children}
