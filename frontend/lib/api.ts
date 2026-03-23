@@ -7,9 +7,9 @@
  * 로컬 개발 시에는 기존처럼 같은 호스트의 :8000 포트를 사용합니다.
  */
 
-const BACKEND_DIRECT = typeof window !== "undefined"
-  ? (process.env.NEXT_PUBLIC_BACKEND_URL || `${window.location.protocol}//${window.location.hostname}:8000`)
-  : (process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000");
+// NEXT_PUBLIC_BACKEND_URL이 설정되면 (Railway 배포) 해당 URL 사용
+// 설정되지 않으면 (로컬 개발) 빈 문자열 → 상대경로로 Next.js rewrites 프록시 사용
+const BACKEND_DIRECT = process.env.NEXT_PUBLIC_BACKEND_URL || "";
 
 // ── 타입 정의 ────────────────────────────────────────────────────────────────
 
