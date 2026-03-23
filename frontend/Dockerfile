@@ -7,7 +7,7 @@ RUN npm ci
 
 COPY . .
 
-# 빌드 시 Backend URL을 주입 (Railway 내부 통신용)
+# NEXT_PUBLIC_BACKEND_URL: 클라이언트에서 백엔드 직접 호출용
 ARG NEXT_PUBLIC_BACKEND_URL
 ENV NEXT_PUBLIC_BACKEND_URL=${NEXT_PUBLIC_BACKEND_URL}
 

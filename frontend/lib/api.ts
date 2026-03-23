@@ -122,7 +122,7 @@ export type SSEEvent =
 // ── 기본 fetch 헬퍼 ──────────────────────────────────────────────────────────
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`/api${path}`, {
+  const res = await fetch(`${BACKEND_DIRECT}/api${path}`, {
     headers: { "Content-Type": "application/json" },
     ...options,
   });
