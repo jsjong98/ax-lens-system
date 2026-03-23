@@ -66,6 +66,13 @@ from settings_store import (
     upsert_result,
 )
 from usage_store import get_usage, reset_usage
+from auth_store import (
+    init_default_users,
+    authenticate,
+    get_session_user,
+    change_password,
+    logout,
+)
 
 # ── 앱 초기화 ────────────────────────────────────────────────────────────────
 
@@ -87,6 +94,61 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── 기본 사용자 초기화 ─────────────────────────────────────────────────────────
+init_default_users()
+
+# ── 인증 엔드포인트 ──────────────────────────────────────────────────────────
+
+from pydantic import BaseModel as _BaseModel
+
+
+class _LoginRequest(_BaseModel):
+    email: str
+    password: str
+
+
+class _ChangePasswordRequest(_BaseModel):
+    old_password: str
+    new_password: str
+
+
+@app.post("/api/auth/login", tags=["Auth"])
+async def api_login(body: _LoginRequest):
+    token = authenticate(body.email, body.password)
+    if not token:
+        raise HTTPException(401, "이메일 또는 비밀번호가 올바르지 않습니다.")
+    user = get_session_user(token)
+    return {"ok": True, "token": token, "user": user}
+
+
+@app.get("/api/auth/me", tags=["Auth"])
+async def api_me(request: Request):
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    user = get_session_user(token)
+    if not user:
+        raise HTTPException(401, "인증이 필요합니다.")
+    return {"ok": True, "user": user}
+
+
+@app.post("/api/auth/change-password", tags=["Auth"])
+async def api_change_password(body: _ChangePasswordRequest, request: Request):
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    user = get_session_user(token)
+    if not user:
+        raise HTTPException(401, "인증이 필요합니다.")
+    ok = change_password(user["email"], body.old_password, body.new_password)
+    if not ok:
+        raise HTTPException(400, "기존 비밀번호가 올바르지 않습니다.")
+    return {"ok": True}
+
+
+@app.post("/api/auth/logout", tags=["Auth"])
+async def api_logout(request: Request):
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    logout(token)
+    return {"ok": True}
+
 
 # ── 인메모리 Task 캐시 ────────────────────────────────────────────────────────
 _tasks_cache: list[Task] = []

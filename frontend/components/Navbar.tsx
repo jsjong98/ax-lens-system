@@ -1,8 +1,11 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ClipboardList, Play, BarChart3, Settings, GitBranch, Sparkles, FolderKanban } from "lucide-react";
+import { ClipboardList, Play, BarChart3, Settings, GitBranch, Sparkles, FolderKanban, LogOut, KeyRound } from "lucide-react";
+import { useAuth } from "@/components/AuthProvider";
+import ChangePasswordModal from "@/components/ChangePasswordModal";
 
 const navItems = [
   { href: "/tasks",              label: "Task 목록",     icon: ClipboardList },
@@ -16,52 +19,86 @@ const navItems = [
 
 export default function Navbar() {
   const pathname = usePathname();
+  const { user, logout } = useAuth();
+  const [showPwModal, setShowPwModal] = useState(false);
 
   return (
-    <nav className="sticky top-0 z-50 bg-white shadow-sm" style={{ borderBottom: "2px solid #A62121" }}>
-      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div className="flex h-16 items-center justify-between">
-          {/* 로고 */}
-          <Link href="/tasks" className="flex items-center gap-3">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/strategyand-logo.svg"
-              alt="Strategy&"
-              className="h-8 w-auto"
-            />
-            <div className="h-5 w-px bg-gray-300" />
-            <span className="text-sm font-semibold tracking-tight" style={{ color: "#A62121" }}>
-              PwC AX Lens System
-            </span>
-          </Link>
+    <>
+      <nav className="sticky top-0 z-50 bg-white shadow-sm" style={{ borderBottom: "2px solid #A62121" }}>
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="flex h-16 items-center justify-between">
+            {/* 로고 */}
+            <Link href="/tasks" className="flex items-center gap-3">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/strategyand-logo.svg"
+                alt="Strategy&"
+                className="h-8 w-auto"
+              />
+              <div className="h-5 w-px bg-gray-300" />
+              <span className="text-sm font-semibold tracking-tight" style={{ color: "#A62121" }}>
+                PwC AX Lens System
+              </span>
+            </Link>
 
-          {/* 메뉴 */}
-          <div className="flex items-center gap-1">
-            {navItems.map(({ href, label, icon: Icon }) => {
-              const active = pathname.startsWith(href);
-              return (
-                <Link
-                  key={href}
-                  href={href}
-                  className={`flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-                    active
-                      ? "text-white"
-                      : "text-gray-600 hover:text-gray-900"
-                  }`}
-                  style={active
-                    ? { backgroundColor: "#A62121" }
-                    : undefined}
-                  onMouseEnter={(e) => { if (!active) (e.currentTarget as HTMLElement).style.backgroundColor = "#FFF5F7"; }}
-                  onMouseLeave={(e) => { if (!active) (e.currentTarget as HTMLElement).style.backgroundColor = ""; }}
-                >
-                  <Icon className="h-4 w-4" />
-                  {label}
-                </Link>
-              );
-            })}
+            {/* 메뉴 */}
+            <div className="flex items-center gap-1">
+              {navItems.map(({ href, label, icon: Icon }) => {
+                const active = pathname.startsWith(href);
+                return (
+                  <Link
+                    key={href}
+                    href={href}
+                    className={`flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                      active
+                        ? "text-white"
+                        : "text-gray-600 hover:text-gray-900"
+                    }`}
+                    style={active
+                      ? { backgroundColor: "#A62121" }
+                      : undefined}
+                    onMouseEnter={(e) => { if (!active) (e.currentTarget as HTMLElement).style.backgroundColor = "#FFF5F7"; }}
+                    onMouseLeave={(e) => { if (!active) (e.currentTarget as HTMLElement).style.backgroundColor = ""; }}
+                  >
+                    <Icon className="h-4 w-4" />
+                    {label}
+                  </Link>
+                );
+              })}
+
+              {/* 사용자 메뉴 */}
+              {user && (
+                <>
+                  <div className="ml-3 h-5 w-px bg-gray-300" />
+                  <span className="ml-2 text-xs text-gray-500">{user.email}</span>
+                  <button
+                    onClick={() => setShowPwModal(true)}
+                    className="ml-1 rounded-md p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                    title="비밀번호 변경"
+                  >
+                    <KeyRound className="h-4 w-4" />
+                  </button>
+                  <button
+                    onClick={logout}
+                    className="rounded-md p-2 text-gray-400 hover:bg-gray-100 hover:text-red-600"
+                    title="로그아웃"
+                  >
+                    <LogOut className="h-4 w-4" />
+                  </button>
+                </>
+              )}
+            </div>
           </div>
         </div>
-      </div>
-    </nav>
+      </nav>
+
+      {/* 비밀번호 변경 모달 */}
+      <ChangePasswordModal open={showPwModal} onClose={() => setShowPwModal(false)} />
+
+      {/* 첫 로그인 시 강제 비밀번호 변경 */}
+      {user?.must_change_password && (
+        <ChangePasswordModal open forced onClose={() => {}} />
+      )}
+    </>
   );
 }

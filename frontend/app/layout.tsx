@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Noto_Sans_KR } from "next/font/google";
 import "./globals.css";
-import Navbar from "@/components/Navbar";
+import LayoutShell from "@/components/LayoutShell";
 
 const notoSansKR = Noto_Sans_KR({
   variable: "--font-noto-sans-kr",
@@ -23,10 +23,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="ko">
       <body className={`${notoSansKR.variable} antialiased min-h-screen`} style={{ background: "#FFF5F7" }}>
-        <Navbar />
-        <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-          {children}
-        </main>
+        <LayoutShell>{children}</LayoutShell>
       </body>
     </html>
   );

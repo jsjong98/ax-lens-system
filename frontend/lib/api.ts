@@ -119,11 +119,31 @@ export type SSEEvent =
   | { type: "done"; total: number }
   | { type: "error"; message: string };
 
+// ── 인증 토큰 관리 ──────────────────────────────────────────────────────────
+
+function getAuthToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem("auth_token");
+}
+
+function setAuthToken(token: string): void {
+  if (typeof window !== "undefined") localStorage.setItem("auth_token", token);
+}
+
+function clearAuthToken(): void {
+  if (typeof window !== "undefined") localStorage.removeItem("auth_token");
+}
+
 // ── 기본 fetch 헬퍼 ──────────────────────────────────────────────────────────
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
+  const token = getAuthToken();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
   const res = await fetch(`${BACKEND_DIRECT}/api${path}`, {
-    headers: { "Content-Type": "application/json" },
+    headers,
     ...options,
   });
 
@@ -137,6 +157,58 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   }
 
   return res.json() as Promise<T>;
+}
+
+// ── Auth API ────────────────────────────────────────────────────────────────
+
+export interface AuthUser {
+  email: string;
+  name: string;
+  must_change_password: boolean;
+}
+
+export async function login(email: string, password: string): Promise<{ token: string; user: AuthUser }> {
+  const res = await fetch(`${BACKEND_DIRECT}/api/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "로그인 실패" }));
+    throw new Error(err.detail || "로그인 실패");
+  }
+  const data = await res.json();
+  setAuthToken(data.token);
+  return data;
+}
+
+export async function getMe(): Promise<AuthUser | null> {
+  const token = getAuthToken();
+  if (!token) return null;
+  try {
+    const res = await fetch(`${BACKEND_DIRECT}/api/auth/me`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.user;
+  } catch {
+    return null;
+  }
+}
+
+export async function changePassword(oldPassword: string, newPassword: string): Promise<void> {
+  await apiFetch("/auth/change-password", {
+    method: "POST",
+    body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }),
+  });
+}
+
+export async function apiLogout(): Promise<void> {
+  try {
+    await apiFetch("/auth/logout", { method: "POST" });
+  } catch {}
+  clearAuthToken();
 }
 
 // ── Task API ─────────────────────────────────────────────────────────────────
