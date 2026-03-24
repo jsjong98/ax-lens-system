@@ -182,8 +182,7 @@ async def api_reset_request(body: _ResetRequestBody):
     """비밀번호 재설정 인증번호를 이메일로 발송합니다."""
     code = generate_reset_code(body.email)
     if not code:
-        # 보안상 등록되지 않은 이메일도 동일한 응답
-        return {"ok": True, "message": "등록된 이메일이면 인증번호가 발송됩니다."}
+        raise HTTPException(404, "등록되지 않은 이메일입니다. 관리자에게 문의해 주세요.")
     sent = await send_reset_email(body.email, code)
     if not sent:
         raise HTTPException(500, "이메일 발송에 실패했습니다. 잠시 후 다시 시도해 주세요.")

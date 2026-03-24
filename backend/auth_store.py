@@ -198,7 +198,7 @@ async def send_reset_email(email: str, code: str) -> bool:
     import urllib.error
 
     payload = json.dumps({
-        "from": "PwC AX Lens <onboarding@resend.dev>",
+        "from": "PwC AX Lens <noreply@pwc-ax-lens.com>",
         "to": [email],
         "subject": "[PwC AX Lens] 비밀번호 재설정 인증번호",
         "html": f"""
