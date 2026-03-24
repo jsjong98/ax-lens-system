@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { getTasks, getFilterOptions, type Task, type FilterOptions } from "@/lib/api";
+import { getTasks, getFilterOptions, getProjectList, loadProject, type Task, type FilterOptions, type ProjectInfo } from "@/lib/api";
 import TaskTable from "@/components/TaskTable";
 import ExcelUploader from "@/components/ExcelUploader";
-import { Search, SlidersHorizontal, RefreshCw } from "lucide-react";
+import { Search, SlidersHorizontal, RefreshCw, FolderOpen, Clock, FileSpreadsheet, CheckCircle2 } from "lucide-react";
 
 const PAGE_SIZE = 50;
 
@@ -18,6 +18,11 @@ export default function TasksPage() {
   const [search, setSearch]       = useState("");
   const [selL3, setSelL3]         = useState("");
   const [selL4, setSelL4]         = useState("");
+
+  // 이전 프로젝트
+  const [projects, setProjects]   = useState<ProjectInfo[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const [loadingProject, setLoadingProject] = useState<string | null>(null);
 
   const fetchData = useCallback(async (p = 1) => {
     setLoading(true);
@@ -35,10 +40,22 @@ export default function TasksPage() {
   }, [search, selL3, selL4]);
 
   useEffect(() => {
-    getFilterOptions()
-      .then(setFilters)
-      .catch(() => {});
+    getFilterOptions().then(setFilters).catch(() => {});
+    getProjectList().then((r) => setProjects(r.projects)).catch(() => {});
   }, []);
+
+  const handleLoadProject = async (filename: string) => {
+    setLoadingProject(filename);
+    try {
+      await loadProject(filename);
+      await fetchData(1);
+      getFilterOptions().then(setFilters).catch(() => {});
+      setShowHistory(false);
+    } catch {
+    } finally {
+      setLoadingProject(null);
+    }
+  };
 
   useEffect(() => {
     const t = setTimeout(() => fetchData(1), 300);
@@ -64,7 +81,66 @@ export default function TasksPage() {
       </div>
 
       {/* 엑셀 업로드 */}
-      <ExcelUploader onUploaded={() => { fetchData(1); }} />
+      <ExcelUploader onUploaded={() => {
+        fetchData(1);
+        getProjectList().then((r) => setProjects(r.projects)).catch(() => {});
+      }} />
+
+      {/* 이전 프로젝트 불러오기 */}
+      {projects.length > 0 && (
+        <div className="rounded-xl border bg-white shadow-sm overflow-hidden">
+          <button
+            onClick={() => setShowHistory((v) => !v)}
+            className="w-full flex items-center justify-between px-5 py-3 hover:bg-gray-50 transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <FolderOpen className="h-4 w-4" style={{ color: "#A62121" }} />
+              <span className="text-sm font-semibold text-gray-900">이전 프로젝트 불러오기</span>
+              <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold bg-gray-100 text-gray-500">{projects.length}</span>
+            </div>
+            <span className="text-xs text-gray-400">{showHistory ? "접기" : "펼치기"}</span>
+          </button>
+
+          {showHistory && (
+            <div className="border-t divide-y">
+              {projects.map((p) => (
+                <div key={p.dirname} className="flex items-center justify-between px-5 py-3 hover:bg-gray-50">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <FileSpreadsheet className="h-4 w-4 text-gray-400 flex-shrink-0" />
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-gray-900 truncate">{p.filename || p.dirname}</p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        {p.created_at && (
+                          <span className="flex items-center gap-1 text-[10px] text-gray-400">
+                            <Clock className="h-3 w-3" />
+                            {new Date(p.created_at).toLocaleDateString("ko-KR")}
+                          </span>
+                        )}
+                        {p.task_count && (
+                          <span className="text-[10px] text-gray-400">{p.task_count}개 Task</span>
+                        )}
+                        {p.has_any_result && (
+                          <span className="flex items-center gap-0.5 text-[10px] text-green-600">
+                            <CheckCircle2 className="h-3 w-3" /> 결과 있음
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleLoadProject(p.filename || p.dirname)}
+                    disabled={loadingProject === (p.filename || p.dirname)}
+                    className="flex-shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold text-white transition-opacity disabled:opacity-50"
+                    style={{ backgroundColor: "#A62121" }}
+                  >
+                    {loadingProject === (p.filename || p.dirname) ? "로딩..." : "불러오기"}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* 필터 바 */}
       <div className="flex flex-wrap items-center gap-3">
