@@ -94,9 +94,9 @@ class AnthropicClassifier(BaseClassifier):
         raw_label = r.get("label", "미분류")
         label = raw_label if raw_label in _LABELS else "미분류"
 
-        input_types  = r.get("input_types", "")  if label == "AI 수행 가능" else ""
-        output_types = r.get("output_types", "") if label == "AI 수행 가능" else ""
-        ai_prerequisites = r.get("ai_prerequisites", "") if label in ("AI 수행 가능", "AI + Human") else ""
+        input_types  = r.get("input_types", "")  if label == "AI" else ""
+        output_types = r.get("output_types", "") if label == "AI" else ""
+        ai_prerequisites = r.get("ai_prerequisites", "") if label in ("AI", "AI + Human") else ""
 
         return ClassificationResult(
             task_id=task.id,

@@ -120,9 +120,9 @@ export default function ClassifyPage() {
 
   const pct = progress.total > 0 ? Math.round((progress.current / progress.total) * 100) : 0;
 
-  const aiCount     = Object.values(liveResults).filter((r) => r.label === "AI 수행 가능").length;
+  const aiCount     = Object.values(liveResults).filter((r) => r.label === "AI").length;
   const hybridCount = Object.values(liveResults).filter((r) => r.label === "AI + Human").length;
-  const humanCount  = Object.values(liveResults).filter((r) => r.label === "인간 수행 필요").length;
+  const humanCount  = Object.values(liveResults).filter((r) => r.label === "Human").length;
 
   const taskRows = tasks.map((t) => ({ ...t, result: liveResults[t.id] }));
 
@@ -264,7 +264,7 @@ export default function ClassifyPage() {
               <div className="flex flex-wrap gap-4 pt-2">
                 <div className="flex items-center gap-2 rounded-lg bg-red-50 border border-red-200 px-3 py-1.5">
                   <span className="h-2 w-2 rounded-full bg-red-500" />
-                  <span className="text-xs text-red-700 font-medium">AI 수행 가능</span>
+                  <span className="text-xs text-red-700 font-medium">AI</span>
                   <span className="text-sm font-bold text-red-800">{aiCount}</span>
                 </div>
                 <div className="flex items-center gap-2 rounded-lg bg-purple-50 border border-purple-200 px-3 py-1.5">
@@ -274,7 +274,7 @@ export default function ClassifyPage() {
                 </div>
                 <div className="flex items-center gap-2 rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-1.5">
                   <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                  <span className="text-xs text-emerald-700 font-medium">인간 수행 필요</span>
+                  <span className="text-xs text-emerald-700 font-medium">Human</span>
                   <span className="text-sm font-bold text-emerald-800">{humanCount}</span>
                 </div>
               </div>

@@ -13,7 +13,7 @@ const BACKEND_DIRECT = process.env.NEXT_PUBLIC_BACKEND_URL || "";
 
 // ── 타입 정의 ────────────────────────────────────────────────────────────────
 
-export type LabelType = "AI 수행 가능" | "AI + Human" | "인간 수행 필요" | "미분류";
+export type LabelType = "AI" | "AI + Human" | "Human" | "미분류";
 export type ProviderType = "openai" | "anthropic";
 
 export interface Task {

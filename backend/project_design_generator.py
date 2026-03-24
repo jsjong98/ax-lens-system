@@ -386,16 +386,16 @@ def _build_user_prompt(
 
     # 분류 통계
     total = len(classification_results)
-    ai_count = sum(1 for r in classification_results.values() if r.get("label") == "AI 수행 가능")
+    ai_count = sum(1 for r in classification_results.values() if r.get("label") == "AI")
     hybrid_count = sum(1 for r in classification_results.values() if r.get("label") == "AI + Human")
-    human_count = sum(1 for r in classification_results.values() if r.get("label") == "인간 수행 필요")
+    human_count = sum(1 for r in classification_results.values() if r.get("label") == "Human")
 
     lines.append("## 분류 결과 통계")
     lines.append(f"- 전체 Task: {total}개")
     if total:
-        lines.append(f"- AI 수행 가능: {ai_count}개 ({ai_count/total*100:.1f}%)")
+        lines.append(f"- AI: {ai_count}개 ({ai_count/total*100:.1f}%)")
         lines.append(f"- AI + Human: {hybrid_count}개 ({hybrid_count/total*100:.1f}%)")
-        lines.append(f"- 인간 수행 필요: {human_count}개 ({human_count/total*100:.1f}%)")
+        lines.append(f"- Human: {human_count}개 ({human_count/total*100:.1f}%)")
     lines.append("")
 
     # Task 목록 + 분류 결과

@@ -331,9 +331,9 @@ export default function ResultsPage() {
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
               {([
                 { label: "전체 Task",     value: stats.total,                                        cardStyle: { background: "#fff", border: "1px solid #E2E8F0" },      valueStyle: { color: "#171717" } },
-                { label: "AI 수행 가능",  value: `${stats.ai_count} (${stats.ai_ratio}%)`,           cardStyle: { background: "#FFF5F7", border: "1px solid #F2A0AF" },   valueStyle: { color: "#A62121" } },
+                { label: "AI",  value: `${stats.ai_count} (${stats.ai_ratio}%)`,           cardStyle: { background: "#FFF5F7", border: "1px solid #F2A0AF" },   valueStyle: { color: "#A62121" } },
                 { label: "AI + Human",   value: `${stats.hybrid_count} (${stats.hybrid_ratio}%)`,   cardStyle: { background: "#FFFBEB", border: "1px solid #FCD34D" },   valueStyle: { color: "#92400E" } },
-                { label: "인간 수행 필요", value: `${stats.human_count} (${stats.human_ratio}%)`,    cardStyle: { background: "#ECFDF5", border: "1px solid #A7F3D0" },   valueStyle: { color: "#065F46" } },
+                { label: "Human", value: `${stats.human_count} (${stats.human_ratio}%)`,    cardStyle: { background: "#ECFDF5", border: "1px solid #A7F3D0" },   valueStyle: { color: "#065F46" } },
                 { label: "미분류",         value: stats.unclassified_count,                          cardStyle: { background: "#fff", border: "1px solid #E2E8F0" },      valueStyle: { color: "#6B7280" } },
               ] as const).map((s) => (
                 <div key={s.label} className="rounded-xl p-4 shadow-sm" style={s.cardStyle}>
@@ -380,7 +380,7 @@ export default function ResultsPage() {
           {/* 레이블 필터 */}
           <div className="flex items-center gap-3">
             <label className="text-xs font-medium text-gray-500">레이블 필터:</label>
-            {(["", "AI 수행 가능", "AI + Human", "인간 수행 필요", "미분류"] as const).map((l) => (
+            {(["", "AI", "AI + Human", "Human", "미분류"] as const).map((l) => (
               <button
                 key={l || "all"}
                 onClick={() => setLabelFilter(l)}

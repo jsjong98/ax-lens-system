@@ -38,7 +38,7 @@ class AgentTask:
     """Agent가 처리하는 개별 태스크."""
     task_id: str
     label: str
-    classification: str     # "AI 수행 가능" | "AI + Human" | "인간 수행 필요"
+    classification: str     # "AI" | "AI + Human" | "Human"
     reason: str = ""
     ai_part: str = ""       # AI+Human일 때 AI가 하는 부분
     human_part: str = ""    # AI+Human일 때 사람이 하는 부분
@@ -160,14 +160,14 @@ Step E. 오케스트레이션 전략
   - 각 Junior Agent에게 기동 지시(어떤 범위와 기준으로 수행할지) 전달
 
 ■ Junior AI Agent = 사원·주임급 실무자
-  - 같은 L4 안에서 연속된 AI 수행 가능 L5 태스크 2개 이상을 묶어 순차 파이프라인으로 처리
+  - 같은 L4 안에서 연속된 AI L5 태스크 2개 이상을 묶어 순차 파이프라인으로 처리
   - 예: 사원이 "자료 수집 → 분석 → 보고서 초안 작성"을 연달아 하는 것과 같음
   - Human 태스크가 중간에 끼면 그룹을 끊고 새 Agent 생성
   - 각 Agent마다 구체적인 AI 기술 유형을 지정 (아래 참조)
   - L5 태스크가 1개뿐이면 단독 Agent로 생성
 
 ■ Human (HR 담당자) = 사람이 직접 해야 하는 역할
-  - "인간 수행 필요" 태스크 수행
+  - "Human" 태스크 수행
   - "AI + Human" 태스크의 Human 파트(검토·승인·판단) 수행
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -270,8 +270,8 @@ Step E. 오케스트레이션 전략
 ■ 유의사항:
   - input_sources: 전체 워크플로우에서 사용되는 입력 데이터 목록. related_agent_ids로 어떤 Agent가 사용하는지 연결
   - ai_tech_per_task: 각 태스크별로 category(대분류), type(세부유형), technique(구현 기법)를 지정
-  - task_ids에는 AI 수행 가능 태스크와 AI+Human의 AI 파트만 포함
-  - 인간 수행 필요 태스크와 AI+Human의 Human 파트는 human_steps에 포함
+  - task_ids에는 AI 태스크와 AI+Human의 AI 파트만 포함
+  - Human 태스크와 AI+Human의 Human 파트는 human_steps에 포함
   - 같은 L4 안에서만 묶을 것 (L4 경계를 넘지 않음)
   - senior_instruction은 Senior AI가 해당 Agent에게 내리는 구체적 지시 내용
   - 기술 용어를 쉽게 풀어서 description을 작성할 것
@@ -440,7 +440,7 @@ def _build_tobe_from_llm_result(
             agent_tasks.append(AgentTask(
                 task_id=tid,
                 label=node.get("label", tid),
-                classification=node.get("classification", "AI 수행 가능"),
+                classification=node.get("classification", "AI"),
                 reason=node.get("reason", ""),
                 ai_part=node.get("hybrid_note", ""),
                 technique=technique,
@@ -496,7 +496,7 @@ def _build_tobe_from_llm_result(
         tid = node["task_id"]
         if tid in llm_human_tids:
             continue
-        if node["classification"] == "인간 수행 필요":
+        if node["classification"] == "Human":
             human_steps.append(HumanStep(
                 id=f"human-{len(human_steps)+1}",
                 task_id=tid,
@@ -746,7 +746,7 @@ def _group_junior_agents(
     def _is_ai_capable(task: dict) -> bool:
         cls = task["classification"]
         split_type = task.get("split_type", "original")
-        return cls == "AI 수행 가능" or (cls == "AI + Human" and split_type == "ai_part")
+        return cls == "AI" or (cls == "AI + Human" and split_type == "ai_part")
 
     def _l4_id_of(task: dict) -> str:
         tid = task.get("task_id", "")
@@ -957,11 +957,11 @@ def _infer_technique(
 
 
 def _extract_human_steps(split_tasks: list[dict]) -> list[HumanStep]:
-    """인간 수행 필요 태스크 + AI+Human의 Human 파트를 추출합니다."""
+    """Human 태스크 + AI+Human의 Human 파트를 추출합니다."""
     steps = []
     step_idx = 1
     for task in split_tasks:
-        if task["classification"] == "인간 수행 필요":
+        if task["classification"] == "Human":
             steps.append(HumanStep(
                 id=f"human-{step_idx}",
                 task_id=task["task_id"],
@@ -1304,9 +1304,9 @@ def _build_summary(
 ) -> dict:
     """To-Be 워크플로우 요약 정보."""
     total = len(classified_nodes)
-    ai_count = sum(1 for n in classified_nodes if n["classification"] == "AI 수행 가능")
+    ai_count = sum(1 for n in classified_nodes if n["classification"] == "AI")
     hybrid_count = sum(1 for n in classified_nodes if n["classification"] == "AI + Human")
-    human_count = sum(1 for n in classified_nodes if n["classification"] == "인간 수행 필요")
+    human_count = sum(1 for n in classified_nodes if n["classification"] == "Human")
 
     return {
         "process_name": senior.name,

@@ -523,9 +523,9 @@ async def get_stats(
 ):
     results_store = load_results(provider)
     total        = len(_tasks_cache)
-    ai_count     = sum(1 for r in results_store.values() if r.label == "AI 수행 가능")
+    ai_count     = sum(1 for r in results_store.values() if r.label == "AI")
     hybrid_count = sum(1 for r in results_store.values() if r.label == "AI + Human")
-    human_count  = sum(1 for r in results_store.values() if r.label == "인간 수행 필요")
+    human_count  = sum(1 for r in results_store.values() if r.label == "Human")
     unclassified_count = total - ai_count - hybrid_count - human_count
 
     l3_map: dict[str, dict] = {}
@@ -535,11 +535,11 @@ async def get_stats(
         l3_map[t.l3]["total"] += 1
         r = results_store.get(t.id)
         if r:
-            if r.label == "AI 수행 가능":
+            if r.label == "AI":
                 l3_map[t.l3]["ai"] += 1
             elif r.label == "AI + Human":
                 l3_map[t.l3]["hybrid"] += 1
-            elif r.label == "인간 수행 필요":
+            elif r.label == "Human":
                 l3_map[t.l3]["human"] += 1
 
     return StatsResponse(
@@ -619,11 +619,11 @@ def _build_result_sheet(ws, tasks_cache: list[Task], results_store: dict, provid
 
         last_row = ws.max_row
         label_cell = ws.cell(row=last_row, column=8)
-        if label == "AI 수행 가능":
+        if label == "AI":
             label_cell.fill = ai_fill
         elif label == "AI + Human":
             label_cell.fill = hybrid_fill
-        elif label == "인간 수행 필요":
+        elif label == "Human":
             label_cell.fill = human_fill
 
     col_widths = [12, 10, 14, 14, 28, 45, 35, 16, 28, 40, 50, 10]
@@ -647,18 +647,18 @@ async def export_results(
     # 요약 시트
     ws2 = wb.create_sheet("요약")
     total    = len(_tasks_cache)
-    ai_cnt   = sum(1 for r in results_store.values() if r.label == "AI 수행 가능")
+    ai_cnt   = sum(1 for r in results_store.values() if r.label == "AI")
     hyb_cnt  = sum(1 for r in results_store.values() if r.label == "AI + Human")
-    hum_cnt  = sum(1 for r in results_store.values() if r.label == "인간 수행 필요")
+    hum_cnt  = sum(1 for r in results_store.values() if r.label == "Human")
     rows = [
         ["항목", "값"],
         ["모델", provider_label],
         ["전체 Task", total],
-        ["AI 수행 가능", ai_cnt],
+        ["AI", ai_cnt],
         ["AI + Human", hyb_cnt],
-        ["인간 수행 필요", hum_cnt],
+        ["Human", hum_cnt],
         ["미분류", total - ai_cnt - hyb_cnt - hum_cnt],
-        ["AI 수행 가능 비율", f"{ai_cnt/total*100:.1f}%" if total else "0%"],
+        ["AI 비율", f"{ai_cnt/total*100:.1f}%" if total else "0%"],
         ["AI + Human 비율", f"{hyb_cnt/total*100:.1f}%" if total else "0%"],
     ]
     for row in rows:
@@ -667,7 +667,8 @@ async def export_results(
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
-    filename = f"classification_{provider}.xlsx"
+    base = _current_excel_path.stem if _current_excel_path else "results"
+    filename = f"{base}_a_results.xlsx"
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -742,7 +743,7 @@ async def export_comparison():
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": "attachment; filename=classification_compare.xlsx"},
+        headers={"Content-Disposition": f"attachment; filename={(_current_excel_path.stem if _current_excel_path else 'compare')}_a_results_compare.xlsx"},
     )
 
 
@@ -1630,11 +1631,11 @@ def _build_classification_from_workflow(workflow_cache: dict) -> dict[str, dict]
         for task in agent.get("assigned_tasks", []):
             level = task.get("automation_level", "")
             if "Full-Auto" in level:
-                label = "AI 수행 가능"
+                label = "AI"
             elif "Human-in-Loop" in level:
                 label = "AI + Human"
             else:
-                label = "인간 수행 필요"
+                label = "Human"
             classification[task["task_id"]] = {
                 "label": label,
                 "reason": task.get("ai_role", ""),

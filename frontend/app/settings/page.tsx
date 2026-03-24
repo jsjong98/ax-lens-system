@@ -167,14 +167,14 @@ export default function SettingsPage() {
             <div className="flex flex-wrap gap-3 text-xs">
               <div className="flex items-center gap-1.5">
                 <span className="h-3 w-3 rounded-full bg-red-500" />
-                <span className="text-gray-600">AI 수행 가능 (빨간색)</span>
+                <span className="text-gray-600">AI (빨간색)</span>
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="h-3 w-3 rounded-full bg-emerald-500" />
-                <span className="text-gray-600">인간 수행 필요 (초록색)</span>
+                <span className="text-gray-600">Human (초록색)</span>
               </div>
               <div className="ml-4 text-gray-400">
-                → 앞 단계에서 해당하면 즉시 "인간 수행 필요" 확정
+                → 앞 단계에서 해당하면 즉시 "Human" 확정
               </div>
             </div>
 
@@ -211,7 +211,7 @@ export default function SettingsPage() {
             ))}
 
             <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs text-emerald-800">
-              <span className="font-semibold">통과 (AI 수행 가능)</span>: 위 9개 기준 모두 해당 없으면 →
+              <span className="font-semibold">통과 (AI)</span>: 위 9개 기준 모두 해당 없으면 →
               자동화 가능한 규칙 기반 업무로 분류
             </div>
           </div>

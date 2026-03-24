@@ -70,7 +70,7 @@ export default function TaskTable({
     }
   };
 
-  const labelOptions: LabelType[] = ["AI 수행 가능", "AI + Human", "인간 수행 필요", "미분류"];
+  const labelOptions: LabelType[] = ["AI", "AI + Human", "Human", "미분류"];
 
   /* ── 공통 헤더 스타일 ── */
   const thBase = "px-3 py-2.5 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap bg-gray-50";

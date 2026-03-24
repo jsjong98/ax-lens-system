@@ -55,7 +55,7 @@ class Task(BaseModel):
 
 # ── 분류 결과 관련 ────────────────────────────────────────────────────────────
 
-LabelType = Literal["AI 수행 가능", "AI + Human", "인간 수행 필요", "미분류"]
+LabelType = Literal["AI", "AI + Human", "Human", "미분류"]
 
 
 class StageAnalysis(BaseModel):

@@ -10,12 +10,12 @@ type BadgeStyle = {
 };
 
 const STYLES: Record<LabelType, BadgeStyle> = {
-  "AI 수행 가능": {
+  "AI": {
     bg: "#FFF5F7",
     text: "#A62121",
     dotColor: "#A62121",
     borderColor: "#F2A0AF",
-    display: "AI 수행 가능",
+    display: "AI",
   },
   "AI + Human": {
     bg: "#FFF7ED",
@@ -24,12 +24,12 @@ const STYLES: Record<LabelType, BadgeStyle> = {
     borderColor: "#FDBA74",
     display: "AI + Human",
   },
-  "인간 수행 필요": {
+  "Human": {
     bg: "#ECFDF5",
     text: "#065F46",
     dotColor: "#10B981",
     borderColor: "#A7F3D0",
-    display: "인간 수행 필요",
+    display: "Human",
   },
   미분류: {
     bg: "#F3F4F6",
