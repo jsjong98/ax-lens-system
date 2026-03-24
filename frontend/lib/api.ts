@@ -709,6 +709,63 @@ export async function generateToBe(params: {
 
 // ── New Workflow ──────────────────────────────────────────────────────────────
 
+export interface ExcelSheet {
+  name: string;
+  recommended: boolean;
+  row_count: number;
+  l5_count: number;
+}
+
+export async function uploadNewWorkflowExcel(file: File): Promise<{
+  message: string;
+  filename: string;
+  task_count: number;
+  sheets: ExcelSheet[];
+}> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const token = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null;
+  const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+  const res = await fetch(`${BACKEND_DIRECT}/api/new-workflow/upload`, {
+    method: "POST",
+    headers,
+    body: formData,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "업로드 실패" }));
+    throw new Error(err.detail || "업로드 실패");
+  }
+  return res.json();
+}
+
+export async function selectNewWorkflowSheet(sheetName: string): Promise<{
+  message: string;
+  sheet_name: string;
+  task_count: number;
+}> {
+  return apiFetch("/new-workflow/select-sheet", {
+    method: "POST",
+    body: JSON.stringify({ sheet_name: sheetName }),
+  });
+}
+
+export async function getNewWorkflowTasks(): Promise<{
+  total: number;
+  tasks: Array<{
+    id: string; l2: string; l3: string; l3_id: string;
+    l4: string; l4_id: string; name: string;
+    description: string; performer: string;
+  }>;
+}> {
+  return apiFetch("/new-workflow/tasks");
+}
+
+export async function getNewWorkflowFilters(): Promise<{
+  l3_options: Array<{ id: string; name: string }>;
+}> {
+  return apiFetch("/new-workflow/filters");
+}
+
 export interface NewWorkflowAssignedTask {
   task_id: string;
   task_name: string;
@@ -833,6 +890,7 @@ export interface ProjectDefinitionResult {
 
 export async function generateProjectDefinition(params: {
   provider?: ProviderType;
+  source?: string;
   process_name?: string;
   author?: string;
   l3?: string;
@@ -840,6 +898,7 @@ export async function generateProjectDefinition(params: {
 } = {}): Promise<ProjectDefinitionResult> {
   const qs = new URLSearchParams();
   if (params.provider)     qs.set("provider", params.provider);
+  if (params.source)       qs.set("source", params.source);
   if (params.process_name) qs.set("process_name", params.process_name);
   if (params.author)       qs.set("author", params.author);
   if (params.l3)           qs.set("l3", params.l3);
@@ -917,12 +976,14 @@ export interface ProjectDesignResult {
 
 export async function generateProjectDesign(params: {
   provider?: ProviderType;
+  source?: string;
   process_name?: string;
   l3?: string;
   l4?: string;
 } = {}): Promise<ProjectDesignResult> {
   const qs = new URLSearchParams();
   if (params.provider)     qs.set("provider", params.provider);
+  if (params.source)       qs.set("source", params.source);
   if (params.process_name) qs.set("process_name", params.process_name);
   if (params.l3)           qs.set("l3", params.l3);
   if (params.l4)           qs.set("l4", params.l4);

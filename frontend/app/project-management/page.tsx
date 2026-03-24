@@ -1,12 +1,14 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   generateProjectDefinition,
   getProjectDefinition,
   generateProjectDesign,
   getProjectDesign,
   getFilterOptions,
+  getNewWorkflowFilters,
   downloadProjectPpt,
   type ProjectDefinitionResult,
   type ProjectDesignResult,
@@ -32,6 +34,10 @@ const ACTOR_COLORS: Record<string, { bg: string; border: string; text: string }>
 type TabType = "definition" | "design";
 
 export default function ProjectManagementPage() {
+  const searchParams = useSearchParams();
+  const source = searchParams.get("source") || "";
+  const isNwSource = source === "new-workflow";
+
   const [activeTab, setActiveTab] = useState<TabType>("definition");
 
   // 공통 설정
@@ -52,12 +58,18 @@ export default function ProjectManagementPage() {
   const [designLoading, setDesignLoading] = useState(false);
   const [designError, setDesignError] = useState<string | null>(null);
 
-  // 초기 로드
+  // 초기 로드 - NW 소스면 NW 필터 사용
   useEffect(() => {
-    getFilterOptions().then(setFilters).catch(() => {});
+    if (isNwSource) {
+      getNewWorkflowFilters()
+        .then((f) => setFilters({ l2: [], l3: f.l3_options.map((o) => ({ id: o.id, name: o.name })), l4: [] }))
+        .catch(() => {});
+    } else {
+      getFilterOptions().then(setFilters).catch(() => {});
+    }
     getProjectDefinition().then(setDefResult).catch(() => {});
     getProjectDesign().then(setDesignResult).catch(() => {});
-  }, []);
+  }, [isNwSource]);
 
   /* ── 과제 정의서 생성 ─────────────────────────────────────── */
   const handleGenerateDefinition = useCallback(async () => {
@@ -66,6 +78,7 @@ export default function ProjectManagementPage() {
     try {
       const res = await generateProjectDefinition({
         provider,
+        source: isNwSource ? "new-workflow" : undefined,
         process_name: processName || undefined,
         author: author || undefined,
         l3: selectedL3 || undefined,
@@ -77,7 +90,7 @@ export default function ProjectManagementPage() {
     } finally {
       setDefLoading(false);
     }
-  }, [provider, processName, author, selectedL3, selectedL4]);
+  }, [provider, isNwSource, processName, author, selectedL3, selectedL4]);
 
   /* ── 과제 설계서 생성 ─────────────────────────────────────── */
   const handleGenerateDesign = useCallback(async () => {
@@ -86,6 +99,7 @@ export default function ProjectManagementPage() {
     try {
       const res = await generateProjectDesign({
         provider,
+        source: isNwSource ? "new-workflow" : undefined,
         process_name: processName || undefined,
         l3: selectedL3 || undefined,
         l4: selectedL4 || undefined,
@@ -96,7 +110,7 @@ export default function ProjectManagementPage() {
     } finally {
       setDesignLoading(false);
     }
-  }, [provider, processName, selectedL3, selectedL4]);
+  }, [provider, isNwSource, processName, selectedL3, selectedL4]);
 
   const loading = activeTab === "definition" ? defLoading : designLoading;
   const error = activeTab === "definition" ? defError : designError;
@@ -106,9 +120,17 @@ export default function ProjectManagementPage() {
     <div className="space-y-6">
       {/* 헤더 */}
       <div>
+        {isNwSource && (
+          <p className="text-xs font-medium mb-2 px-3 py-1.5 rounded-full inline-block"
+            style={{ backgroundColor: "#FFF5F7", color: PWC.primary, border: `1px solid ${PWC.primary}` }}>
+            New Workflow 결과 기반
+          </p>
+        )}
         <h1 className="text-2xl font-bold text-gray-900">Project Management</h1>
         <p className="mt-1 text-sm text-gray-500">
-          분류 결과와 To-Be Workflow를 기반으로 과제 정의서 / 설계서를 자동 생성합니다.
+          {isNwSource
+            ? "New Workflow 설계 결과를 기반으로 과제 정의서 / 설계서를 자동 생성합니다."
+            : "분류 결과와 To-Be Workflow를 기반으로 과제 정의서 / 설계서를 자동 생성합니다."}
         </p>
       </div>
 
