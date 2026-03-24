@@ -8,9 +8,11 @@ import {
   getNewWorkflowFilters,
   generateNewWorkflow,
   generateNewWorkflowFreeform,
+  benchmarkNewWorkflow,
   downloadNewWorkflowAsHrJson,
   type ExcelSheet,
   type NewWorkflowResult,
+  type BenchmarkInsight,
   type NewWorkflowAgent,
   type NewWorkflowAssignedTask,
 } from "@/lib/api";
@@ -218,6 +220,12 @@ export default function NewWorkflowPage() {
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
 
+  // 벤치마킹 상태
+  const [benchmarking, setBenchmarking] = useState(false);
+  const [benchmarkInsights, setBenchmarkInsights] = useState<BenchmarkInsight[]>([]);
+  const [improvementSummary, setImprovementSummary] = useState("");
+  const [isBenchmarked, setIsBenchmarked] = useState(false);
+
   const updateForm = (key: string, value: string) =>
     setFormData((prev) => ({ ...prev, [key]: value }));
 
@@ -286,6 +294,24 @@ export default function NewWorkflowPage() {
       setError(e instanceof Error ? e.message : "생성 중 오류 발생");
     } finally {
       setLoading(false);
+    }
+  };
+
+  // 벤치마킹
+  const handleBenchmark = async () => {
+    setBenchmarking(true);
+    setError(null);
+    try {
+      const res = await benchmarkNewWorkflow();
+      setResult(res);
+      setBenchmarkInsights(res.benchmark_insights || []);
+      setImprovementSummary(res.improvement_summary || "");
+      setIsBenchmarked(true);
+      setActiveTab("ai");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "벤치마킹 중 오류 발생");
+    } finally {
+      setBenchmarking(false);
     }
   };
 
@@ -534,6 +560,70 @@ export default function NewWorkflowPage() {
                   <p className="text-xs mt-0.5" style={{ color: "#2F80ED" }}>AI Agent</p>
                 </div>
               </div>
+            </div>
+
+            {/* ── 2단계: 벤치마킹 ────────────────────────────────────────── */}
+            <div className="rounded-xl p-5 mb-6 shadow-sm" style={{ backgroundColor: PWC.cardBg, border: isBenchmarked ? "2px solid #6fcf97" : "1px solid #f0e0e0" }}>
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">🔍</span>
+                  <h2 className="text-base font-semibold text-gray-900">
+                    2단계: 웹 벤치마킹으로 가다듬기
+                  </h2>
+                  {isBenchmarked && (
+                    <span className="rounded-full px-2.5 py-0.5 text-xs font-semibold bg-green-100 text-green-700 border border-green-300">
+                      적용 완료
+                    </span>
+                  )}
+                </div>
+                <button
+                  onClick={handleBenchmark}
+                  disabled={benchmarking}
+                  className="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white transition-opacity disabled:opacity-60"
+                  style={{ backgroundColor: isBenchmarked ? "#1a7a45" : PWC.primary }}
+                >
+                  {benchmarking ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <span>🔍</span>
+                  )}
+                  {benchmarking ? "벤치마킹 검색 및 개선 중..." : isBenchmarked ? "다시 벤치마킹" : "벤치마킹 시작"}
+                </button>
+              </div>
+
+              {!isBenchmarked && (
+                <p className="text-sm text-gray-500">
+                  유사 AI 자동화 사례를 웹에서 검색하고, 벤치마킹 결과를 반영하여 Workflow를 가다듬습니다.
+                </p>
+              )}
+
+              {/* 벤치마킹 인사이트 */}
+              {isBenchmarked && improvementSummary && (
+                <div className="mt-3 rounded-lg p-4" style={{ backgroundColor: "#F0FFF4", border: "1px solid #C6F6D5" }}>
+                  <p className="text-sm font-semibold text-green-800 mb-2">개선 요약</p>
+                  <p className="text-sm text-green-700">{improvementSummary}</p>
+                </div>
+              )}
+
+              {isBenchmarked && benchmarkInsights.length > 0 && (
+                <div className="mt-3 space-y-2">
+                  <p className="text-xs font-semibold text-gray-500">참고한 벤치마킹 사례</p>
+                  {benchmarkInsights.map((insight, i) => (
+                    <div key={i} className="rounded-lg p-3 bg-gray-50 border border-gray-200">
+                      <div className="flex items-start gap-2">
+                        <span className="text-xs font-bold text-gray-400 mt-0.5">{i + 1}</span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-gray-800">{insight.source}</p>
+                          <p className="text-xs text-gray-600 mt-0.5">{insight.insight}</p>
+                          <p className="text-xs mt-1" style={{ color: PWC.primary }}>
+                            → {insight.application}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* 탭 + 버튼 */}

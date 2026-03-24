@@ -837,6 +837,22 @@ export async function generateNewWorkflowFreeform(params: {
   });
 }
 
+export interface BenchmarkInsight {
+  source: string;
+  insight: string;
+  application: string;
+}
+
+export interface BenchmarkResult extends NewWorkflowResult {
+  benchmark_insights: BenchmarkInsight[];
+  improvement_summary: string;
+  search_count: number;
+}
+
+export async function benchmarkNewWorkflow(): Promise<BenchmarkResult> {
+  return apiFetch("/new-workflow/benchmark", { method: "POST" });
+}
+
 export async function getNewWorkflowResult(): Promise<NewWorkflowResult> {
   return apiFetch("/new-workflow/result");
 }

@@ -1365,6 +1365,60 @@ async def generate_new_workflow_freeform(request: Request):
     return {"ok": True, **result_dict}
 
 
+@app.post("/api/new-workflow/benchmark", tags=["NewWorkflow"])
+async def benchmark_new_workflow():
+    """
+    현재 Workflow 결과를 기반으로 웹 벤치마킹 검색 후 LLM으로 개선합니다.
+    """
+    from benchmark_search import search_benchmarks, refine_workflow_with_benchmarks
+    from new_workflow_generator import result_to_dict, _parse_freeform_result
+
+    if not _new_workflow_cache:
+        raise HTTPException(400, "Workflow 결과가 없습니다. 먼저 1단계를 실행하세요.")
+
+    # 1. 웹 벤치마킹 검색
+    benchmark_results = await search_benchmarks(_new_workflow_cache)
+
+    if not benchmark_results:
+        raise HTTPException(500, "벤치마킹 검색 결과를 가져오지 못했습니다. 잠시 후 다시 시도해 주세요.")
+
+    # 2. LLM으로 Workflow 개선
+    settings = load_settings()
+    anthropic_key = os.getenv("ANTHROPIC_API_KEY", "") or settings.anthropic_api_key
+    openai_key = os.getenv("OPENAI_API_KEY", "") or settings.api_key
+
+    refined_data = await refine_workflow_with_benchmarks(
+        workflow_cache=_new_workflow_cache,
+        benchmark_results=benchmark_results,
+        api_key=anthropic_key,
+        model=settings.anthropic_model or "claude-sonnet-4-6",
+        openai_api_key=openai_key,
+        openai_model=settings.model or "gpt-5.4",
+    )
+
+    if "error" in refined_data:
+        raise HTTPException(500, refined_data["error"])
+
+    # 벤치마킹 인사이트 저장
+    benchmark_insights = refined_data.pop("benchmark_insights", [])
+    improvement_summary = refined_data.pop("improvement_summary", "")
+
+    # 개선된 Workflow를 파싱하여 캐시 업데이트
+    refined_result = _parse_freeform_result(refined_data)
+    refined_dict = result_to_dict(refined_result)
+
+    _new_workflow_cache.clear()
+    _new_workflow_cache.update(refined_dict)
+
+    return {
+        "ok": True,
+        "benchmark_insights": benchmark_insights,
+        "improvement_summary": improvement_summary,
+        "search_count": len(benchmark_results),
+        **refined_dict,
+    }
+
+
 @app.get("/api/new-workflow/result", tags=["NewWorkflow"])
 async def get_new_workflow_result():
     """마지막으로 생성된 New Workflow 결과를 반환합니다."""
