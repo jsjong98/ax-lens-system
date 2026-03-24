@@ -14,13 +14,11 @@ import {
   type ExcelSheet,
   type NewWorkflowResult,
   type BenchmarkInsight,
-  type NewWorkflowAgent,
-  type NewWorkflowAssignedTask,
 } from "@/lib/api";
 import WorkflowEditor from "@/components/WorkflowEditor";
 import {
-  Sparkles, ChevronDown, ChevronRight, Loader2, Edit3,
-  Bot, User, Zap, Download, Upload, FileSpreadsheet, ArrowRight,
+  Sparkles, Loader2,
+  Zap, Download, Upload, FileSpreadsheet, ArrowRight,
   FolderKanban,
 } from "lucide-react";
 
@@ -32,157 +30,6 @@ const AUTO_COLOR: Record<string, { bg: string; text: string; border: string }> =
   "Human-in-Loop":    { bg: "#FFF9DB", text: "#7a5c00", border: "#f2c94c" },
   "Human-Supervised": { bg: "#FFE0E0", text: "#A62121", border: "#eb5757" },
 };
-
-/* ── 뱃지 ─────────────────────────────────────────────────────────────────── */
-function AutoBadge({ level }: { level: string }) {
-  const c = AUTO_COLOR[level] ?? { bg: "#f0f0f0", text: "#333", border: "#ccc" };
-  return (
-    <span className="inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold"
-      style={{ backgroundColor: c.bg, color: c.text, border: `1px solid ${c.border}` }}>
-      {level}
-    </span>
-  );
-}
-
-/* ── Task 행 ──────────────────────────────────────────────────────────────── */
-function TaskRow({ task }: { task: NewWorkflowAssignedTask }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="border-b border-gray-100 last:border-0">
-      <button className="w-full flex items-start gap-3 px-4 py-3 text-left hover:bg-gray-50 transition-colors"
-        onClick={() => setOpen((v) => !v)}>
-        <span className="mt-0.5 text-gray-400 flex-shrink-0">
-          {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-        </span>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs font-mono text-gray-400">{task.task_id}</span>
-            <span className="text-sm font-medium text-gray-800 truncate">{task.task_name}</span>
-            <AutoBadge level={task.automation_level} />
-          </div>
-          <p className="text-xs text-gray-500 mt-0.5">{task.l3} &gt; {task.l4}</p>
-        </div>
-      </button>
-      {open && (
-        <div className="px-10 pb-4 space-y-3">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div className="rounded-lg p-3" style={{ backgroundColor: "#EBF8F0", border: "1px solid #6fcf97" }}>
-              <div className="flex items-center gap-1.5 mb-1">
-                <Bot className="h-3.5 w-3.5" style={{ color: "#1a7a45" }} />
-                <span className="text-xs font-semibold" style={{ color: "#1a7a45" }}>AI 역할</span>
-              </div>
-              <p className="text-sm text-gray-700">{task.ai_role || "—"}</p>
-            </div>
-            {task.human_role && (
-              <div className="rounded-lg p-3" style={{ backgroundColor: "#FFF9DB", border: "1px solid #f2c94c" }}>
-                <div className="flex items-center gap-1.5 mb-1">
-                  <User className="h-3.5 w-3.5" style={{ color: "#7a5c00" }} />
-                  <span className="text-xs font-semibold" style={{ color: "#7a5c00" }}>Human 역할</span>
-                </div>
-                <p className="text-sm text-gray-700">{task.human_role}</p>
-              </div>
-            )}
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {task.input_data.length > 0 && (
-              <div>
-                <p className="text-xs font-semibold text-gray-500 mb-1">INPUT</p>
-                <ul className="space-y-1">
-                  {task.input_data.map((d, i) => (
-                    <li key={i} className="flex items-center gap-1.5 text-sm text-gray-700">
-                      <span className="h-1.5 w-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: PWC.primary }} />{d}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {task.output_data.length > 0 && (
-              <div>
-                <p className="text-xs font-semibold text-gray-500 mb-1">OUTPUT</p>
-                <ul className="space-y-1">
-                  {task.output_data.map((d, i) => (
-                    <li key={i} className="flex items-center gap-1.5 text-sm text-gray-700">
-                      <span className="h-1.5 w-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: "#6fcf97" }} />{d}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* ── Agent 카드 ───────────────────────────────────────────────────────────── */
-function AgentCard({ agent }: { agent: NewWorkflowAgent }) {
-  const [open, setOpen] = useState(true);
-  const c = AUTO_COLOR[agent.automation_level] ?? { bg: "#f0f0f0", text: "#333", border: "#ccc" };
-  return (
-    <div className="rounded-xl overflow-hidden shadow-sm" style={{ border: `1px solid ${c.border}`, backgroundColor: PWC.cardBg }}>
-      <div className="px-5 py-4 cursor-pointer" style={{ backgroundColor: c.bg }} onClick={() => setOpen((v) => !v)}>
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <Bot className="h-4 w-4 flex-shrink-0" style={{ color: c.text }} />
-              <h3 className="font-semibold text-gray-900">{agent.agent_name}</h3>
-              <AutoBadge level={agent.automation_level} />
-            </div>
-            <p className="text-sm mt-1" style={{ color: c.text }}>{agent.agent_type} · {agent.ai_technique}</p>
-          </div>
-          <div className="flex items-center gap-3 flex-shrink-0">
-            <span className="text-sm font-medium text-gray-500">{agent.task_count}개 Task</span>
-            {open ? <ChevronDown className="h-4 w-4 text-gray-400" /> : <ChevronRight className="h-4 w-4 text-gray-400" />}
-          </div>
-        </div>
-        {agent.description && <p className="mt-2 text-sm text-gray-600">{agent.description}</p>}
-      </div>
-      {open && <div>{agent.assigned_tasks.map((t) => <TaskRow key={t.task_id} task={t} />)}</div>}
-    </div>
-  );
-}
-
-/* ── 실행 플로우 ──────────────────────────────────────────────────────────── */
-function ExecutionFlow({ result }: { result: NewWorkflowResult }) {
-  const agentMap = Object.fromEntries(result.agents.map((a) => [a.agent_id, a]));
-  return (
-    <div className="space-y-3">
-      {result.execution_flow.map((step, idx) => (
-        <div key={step.step} className="flex gap-4">
-          <div className="flex flex-col items-center">
-            <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-sm font-bold text-white"
-              style={{ backgroundColor: PWC.primary }}>{step.step}</div>
-            {idx < result.execution_flow.length - 1 && <div className="w-0.5 flex-1 mt-1" style={{ backgroundColor: "#e5e7eb" }} />}
-          </div>
-          <div className="flex-1 pb-6">
-            <div className="flex items-center gap-2 mb-1">
-              <p className="font-semibold text-gray-800">{step.step_name}</p>
-              {step.step_type === "parallel" && (
-                <span className="rounded-full px-2 py-0.5 text-xs font-medium"
-                  style={{ backgroundColor: "#EBF4FF", color: "#2F80ED", border: "1px solid #2F80ED" }}>병렬</span>
-              )}
-            </div>
-            <p className="text-sm text-gray-500 mb-2">{step.description}</p>
-            <div className="flex flex-wrap gap-2">
-              {step.agent_ids.map((aid) => {
-                const agent = agentMap[aid];
-                if (!agent) return null;
-                const ac = AUTO_COLOR[agent.automation_level] ?? { bg: "#f0f0f0", text: "#333", border: "#ccc" };
-                return (
-                  <span key={aid} className="flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium"
-                    style={{ backgroundColor: ac.bg, color: ac.text, border: `1px solid ${ac.border}` }}>
-                    <Bot className="h-3 w-3" />{agent.agent_name}
-                  </span>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
 
 /* ══════════════════════════════════════════════════════════════════════════ */
 /* ── 메인 페이지 ─────────────────────────────────────────────────────────── */
@@ -218,7 +65,6 @@ export default function NewWorkflowPage() {
   // 생성 상태
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<NewWorkflowResult | null>(null);
-  const [activeTab, setActiveTab] = useState<"ai" | "human" | "flow">("ai");
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
 
@@ -272,7 +118,7 @@ export default function NewWorkflowPage() {
     try {
       const res = await generateNewWorkflow({ l3: selectedL3 || undefined });
       setResult(res);
-      setActiveTab("ai");
+      // result updated
     } catch (e) {
       setError(e instanceof Error ? e.message : "생성 중 오류 발생");
     } finally {
@@ -291,7 +137,7 @@ export default function NewWorkflowPage() {
     try {
       const res = await generateNewWorkflowFreeform(formData);
       setResult(res);
-      setActiveTab("ai");
+      // result updated
     } catch (e) {
       setError(e instanceof Error ? e.message : "생성 중 오류 발생");
     } finally {
@@ -309,7 +155,7 @@ export default function NewWorkflowPage() {
       setBenchmarkInsights(res.benchmark_insights || []);
       setImprovementSummary(res.improvement_summary || "");
       setIsBenchmarked(true);
-      setActiveTab("ai");
+      // result updated
     } catch (e) {
       setError(e instanceof Error ? e.message : "벤치마킹 중 오류 발생");
     } finally {
@@ -533,176 +379,43 @@ export default function NewWorkflowPage() {
           </div>
         )}
 
-        {/* ── Step 3: 결과 ─────────────────────────────────────────────────────── */}
+        {/* ── 결과: 스윔레인 메인 뷰 + 단계 컨트롤 ─────────────────────────── */}
         {result && (
           <>
-            {/* 요약 */}
-            <div className="rounded-xl p-5 mb-6 shadow-sm" style={{ backgroundColor: PWC.cardBg, border: "1px solid #f0e0e0" }}>
-              <h2 className="text-base font-semibold text-gray-900 mb-3">
-                {result.process_name} — To-Be Workflow 설계 결과
-              </h2>
-              <p className="text-sm text-gray-600 leading-relaxed mb-4">{result.blueprint_summary}</p>
-
-              {/* AI / Human 통계 */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <div className="rounded-lg p-3 text-center" style={{ backgroundColor: "#f5f5f5" }}>
-                  <p className="text-2xl font-bold text-gray-900">{result.total_tasks}</p>
-                  <p className="text-xs text-gray-500 mt-0.5">총 신규 Task</p>
+            {/* 요약 + 통계 바 */}
+            <div className="rounded-xl p-4 mb-4 shadow-sm" style={{ backgroundColor: PWC.cardBg, border: "1px solid #f0e0e0" }}>
+              <div className="flex items-center justify-between flex-wrap gap-3">
+                <div className="flex-1 min-w-0">
+                  <h2 className="text-base font-semibold text-gray-900">{result.process_name} — AI Service Flow</h2>
+                  <p className="text-xs text-gray-500 mt-0.5 truncate">{result.blueprint_summary}</p>
                 </div>
-                <div className="rounded-lg p-3 text-center" style={{ backgroundColor: AUTO_COLOR["Full-Auto"].bg }}>
-                  <p className="text-2xl font-bold" style={{ color: AUTO_COLOR["Full-Auto"].text }}>{aiTasks.length}</p>
-                  <p className="text-xs mt-0.5" style={{ color: AUTO_COLOR["Full-Auto"].text }}>AI 수행</p>
-                </div>
-                <div className="rounded-lg p-3 text-center" style={{ backgroundColor: AUTO_COLOR["Human-in-Loop"].bg }}>
-                  <p className="text-2xl font-bold" style={{ color: AUTO_COLOR["Human-in-Loop"].text }}>{humanTasks.length}</p>
-                  <p className="text-xs mt-0.5" style={{ color: AUTO_COLOR["Human-in-Loop"].text }}>Human 수행</p>
-                </div>
-                <div className="rounded-lg p-3 text-center" style={{ backgroundColor: "#EBF4FF" }}>
-                  <p className="text-2xl font-bold" style={{ color: "#2F80ED" }}>{result.agents.length}</p>
-                  <p className="text-xs mt-0.5" style={{ color: "#2F80ED" }}>AI Agent</p>
-                </div>
-              </div>
-            </div>
-
-            {/* ── 2단계: 벤치마킹 ────────────────────────────────────────── */}
-            <div className="rounded-xl p-5 mb-6 shadow-sm" style={{ backgroundColor: PWC.cardBg, border: isBenchmarked ? "2px solid #6fcf97" : "1px solid #f0e0e0" }}>
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2">
-                  <span className="text-lg">🔍</span>
-                  <h2 className="text-base font-semibold text-gray-900">
-                    2단계: 웹 벤치마킹으로 가다듬기
-                  </h2>
-                  {isBenchmarked && (
-                    <span className="rounded-full px-2.5 py-0.5 text-xs font-semibold bg-green-100 text-green-700 border border-green-300">
-                      적용 완료
-                    </span>
-                  )}
-                </div>
-                <button
-                  onClick={handleBenchmark}
-                  disabled={benchmarking}
-                  className="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white transition-opacity disabled:opacity-60"
-                  style={{ backgroundColor: isBenchmarked ? "#1a7a45" : PWC.primary }}
-                >
-                  {benchmarking ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <span>🔍</span>
-                  )}
-                  {benchmarking ? "벤치마킹 검색 및 개선 중..." : isBenchmarked ? "다시 벤치마킹" : "벤치마킹 시작"}
-                </button>
-              </div>
-
-              {!isBenchmarked && (
-                <p className="text-sm text-gray-500">
-                  유사 AI 자동화 사례를 웹에서 검색하고, 벤치마킹 결과를 반영하여 Workflow를 가다듬습니다.
-                </p>
-              )}
-
-              {/* 벤치마킹 인사이트 */}
-              {isBenchmarked && improvementSummary && (
-                <div className="mt-3 rounded-lg p-4" style={{ backgroundColor: "#F0FFF4", border: "1px solid #C6F6D5" }}>
-                  <p className="text-sm font-semibold text-green-800 mb-2">개선 요약</p>
-                  <p className="text-sm text-green-700">{improvementSummary}</p>
-                </div>
-              )}
-
-              {isBenchmarked && benchmarkInsights.length > 0 && (
-                <div className="mt-3 space-y-2">
-                  <p className="text-xs font-semibold text-gray-500">참고한 벤치마킹 사례</p>
-                  {benchmarkInsights.map((insight, i) => (
-                    <div key={i} className="rounded-lg p-3 bg-gray-50 border border-gray-200">
-                      <div className="flex items-start gap-2">
-                        <span className="text-xs font-bold text-gray-400 mt-0.5">{i + 1}</span>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-gray-800">{insight.source}</p>
-                          <p className="text-xs text-gray-600 mt-0.5">{insight.insight}</p>
-                          <p className="text-xs mt-1" style={{ color: PWC.primary }}>
-                            → {insight.application}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* 탭 + 버튼 */}
-            <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
-              <div className="flex gap-1 rounded-lg p-1 w-fit" style={{ backgroundColor: "#f0e0e0" }}>
-                {([
-                  { key: "ai", label: `AI Task (${aiTasks.length})` },
-                  { key: "human", label: `Human Task (${humanTasks.length})` },
-                  { key: "flow", label: "실행 플로우" },
-                ] as const).map(({ key, label }) => (
-                  <button
-                    key={key}
-                    onClick={() => setActiveTab(key)}
-                    className="rounded-md px-4 py-1.5 text-sm font-medium transition-colors"
-                    style={activeTab === key ? { backgroundColor: PWC.primary, color: "#fff" } : { color: PWC.primary }}
-                  >
-                    {label}
+                <div className="flex gap-2">
+                  <div className="rounded-lg px-3 py-1.5 text-center" style={{ backgroundColor: "#f5f5f5" }}>
+                    <span className="text-lg font-bold text-gray-900">{result.total_tasks}</span>
+                    <span className="text-[10px] text-gray-500 ml-1">Task</span>
+                  </div>
+                  <div className="rounded-lg px-3 py-1.5 text-center" style={{ backgroundColor: AUTO_COLOR["Full-Auto"].bg }}>
+                    <span className="text-lg font-bold" style={{ color: AUTO_COLOR["Full-Auto"].text }}>{aiTasks.length}</span>
+                    <span className="text-[10px] ml-1" style={{ color: AUTO_COLOR["Full-Auto"].text }}>AI</span>
+                  </div>
+                  <div className="rounded-lg px-3 py-1.5 text-center" style={{ backgroundColor: AUTO_COLOR["Human-in-Loop"].bg }}>
+                    <span className="text-lg font-bold" style={{ color: AUTO_COLOR["Human-in-Loop"].text }}>{humanTasks.length}</span>
+                    <span className="text-[10px] ml-1" style={{ color: AUTO_COLOR["Human-in-Loop"].text }}>Human</span>
+                  </div>
+                  <button onClick={handleExport} disabled={exporting}
+                    className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium disabled:opacity-60"
+                    style={{ borderColor: PWC.primary, color: PWC.primary }}>
+                    {exporting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
+                    JSON
                   </button>
-                ))}
-              </div>
-
-              <div className="flex gap-2">
-                <button onClick={handleExport} disabled={exporting}
-                  className="flex items-center gap-2 rounded-lg border px-4 py-1.5 text-sm font-medium disabled:opacity-60"
-                  style={{ borderColor: PWC.primary, color: PWC.primary }}>
-                  {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                  JSON 내보내기
-                </button>
+                </div>
               </div>
             </div>
 
-            {/* AI Task 탭 */}
-            {activeTab === "ai" && (
-              <div className="space-y-4">
-                {result.agents
-                  .filter((a) => a.automation_level === "Full-Auto")
-                  .map((agent) => <AgentCard key={agent.agent_id} agent={agent} />)}
-                {result.agents
-                  .filter((a) => a.automation_level === "Full-Auto").length === 0 && (
-                  <div className="text-center py-8 text-gray-400 text-sm">Full-Auto AI 에이전트가 없습니다.</div>
-                )}
-              </div>
-            )}
-
-            {/* Human Task 탭 */}
-            {activeTab === "human" && (
-              <div className="space-y-4">
-                {result.agents
-                  .filter((a) => a.automation_level !== "Full-Auto")
-                  .map((agent) => <AgentCard key={agent.agent_id} agent={agent} />)}
-                {result.agents
-                  .filter((a) => a.automation_level !== "Full-Auto").length === 0 && (
-                  <div className="text-center py-8 text-gray-400 text-sm">Human 관여 에이전트가 없습니다.</div>
-                )}
-              </div>
-            )}
-
-            {/* 실행 플로우 탭 */}
-            {activeTab === "flow" && (
-              <div className="rounded-xl p-5 shadow-sm" style={{ backgroundColor: PWC.cardBg, border: "1px solid #f0e0e0" }}>
-                <h2 className="text-base font-semibold text-gray-900 mb-5">To-Be Workflow 실행 순서</h2>
-                <ExecutionFlow result={result} />
-              </div>
-            )}
-
-            {/* ── 3단계: 직접 편집 ─────────────────────────────────────────── */}
-            <div className="rounded-xl p-5 mb-6 shadow-sm" style={{ backgroundColor: PWC.cardBg, border: "1px solid #f0e0e0" }}>
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2">
-                  <Edit3 className="h-5 w-5" style={{ color: PWC.primary }} />
-                  <h2 className="text-base font-semibold text-gray-900">3단계: Workflow 직접 편집</h2>
-                </div>
-              </div>
-              <p className="text-sm text-gray-500 mb-4">
-                AI Service Flow를 직접 수정할 수 있습니다. 박스를 클릭하여 편집하고, + 버튼으로 새 항목을 추가하세요.
-              </p>
+            {/* ★ 메인 스윔레인 — 항상 보임 ★ */}
+            <div className="mb-6">
               <WorkflowEditor
+                key={`editor-${result.total_tasks}-${isBenchmarked}`}
                 result={result}
                 onSave={async (swimlaneData) => {
                   try {
@@ -712,19 +425,82 @@ export default function NewWorkflowPage() {
               />
             </div>
 
+            {/* ── 단계별 액션 바 ──────────────────────────────────────────── */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+
+              {/* 1단계: 완료 */}
+              <div className="rounded-xl p-4 shadow-sm" style={{ backgroundColor: PWC.cardBg, border: "2px solid #6fcf97" }}>
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-6 h-6 rounded-full bg-green-100 flex items-center justify-center">
+                    <span className="text-xs font-bold text-green-700">1</span>
+                  </div>
+                  <span className="text-sm font-semibold text-gray-900">AI 설계</span>
+                  <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold bg-green-100 text-green-700">완료</span>
+                </div>
+                <p className="text-xs text-gray-500">Pain Point 기반 To-Be Workflow 생성됨</p>
+              </div>
+
+              {/* 2단계: 벤치마킹 */}
+              <div className="rounded-xl p-4 shadow-sm" style={{ backgroundColor: PWC.cardBg, border: isBenchmarked ? "2px solid #6fcf97" : "1px solid #f0e0e0" }}>
+                <div className="flex items-center gap-2 mb-2">
+                  <div className={`w-6 h-6 rounded-full flex items-center justify-center ${isBenchmarked ? "bg-green-100" : "bg-gray-100"}`}>
+                    <span className={`text-xs font-bold ${isBenchmarked ? "text-green-700" : "text-gray-500"}`}>2</span>
+                  </div>
+                  <span className="text-sm font-semibold text-gray-900">벤치마킹</span>
+                  {isBenchmarked && <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold bg-green-100 text-green-700">적용됨</span>}
+                </div>
+                <button onClick={handleBenchmark} disabled={benchmarking}
+                  className="w-full mt-1 flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                  style={{ backgroundColor: isBenchmarked ? "#1a7a45" : PWC.primary }}>
+                  {benchmarking ? <Loader2 className="h-3 w-3 animate-spin" /> : <span>🔍</span>}
+                  {benchmarking ? "검색 중..." : isBenchmarked ? "다시 벤치마킹" : "벤치마킹 시작"}
+                </button>
+              </div>
+
+              {/* 3단계: 편집 안내 */}
+              <div className="rounded-xl p-4 shadow-sm" style={{ backgroundColor: PWC.cardBg, border: "1px solid #f0e0e0" }}>
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-6 h-6 rounded-full bg-gray-100 flex items-center justify-center">
+                    <span className="text-xs font-bold text-gray-500">3</span>
+                  </div>
+                  <span className="text-sm font-semibold text-gray-900">직접 편집</span>
+                </div>
+                <p className="text-xs text-gray-500">위 스윔레인의 박스를 클릭하여 직접 수정하세요. + 버튼으로 추가, 휴지통으로 삭제.</p>
+              </div>
+            </div>
+
+            {/* 벤치마킹 인사이트 (접힘 가능) */}
+            {isBenchmarked && (improvementSummary || benchmarkInsights.length > 0) && (
+              <div className="rounded-xl p-4 mb-6 shadow-sm" style={{ backgroundColor: "#F0FFF4", border: "1px solid #C6F6D5" }}>
+                <p className="text-sm font-semibold text-green-800 mb-2">벤치마킹 개선 요약</p>
+                {improvementSummary && <p className="text-sm text-green-700 mb-3">{improvementSummary}</p>}
+                {benchmarkInsights.length > 0 && (
+                  <div className="space-y-1.5">
+                    {benchmarkInsights.map((insight, i) => (
+                      <div key={i} className="flex items-start gap-2 text-xs">
+                        <span className="font-bold text-green-600 mt-0.5">{i + 1}.</span>
+                        <div>
+                          <span className="font-medium text-gray-800">{insight.source}</span>
+                          <span className="text-gray-500"> — {insight.insight}</span>
+                          <span style={{ color: PWC.primary }}> → {insight.application}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* ── 과제 관리로 연결 ────────────────────────────────────────────── */}
-            <div className="mt-8 rounded-xl p-6 shadow-sm text-center"
+            <div className="rounded-xl p-5 shadow-sm text-center"
               style={{ backgroundColor: PWC.cardBg, border: "2px solid #f0e0e0" }}>
-              <FolderKanban className="mx-auto h-8 w-8 mb-3" style={{ color: PWC.primary }} />
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">과제 관리로 이어서 진행하기</h3>
-              <p className="text-sm text-gray-500 mb-4">
-                이 Workflow 설계 결과를 기반으로 과제 정의서와 설계서를 자동 생성할 수 있습니다.
-              </p>
+              <FolderKanban className="mx-auto h-7 w-7 mb-2" style={{ color: PWC.primary }} />
+              <h3 className="text-base font-semibold text-gray-900 mb-1">과제 관리로 이어서 진행</h3>
+              <p className="text-xs text-gray-500 mb-3">Workflow 설계 결과를 기반으로 과제 정의서/설계서를 자동 생성합니다.</p>
               <button
                 onClick={() => router.push("/project-management?source=new-workflow")}
-                className="inline-flex items-center gap-2 rounded-lg px-6 py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90"
-                style={{ backgroundColor: PWC.primary }}
-              >
+                className="inline-flex items-center gap-2 rounded-lg px-5 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90"
+                style={{ backgroundColor: PWC.primary }}>
                 <FolderKanban className="h-4 w-4" />
                 과제 정의서 / 설계서 생성
                 <ArrowRight className="h-4 w-4" />
