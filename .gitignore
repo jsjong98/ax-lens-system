@@ -7,6 +7,11 @@ backend/results_anthropic.json
 backend/results/
 backend/usage.json
 backend/workflow.json
+backend/workflow_result.json
+backend/new_workflow_result.json
+backend/project_definition.json
+backend/project_design.json
+backend/nw_tasks.json
 backend/settings.json
 
 # ── 업로드된 파일 / 클라이언트 데이터 ──────────────────

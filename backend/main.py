@@ -77,6 +77,7 @@ from auth_store import (
     reset_password,
     send_reset_email,
 )
+from data_store import save_data, load_data, clear_data, get_saved_status
 
 # ── 앱 초기화 ────────────────────────────────────────────────────────────────
 
@@ -202,6 +203,32 @@ async def api_reset_confirm(body: _ResetPasswordBody):
 
 # ── 인메모리 Task 캐시 ────────────────────────────────────────────────────────
 _tasks_cache: list[Task] = []
+
+
+# ── 영속 저장 헬퍼 ──────────────────────────────────────────────────────────
+
+def _persist_cache(key: str, cache: dict) -> None:
+    """캐시 데이터를 JSON 파일로 영속 저장합니다."""
+    save_data(key, dict(cache))
+
+
+def _restore_cache(key: str, cache: dict) -> None:
+    """서버 시작 시 JSON 파일에서 캐시를 복원합니다."""
+    data = load_data(key)
+    if data and isinstance(data, dict):
+        cache.update(data)
+        print(f"[data_store] '{key}' 복원 완료 ({len(data)} keys)")
+
+
+# 데이터 저장 상태 확인 API
+@app.get("/api/data-status", tags=["Data"])
+async def get_data_status():
+    """각 단계별 데이터 저장 상태를 반환합니다."""
+    return {
+        "ok": True,
+        "tasks_loaded": len(_tasks_cache) > 0,
+        "saved": get_saved_status(),
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1180,10 +1207,11 @@ async def generate_tobe_workflow(
 # New Workflow 엔드포인트 (엑셀 → AI 워크플로우 설계 초안)
 # ─────────────────────────────────────────────────────────────────────────────
 
-# New Workflow 전용 캐시 (독립 운영)
+# New Workflow 전용 캐시 (독립 운영) + 자동 복원
 _nw_tasks_cache: list[Task] = []
 _nw_excel_path: Path | None = None
 _new_workflow_cache: dict = {}
+_restore_cache("new_workflow", _new_workflow_cache)
 
 
 @app.post("/api/new-workflow/upload", tags=["NewWorkflow"])
@@ -1324,6 +1352,7 @@ async def generate_new_workflow(
 
     result_dict = result_to_dict(result)
     _new_workflow_cache.update(result_dict)
+    _persist_cache("new_workflow", _new_workflow_cache)
 
     return {"ok": True, **result_dict}
 
@@ -1361,6 +1390,8 @@ async def generate_new_workflow_freeform(request: Request):
     result_dict = result_to_dict(result)
     _new_workflow_cache.clear()
     _new_workflow_cache.update(result_dict)
+    _persist_cache("new_workflow", _new_workflow_cache)
+
 
     return {"ok": True, **result_dict}
 
@@ -1409,6 +1440,7 @@ async def benchmark_new_workflow():
 
     _new_workflow_cache.clear()
     _new_workflow_cache.update(refined_dict)
+    _persist_cache("new_workflow", _new_workflow_cache)
 
     return {
         "ok": True,
@@ -1435,6 +1467,7 @@ async def save_edited_workflow(request: Request):
         raise HTTPException(400, "저장할 데이터가 없습니다.")
     _new_workflow_cache.clear()
     _new_workflow_cache.update(body)
+    _persist_cache("new_workflow", _new_workflow_cache)
     return {"ok": True}
 
 
@@ -1442,6 +1475,7 @@ async def save_edited_workflow(request: Request):
 async def clear_new_workflow_result():
     """New Workflow 결과를 초기화합니다."""
     _new_workflow_cache.clear()
+    clear_data("new_workflow")
     return {"ok": True}
 
 
@@ -1530,6 +1564,7 @@ async def export_new_workflow_as_hr_json():
 
 # 과제 정의서 캐시
 _project_definition_cache: dict = {}
+_restore_cache("project_definition", _project_definition_cache)
 
 
 def _build_classification_from_workflow(workflow_cache: dict) -> dict[str, dict]:
@@ -1668,6 +1703,7 @@ async def generate_project_definition(
     result_dict = project_definition_to_dict(result)
     _project_definition_cache.clear()
     _project_definition_cache.update(result_dict)
+    _persist_cache("project_definition", _project_definition_cache)
 
     return {"ok": True, **result_dict}
 
@@ -1684,12 +1720,14 @@ async def get_project_definition():
 async def clear_project_definition():
     """과제 정의서 결과를 초기화합니다."""
     _project_definition_cache.clear()
+    clear_data("project_definition")
     return {"ok": True}
 
 
 # ── 과제 설계서 ───────────────────────────────────────────────────────────────
 
 _project_design_cache: dict = {}
+_restore_cache("project_design", _project_design_cache)
 
 
 @app.post("/api/project-management/design/generate", tags=["ProjectManagement"])
@@ -1787,6 +1825,7 @@ async def generate_project_design(
     result_dict = project_design_to_dict(result)
     _project_design_cache.clear()
     _project_design_cache.update(result_dict)
+    _persist_cache("project_design", _project_design_cache)
 
     return {"ok": True, **result_dict}
 
@@ -1803,6 +1842,7 @@ async def get_project_design():
 async def clear_project_design():
     """과제 설계서 결과를 초기화합니다."""
     _project_design_cache.clear()
+    clear_data("project_design")
     return {"ok": True}
 
 
