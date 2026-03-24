@@ -63,18 +63,20 @@ def _save_users(users: dict[str, dict]) -> None:
 
 
 def init_default_users() -> None:
-    """기본 계정이 없으면 생성"""
+    """
+    기본 계정이 없으면 생성.
+    환경변수 DEFAULT_USERS에서 읽음 (JSON 배열).
+    예: [{"email":"a@b.com","name":"홍길동","password":"pw123"}]
+    """
     users = _load_users()
-    defaults = [
-        {"email": "jong-hwan.oh@pwc.com", "name": "오종환", "password": "strategy&"},
-        {"email": "jidong.kim@pwc.com", "name": "김지동", "password": "strategy&"},
-        {"email": "hee-jin.jung@pwc.com", "name": "정희진", "password": "strategy&"},
-        {"email": "hyesoo.cho@pwc.com", "name": "조혜수", "password": "strategy&"},
-        {"email": "solee.yoon@pwc.com", "name": "윤솔이", "password": "strategy&"},
-        {"email": "soyeon.s.back@pwc.com", "name": "백소연", "password": "strategy&"},
-        {"email": "heonsang.h.you@pwc.com", "name": "유헌상", "password": "strategy&"},
-        {"email": "suyeon.y.oh@pwc.com", "name": "오수연", "password": "strategy&"},
-    ]
+    defaults_json = os.getenv("DEFAULT_USERS", "")
+    if not defaults_json:
+        return  # 환경변수 미설정 시 건너뜀
+    try:
+        defaults = json.loads(defaults_json)
+    except json.JSONDecodeError:
+        print("[auth] DEFAULT_USERS 환경변수 파싱 실패")
+        return
     changed = False
     for d in defaults:
         if d["email"] not in users:
