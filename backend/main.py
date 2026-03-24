@@ -1427,6 +1427,17 @@ async def get_new_workflow_result():
     return {"ok": True, **_new_workflow_cache}
 
 
+@app.put("/api/new-workflow/result", tags=["NewWorkflow"])
+async def save_edited_workflow(request: Request):
+    """3단계에서 편집된 Workflow를 저장합니다."""
+    body = await request.json()
+    if not body:
+        raise HTTPException(400, "저장할 데이터가 없습니다.")
+    _new_workflow_cache.clear()
+    _new_workflow_cache.update(body)
+    return {"ok": True}
+
+
 @app.delete("/api/new-workflow/result", tags=["NewWorkflow"])
 async def clear_new_workflow_result():
     """New Workflow 결과를 초기화합니다."""

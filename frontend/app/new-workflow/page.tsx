@@ -9,6 +9,7 @@ import {
   generateNewWorkflow,
   generateNewWorkflowFreeform,
   benchmarkNewWorkflow,
+  saveEditedWorkflow,
   downloadNewWorkflowAsHrJson,
   type ExcelSheet,
   type NewWorkflowResult,
@@ -16,8 +17,9 @@ import {
   type NewWorkflowAgent,
   type NewWorkflowAssignedTask,
 } from "@/lib/api";
+import WorkflowEditor from "@/components/WorkflowEditor";
 import {
-  Sparkles, ChevronDown, ChevronRight, Loader2,
+  Sparkles, ChevronDown, ChevronRight, Loader2, Edit3,
   Bot, User, Zap, Download, Upload, FileSpreadsheet, ArrowRight,
   FolderKanban,
 } from "lucide-react";
@@ -688,6 +690,27 @@ export default function NewWorkflowPage() {
                 <ExecutionFlow result={result} />
               </div>
             )}
+
+            {/* ── 3단계: 직접 편집 ─────────────────────────────────────────── */}
+            <div className="rounded-xl p-5 mb-6 shadow-sm" style={{ backgroundColor: PWC.cardBg, border: "1px solid #f0e0e0" }}>
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <Edit3 className="h-5 w-5" style={{ color: PWC.primary }} />
+                  <h2 className="text-base font-semibold text-gray-900">3단계: Workflow 직접 편집</h2>
+                </div>
+              </div>
+              <p className="text-sm text-gray-500 mb-4">
+                AI Service Flow를 직접 수정할 수 있습니다. 박스를 클릭하여 편집하고, + 버튼으로 새 항목을 추가하세요.
+              </p>
+              <WorkflowEditor
+                result={result}
+                onSave={async (swimlaneData) => {
+                  try {
+                    await saveEditedWorkflow(swimlaneData as unknown as Record<string, unknown>);
+                  } catch {}
+                }}
+              />
+            </div>
 
             {/* ── 과제 관리로 연결 ────────────────────────────────────────────── */}
             <div className="mt-8 rounded-xl p-6 shadow-sm text-center"

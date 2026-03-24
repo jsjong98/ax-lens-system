@@ -857,6 +857,13 @@ export async function getNewWorkflowResult(): Promise<NewWorkflowResult> {
   return apiFetch("/new-workflow/result");
 }
 
+export async function saveEditedWorkflow(data: Record<string, unknown>): Promise<{ ok: boolean }> {
+  return apiFetch("/new-workflow/result", {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+}
+
 export async function clearNewWorkflowResult(): Promise<{ ok: boolean }> {
   return apiFetch("/new-workflow/result", { method: "DELETE" });
 }
