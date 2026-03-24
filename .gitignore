@@ -1,6 +1,7 @@
 # ── 민감 정보 ──────────────────────────────────────────
 backend/.env
 backend/users.json
+backend/sessions.json
 backend/results.json
 backend/results_openai.json
 backend/results_anthropic.json

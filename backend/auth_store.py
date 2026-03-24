@@ -15,12 +15,34 @@ from pathlib import Path
 from datetime import datetime, timedelta
 
 _USERS_FILE = Path(__file__).parent / "users.json"
+_SESSIONS_FILE = Path(__file__).parent / "sessions.json"
 
-# 인메모리 세션 저장소: {token: {"email": ..., "expires": ...}}
+# 세션 저장소 (파일 영속)
 _sessions: dict[str, dict] = {}
 
-# 인메모리 인증번호 저장소: {email: {"code": ..., "expires_at": ...}}
+# 인메모리 인증번호 저장소
 _reset_codes: dict[str, dict] = {}
+
+
+def _load_sessions() -> None:
+    """서버 시작 시 세션 파일에서 복원."""
+    global _sessions
+    if _SESSIONS_FILE.exists():
+        try:
+            _sessions = json.loads(_SESSIONS_FILE.read_text("utf-8"))
+        except Exception:
+            _sessions = {}
+
+
+def _save_sessions() -> None:
+    """세션을 파일로 저장."""
+    try:
+        _SESSIONS_FILE.write_text(json.dumps(_sessions, ensure_ascii=False), "utf-8")
+    except Exception as e:
+        print(f"[auth] 세션 저장 실패: {e}")
+
+
+_load_sessions()
 
 
 def _hash_password(password: str) -> str:
@@ -75,9 +97,10 @@ def authenticate(email: str, password: str) -> str | None:
         return None
     if user["password_hash"] != _hash_password(password):
         return None
-    # 세션 토큰 생성
+    # 세션 토큰 생성 + 파일 저장
     token = secrets.token_urlsafe(32)
     _sessions[token] = {"email": email}
+    _save_sessions()
     return token
 
 
@@ -115,6 +138,7 @@ def change_password(email: str, old_password: str, new_password: str) -> bool:
 def logout(token: str) -> None:
     """세션 삭제"""
     _sessions.pop(token, None)
+    _save_sessions()
 
 
 # ── 비밀번호 재설정 ──────────────────────────────────────────────────────────
