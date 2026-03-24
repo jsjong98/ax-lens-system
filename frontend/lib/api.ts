@@ -823,6 +823,20 @@ export async function generateNewWorkflow(params: {
   return apiFetch(`/new-workflow/generate${query}`, { method: "POST" });
 }
 
+export async function generateNewWorkflowFreeform(params: {
+  process_name: string;
+  inputs?: string;
+  outputs?: string;
+  systems?: string;
+  pain_points?: string;
+  additional_info?: string;
+}): Promise<NewWorkflowResult> {
+  return apiFetch("/new-workflow/generate-freeform", {
+    method: "POST",
+    body: JSON.stringify(params),
+  });
+}
+
 export async function getNewWorkflowResult(): Promise<NewWorkflowResult> {
   return apiFetch("/new-workflow/result");
 }

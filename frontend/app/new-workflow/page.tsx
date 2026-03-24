@@ -7,6 +7,7 @@ import {
   selectNewWorkflowSheet,
   getNewWorkflowFilters,
   generateNewWorkflow,
+  generateNewWorkflowFreeform,
   downloadNewWorkflowAsHrJson,
   type ExcelSheet,
   type NewWorkflowResult,
@@ -14,7 +15,7 @@ import {
   type NewWorkflowAssignedTask,
 } from "@/lib/api";
 import {
-  Sparkles, ChevronDown, ChevronRight, Loader2, RefreshCw,
+  Sparkles, ChevronDown, ChevronRight, Loader2,
   Bot, User, Zap, Download, Upload, FileSpreadsheet, ArrowRight,
   FolderKanban,
 } from "lucide-react";
@@ -183,24 +184,42 @@ function ExecutionFlow({ result }: { result: NewWorkflowResult }) {
 /* ── 메인 페이지 ─────────────────────────────────────────────────────────── */
 /* ══════════════════════════════════════════════════════════════════════════ */
 
+type InputMode = "excel" | "form";
+
 export default function NewWorkflowPage() {
   const router = useRouter();
 
-  // 업로드 상태
+  // 입력 모드
+  const [inputMode, setInputMode] = useState<InputMode>("form");
+
+  // 엑셀 업로드 상태
   const [uploading, setUploading] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<string | null>(null);
   const [taskCount, setTaskCount] = useState(0);
   const [sheets, setSheets] = useState<ExcelSheet[]>([]);
   const [selectedSheet, setSelectedSheet] = useState("");
-
-  // 생성 상태
   const [l3Options, setL3Options] = useState<{ id: string; name: string }[]>([]);
   const [selectedL3, setSelectedL3] = useState("");
+
+  // 직접 입력 상태
+  const [formData, setFormData] = useState({
+    process_name: "",
+    inputs: "",
+    outputs: "",
+    systems: "",
+    pain_points: "",
+    additional_info: "",
+  });
+
+  // 생성 상태
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<NewWorkflowResult | null>(null);
   const [activeTab, setActiveTab] = useState<"ai" | "human" | "flow">("ai");
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+
+  const updateForm = (key: string, value: string) =>
+    setFormData((prev) => ({ ...prev, [key]: value }));
 
   // 파일 업로드
   const handleUpload = useCallback(async (file: File) => {
@@ -236,12 +255,31 @@ export default function NewWorkflowPage() {
     }
   };
 
-  // Workflow 생성
-  const handleGenerate = async () => {
+  // Workflow 생성 (엑셀 모드)
+  const handleGenerateFromExcel = async () => {
     setLoading(true);
     setError(null);
     try {
       const res = await generateNewWorkflow({ l3: selectedL3 || undefined });
+      setResult(res);
+      setActiveTab("ai");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "생성 중 오류 발생");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Workflow 생성 (직접 입력 모드)
+  const handleGenerateFromForm = async () => {
+    if (!formData.process_name.trim()) {
+      setError("프로세스/주제명을 입력해 주세요.");
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await generateNewWorkflowFreeform(formData);
       setResult(res);
       setActiveTab("ai");
     } catch (e) {
@@ -282,108 +320,183 @@ export default function NewWorkflowPage() {
           </p>
         </div>
 
-        {/* ── Step 1: 엑셀 업로드 ─────────────────────────────────────────────── */}
-        <div className="rounded-xl p-5 mb-6 shadow-sm" style={{ backgroundColor: PWC.cardBg, border: "1px solid #f0e0e0" }}>
-          <div className="flex items-center gap-2 mb-3">
-            <FileSpreadsheet className="h-5 w-5" style={{ color: PWC.primary }} />
-            <h2 className="text-base font-semibold text-gray-900">1. 엑셀 파일 업로드</h2>
-          </div>
-
-          {!uploadedFile ? (
-            <label className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 py-10 cursor-pointer hover:border-[#A62121] transition-colors">
-              <input
-                type="file"
-                accept=".xlsx"
-                className="hidden"
-                onChange={(e) => { if (e.target.files?.[0]) handleUpload(e.target.files[0]); }}
-                disabled={uploading}
-              />
-              {uploading ? (
-                <Loader2 className="h-8 w-8 animate-spin text-gray-400 mb-2" />
-              ) : (
-                <Upload className="h-8 w-8 text-gray-400 mb-2" />
-              )}
-              <p className="text-sm text-gray-600 font-medium">
-                {uploading ? "업로드 중..." : "클릭하거나 파일을 드래그해서 업로드"}
-              </p>
-              <p className="text-xs text-gray-400 mt-1">HR As-Is 템플릿 .xlsx 파일</p>
-            </label>
-          ) : (
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <FileSpreadsheet className="h-5 w-5 text-green-600" />
-                <div>
-                  <p className="text-sm font-medium text-gray-900">{uploadedFile}</p>
-                  <p className="text-xs text-gray-500">{taskCount}개 Task 로드됨</p>
-                </div>
-              </div>
-              <label className="text-sm cursor-pointer font-medium" style={{ color: PWC.primary }}>
-                <input
-                  type="file"
-                  accept=".xlsx"
-                  className="hidden"
-                  onChange={(e) => { if (e.target.files?.[0]) handleUpload(e.target.files[0]); }}
-                />
-                다른 파일
-              </label>
-            </div>
-          )}
-
-          {/* 시트 선택 */}
-          {sheets.length > 1 && (
-            <div className="mt-3">
-              <label className="block text-xs font-medium text-gray-500 mb-1">시트 선택</label>
-              <select
-                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
-                value={selectedSheet}
-                onChange={(e) => handleSelectSheet(e.target.value)}
-              >
-                {sheets.map((s) => (
-                  <option key={s.name} value={s.name}>
-                    {s.name} ({s.l5_count} tasks){s.recommended ? " ★ 추천" : ""}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-        </div>
-
-        {/* ── Step 2: 생성 컨트롤 ─────────────────────────────────────────────── */}
-        {uploadedFile && taskCount > 0 && (
-          <div className="rounded-xl p-5 mb-6 shadow-sm" style={{ backgroundColor: PWC.cardBg, border: "1px solid #f0e0e0" }}>
-            <div className="flex items-center gap-2 mb-3">
-              <Zap className="h-5 w-5" style={{ color: PWC.primary }} />
-              <h2 className="text-base font-semibold text-gray-900">2. To-Be Workflow 생성</h2>
-            </div>
-
-            <div className="flex flex-col sm:flex-row gap-3 items-end">
-              <div className="flex-1">
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  L3 필터 <span className="text-gray-400 font-normal">(선택)</span>
-                </label>
-                <select
-                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#A62121]"
-                  value={selectedL3}
-                  onChange={(e) => setSelectedL3(e.target.value)}
-                >
-                  <option value="">전체</option>
-                  {l3Options.map((o) => (
-                    <option key={o.id} value={o.name}>{o.name}</option>
-                  ))}
-                </select>
-              </div>
+        {/* ── 입력 모드 선택 ────────────────────────────────────────────────── */}
+        <div className="rounded-xl shadow-sm overflow-hidden mb-6" style={{ backgroundColor: PWC.cardBg, border: "1px solid #f0e0e0" }}>
+          {/* 모드 탭 */}
+          <div className="flex border-b" style={{ borderColor: "#f0e0e0" }}>
+            {([
+              { key: "form" as InputMode, label: "직접 입력", icon: Zap },
+              { key: "excel" as InputMode, label: "엑셀 업로드", icon: FileSpreadsheet },
+            ]).map(({ key, label, icon: Icon }) => (
               <button
-                onClick={handleGenerate}
-                disabled={loading}
-                className="flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-semibold text-white transition-opacity disabled:opacity-60"
-                style={{ backgroundColor: PWC.primary }}
+                key={key}
+                onClick={() => setInputMode(key)}
+                className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-semibold transition-colors ${
+                  inputMode === key ? "text-white" : "text-gray-500 hover:text-gray-700 hover:bg-gray-50"
+                }`}
+                style={inputMode === key ? { backgroundColor: PWC.primary } : undefined}
               >
-                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : result ? <RefreshCw className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
-                {loading ? "AI가 새 Workflow를 설계하고 있습니다..." : result ? "재생성" : "AI Workflow 설계 시작"}
+                <Icon className="h-4 w-4" />
+                {label}
               </button>
-            </div>
+            ))}
           </div>
-        )}
+
+          <div className="p-5">
+            {/* ── 직접 입력 모드 ──────────────────────────────────────────── */}
+            {inputMode === "form" && (
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    프로세스 / 주제명 <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.process_name}
+                    onChange={(e) => updateForm("process_name", e.target.value)}
+                    placeholder="예: 채용 프로세스, 교육 운영 관리, 급여 정산 등"
+                    className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-[#A62121] focus:ring-1 focus:ring-[#A62121] outline-none"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Input (투입 자료/데이터)</label>
+                    <textarea
+                      value={formData.inputs}
+                      onChange={(e) => updateForm("inputs", e.target.value)}
+                      placeholder="예: 이력서, 채용 공고, 면접 평가서 등"
+                      rows={3}
+                      className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-[#A62121] focus:ring-1 focus:ring-[#A62121] outline-none resize-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Output (산출물/결과물)</label>
+                    <textarea
+                      value={formData.outputs}
+                      onChange={(e) => updateForm("outputs", e.target.value)}
+                      placeholder="예: 최종 합격자 리스트, 채용 보고서, 온보딩 계획 등"
+                      rows={3}
+                      className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-[#A62121] focus:ring-1 focus:ring-[#A62121] outline-none resize-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">사용 시스템 / 툴</label>
+                    <textarea
+                      value={formData.systems}
+                      onChange={(e) => updateForm("systems", e.target.value)}
+                      placeholder="예: SAP, Workday, Excel, Outlook 등"
+                      rows={2}
+                      className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-[#A62121] focus:ring-1 focus:ring-[#A62121] outline-none resize-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Pain Point (현재 문제점)</label>
+                    <textarea
+                      value={formData.pain_points}
+                      onChange={(e) => updateForm("pain_points", e.target.value)}
+                      placeholder="예: 수작업 반복, 데이터 불일치, 처리 시간 과다 등"
+                      rows={2}
+                      className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-[#A62121] focus:ring-1 focus:ring-[#A62121] outline-none resize-none"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">추가 참고사항</label>
+                  <textarea
+                    value={formData.additional_info}
+                    onChange={(e) => updateForm("additional_info", e.target.value)}
+                    placeholder="기타 참고할 정보가 있으면 자유롭게 입력해 주세요"
+                    rows={2}
+                    className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-[#A62121] focus:ring-1 focus:ring-[#A62121] outline-none resize-none"
+                  />
+                </div>
+
+                <button
+                  onClick={handleGenerateFromForm}
+                  disabled={loading || !formData.process_name.trim()}
+                  className="w-full flex items-center justify-center gap-2 rounded-lg px-5 py-3 text-sm font-semibold text-white transition-opacity disabled:opacity-60"
+                  style={{ backgroundColor: PWC.primary }}
+                >
+                  {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                  {loading ? "AI가 새 Workflow를 설계하고 있습니다..." : "AI Workflow 설계 시작"}
+                </button>
+              </div>
+            )}
+
+            {/* ── 엑셀 업로드 모드 ───────────────────────────────────────── */}
+            {inputMode === "excel" && (
+              <div className="space-y-4">
+                {!uploadedFile ? (
+                  <label className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 py-10 cursor-pointer hover:border-[#A62121] transition-colors">
+                    <input
+                      type="file" accept=".xlsx" className="hidden"
+                      onChange={(e) => { if (e.target.files?.[0]) handleUpload(e.target.files[0]); }}
+                      disabled={uploading}
+                    />
+                    {uploading ? <Loader2 className="h-8 w-8 animate-spin text-gray-400 mb-2" /> : <Upload className="h-8 w-8 text-gray-400 mb-2" />}
+                    <p className="text-sm text-gray-600 font-medium">
+                      {uploading ? "업로드 중..." : "클릭하거나 파일을 드래그해서 업로드"}
+                    </p>
+                    <p className="text-xs text-gray-400 mt-1">As-Is 프로세스 .xlsx 파일</p>
+                  </label>
+                ) : (
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <FileSpreadsheet className="h-5 w-5 text-green-600" />
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">{uploadedFile}</p>
+                        <p className="text-xs text-gray-500">{taskCount}개 Task 로드됨</p>
+                      </div>
+                    </div>
+                    <label className="text-sm cursor-pointer font-medium" style={{ color: PWC.primary }}>
+                      <input type="file" accept=".xlsx" className="hidden"
+                        onChange={(e) => { if (e.target.files?.[0]) handleUpload(e.target.files[0]); }} />
+                      다른 파일
+                    </label>
+                  </div>
+                )}
+
+                {sheets.length > 1 && (
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">시트 선택</label>
+                    <select className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                      value={selectedSheet} onChange={(e) => handleSelectSheet(e.target.value)}>
+                      {sheets.map((s) => (
+                        <option key={s.name} value={s.name}>
+                          {s.name} ({s.l5_count} tasks){s.recommended ? " ★ 추천" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {uploadedFile && taskCount > 0 && (
+                  <div className="flex flex-col sm:flex-row gap-3 items-end pt-2">
+                    <div className="flex-1">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">L3 필터 (선택)</label>
+                      <select className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#A62121]"
+                        value={selectedL3} onChange={(e) => setSelectedL3(e.target.value)}>
+                        <option value="">전체</option>
+                        {l3Options.map((o) => <option key={o.id} value={o.name}>{o.name}</option>)}
+                      </select>
+                    </div>
+                    <button onClick={handleGenerateFromExcel} disabled={loading}
+                      className="flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-semibold text-white transition-opacity disabled:opacity-60"
+                      style={{ backgroundColor: PWC.primary }}>
+                      {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                      {loading ? "AI가 새 Workflow를 설계하고 있습니다..." : "AI Workflow 설계 시작"}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
 
         {/* 에러 */}
         {error && (
@@ -508,10 +621,12 @@ export default function NewWorkflowPage() {
         )}
 
         {/* 빈 상태 */}
-        {!result && !loading && !uploadedFile && (
+        {!result && !loading && (
           <div className="rounded-xl py-16 text-center" style={{ backgroundColor: PWC.cardBg, border: "1px dashed #d9a0a0" }}>
             <Sparkles className="mx-auto h-10 w-10 mb-4" style={{ color: "#d9a0a0" }} />
-            <p className="text-gray-500 text-sm">엑셀 파일을 업로드하면 AI가 새로운 To-Be Workflow를 설계합니다.</p>
+            <p className="text-gray-500 text-sm">
+              위에서 업무 정보를 입력하거나 엑셀을 업로드한 뒤, Workflow 설계를 시작해 주세요.
+            </p>
           </div>
         )}
       </div>

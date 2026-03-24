@@ -685,3 +685,241 @@ def result_to_hr_workflow_json(result: NewWorkflowResult) -> dict[str, Any]:
             }
         ],
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 자유형식 입력 기반 Workflow 생성
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_FREEFORM_SYSTEM_PROMPT = """
+당신은 AI 워크플로우 설계 전문가입니다.
+사용자가 제공하는 업무 개요(주제, Input, Output, 시스템/툴, Pain Point 등)를 분석하여,
+완전히 새로운 To-Be Workflow를 설계합니다.
+
+## 당신이 해야 할 일
+1. 주어진 업무 정보를 분석하여 **새로운 L5 수준의 세부 Task를 직접 정의**합니다
+2. 각 Task를 **AI 수행 또는 Human 수행**으로 분류합니다
+3. Input에서 시작하여 원하는 Output까지 이어지는 **워크플로우를 설계**합니다
+4. AI 에이전트를 정의하고, 각 에이전트에 Task를 배정합니다
+
+## AI 에이전트 유형 (예시)
+- Document Processing AI: 문서 작성, 양식 처리, 보고서 생성
+- Data Analysis AI: 데이터 집계, 통계 분석, 패턴 인식
+- Information Retrieval AI: 정보 검색, 조회, 확인
+- Communication AI: 이메일/공지 초안 작성, 알림 발송
+- Decision Support AI: 판단 보조, 조건 검토, 기준 적용
+- Process Automation AI: 시스템 입력, 반복 처리, 규칙 기반 자동화
+
+## AI 기법
+- LLM, RAG, RPA, OCR + LLM, ML Model, Rule Engine, API 연동
+
+## 자동화 수준
+- Full-Auto: AI가 사람 개입 없이 전 과정을 처리
+- Human-in-Loop: AI가 초안/분석을 제공하고 사람이 최종 확인/승인
+- Human-Supervised: AI는 보조 역할, 사람이 주도
+
+## 출력 형식 (JSON)
+{
+  "blueprint_summary": "전체 워크플로우 설계 요약 (2~3문장)",
+  "process_name": "프로세스명",
+  "agents": [
+    {
+      "agent_id": "agent_1",
+      "agent_name": "에이전트 이름",
+      "agent_type": "에이전트 유형",
+      "ai_technique": "사용 기법",
+      "description": "역할 설명",
+      "automation_level": "Full-Auto | Human-in-Loop | Human-Supervised",
+      "assigned_tasks": [
+        {
+          "task_id": "1.1",
+          "task_name": "새로 정의된 Task명",
+          "l4": "상위 업무 카테고리",
+          "l3": "프로세스 영역",
+          "ai_role": "AI가 하는 일",
+          "human_role": "사람이 하는 일 (Full-Auto면 빈 문자열)",
+          "input_data": ["입력 데이터"],
+          "output_data": ["출력 데이터"],
+          "automation_level": "Full-Auto | Human-in-Loop | Human-Supervised"
+        }
+      ]
+    }
+  ],
+  "execution_flow": [
+    {
+      "step": 1,
+      "step_name": "단계명",
+      "step_type": "sequential | parallel",
+      "description": "설명",
+      "agent_ids": ["agent_1"],
+      "task_ids": ["1.1"]
+    }
+  ]
+}
+
+## 규칙
+- 반드시 JSON만 출력 (마크다운 코드 블록 없음)
+- Task ID는 "1.1", "1.2", "2.1" 형태로 부여
+- 최소 5개, 최대 20개의 L5 Task를 정의하세요
+- 에이전트는 최대 7개
+- Pain Point를 해결하는 방향으로 설계
+- Input → ... → Output 흐름이 자연스럽게 연결되어야 함
+- 한국어로 작성
+"""
+
+
+def _build_freeform_prompt(
+    process_name: str,
+    inputs: str,
+    outputs: str,
+    systems: str,
+    pain_points: str,
+    additional_info: str,
+) -> str:
+    """자유형식 입력으로부터 LLM 프롬프트 생성."""
+    lines = [f"## 업무 개요\n"]
+    lines.append(f"**프로세스/주제**: {process_name}\n")
+    if inputs:
+        lines.append(f"**Input (투입 자료/데이터)**: {inputs}\n")
+    if outputs:
+        lines.append(f"**Output (산출물/결과물)**: {outputs}\n")
+    if systems:
+        lines.append(f"**사용 시스템/툴**: {systems}\n")
+    if pain_points:
+        lines.append(f"**Pain Point (현재 문제점)**: {pain_points}\n")
+    if additional_info:
+        lines.append(f"**참고 사항**: {additional_info}\n")
+
+    lines.append("\n위 정보를 분석하여 To-Be AI 워크플로우를 설계해 주세요.")
+    lines.append("Input에서 시작하여 원하는 Output을 만들어내는 전체 흐름을 새로 정의해 주세요.")
+    lines.append("각 단계에서 AI가 할 일과 Human이 할 일을 명확히 구분해 주세요.")
+
+    return "\n".join(lines)
+
+
+def _parse_freeform_result(data: dict) -> NewWorkflowResult:
+    """자유형식 LLM 응답을 NewWorkflowResult로 파싱."""
+    agents_raw = data.get("agents", [])
+    agents: list[AIAgent] = []
+    all_tasks: list[AssignedTask] = []
+
+    for a in agents_raw:
+        tasks_list = []
+        for t in a.get("assigned_tasks", []):
+            at = AssignedTask(
+                task_id=str(t.get("task_id", "")),
+                task_name=t.get("task_name", ""),
+                l4=t.get("l4", ""),
+                l3=t.get("l3", ""),
+                ai_role=t.get("ai_role", ""),
+                human_role=t.get("human_role", ""),
+                input_data=t.get("input_data", []),
+                output_data=t.get("output_data", []),
+                automation_level=t.get("automation_level", "Human-in-Loop"),
+            )
+            tasks_list.append(at)
+            all_tasks.append(at)
+
+        agent = AIAgent(
+            agent_id=a.get("agent_id", f"agent_{len(agents)+1}"),
+            agent_name=a.get("agent_name", ""),
+            agent_type=a.get("agent_type", ""),
+            ai_technique=a.get("ai_technique", ""),
+            description=a.get("description", ""),
+            automation_level=a.get("automation_level", "Human-in-Loop"),
+            assigned_tasks=tasks_list,
+        )
+        agents.append(agent)
+
+    flow_raw = data.get("execution_flow", [])
+    execution_flow = [
+        ExecutionStep(
+            step=s.get("step", i + 1),
+            step_name=s.get("step_name", ""),
+            step_type=s.get("step_type", "sequential"),
+            description=s.get("description", ""),
+            agent_ids=s.get("agent_ids", []),
+            task_ids=s.get("task_ids", []),
+        )
+        for i, s in enumerate(flow_raw)
+    ]
+
+    full_auto = sum(1 for t in all_tasks if t.automation_level == "Full-Auto")
+    hil = sum(1 for t in all_tasks if t.automation_level == "Human-in-Loop")
+    hs = sum(1 for t in all_tasks if t.automation_level == "Human-Supervised")
+
+    return NewWorkflowResult(
+        blueprint_summary=data.get("blueprint_summary", ""),
+        process_name=data.get("process_name", ""),
+        total_tasks=len(all_tasks),
+        full_auto_count=full_auto,
+        human_in_loop_count=hil,
+        human_supervised_count=hs,
+        agents=agents,
+        execution_flow=execution_flow,
+    )
+
+
+async def generate_workflow_from_freeform(
+    process_name: str,
+    inputs: str = "",
+    outputs: str = "",
+    systems: str = "",
+    pain_points: str = "",
+    additional_info: str = "",
+    api_key: str = "",
+    model: str = "claude-sonnet-4-6",
+    openai_api_key: str = "",
+    openai_model: str = "gpt-5.4",
+) -> NewWorkflowResult:
+    """
+    자유형식 입력을 받아 AI가 새로운 L5 Task를 정의하고 Workflow를 설계합니다.
+    """
+    user_prompt = _build_freeform_prompt(
+        process_name, inputs, outputs, systems, pain_points, additional_info,
+    )
+
+    # Anthropic Claude
+    anthropic_key = api_key or os.getenv("ANTHROPIC_API_KEY", "")
+    if anthropic_key:
+        try:
+            from anthropic import AsyncAnthropic
+            client = AsyncAnthropic(api_key=anthropic_key)
+            response = await client.messages.create(
+                model=model,
+                max_tokens=8192,
+                system=_FREEFORM_SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": user_prompt}],
+            )
+            raw = response.content[0].text
+            data = _extract_json(raw)
+            return _parse_freeform_result(data)
+        except Exception as e:
+            print(f"[new_workflow_freeform] Anthropic 실패: {e}")
+
+    # OpenAI fallback
+    openai_key = openai_api_key or os.getenv("OPENAI_API_KEY", "")
+    if openai_key:
+        try:
+            from openai import AsyncOpenAI
+            client = AsyncOpenAI(api_key=openai_key)
+            response = await client.chat.completions.create(
+                model=openai_model,
+                temperature=0.0,
+                messages=[
+                    {"role": "system", "content": _FREEFORM_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt},
+                ],
+                response_format={"type": "json_object"},
+            )
+            raw = response.choices[0].message.content or "{}"
+            data = json.loads(raw)
+            return _parse_freeform_result(data)
+        except Exception as e:
+            print(f"[new_workflow_freeform] OpenAI 실패: {e}")
+
+    return NewWorkflowResult(
+        blueprint_summary="API 키가 설정되지 않아 워크플로우를 생성할 수 없습니다.",
+        process_name=process_name,
+        total_tasks=0, full_auto_count=0, human_in_loop_count=0, human_supervised_count=0,
+    )

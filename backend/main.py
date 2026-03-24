@@ -1328,6 +1328,43 @@ async def generate_new_workflow(
     return {"ok": True, **result_dict}
 
 
+@app.post("/api/new-workflow/generate-freeform", tags=["NewWorkflow"])
+async def generate_new_workflow_freeform(request: Request):
+    """
+    자유형식 입력을 받아 AI가 새로운 L5 Task를 정의하고 Workflow를 설계합니다.
+    Body: { process_name, inputs, outputs, systems, pain_points, additional_info }
+    """
+    from new_workflow_generator import generate_workflow_from_freeform, result_to_dict
+
+    body = await request.json()
+    process_name = body.get("process_name", "")
+    if not process_name:
+        raise HTTPException(400, "프로세스/주제명을 입력해 주세요.")
+
+    settings = load_settings()
+    anthropic_key = os.getenv("ANTHROPIC_API_KEY", "") or settings.anthropic_api_key
+    openai_key = os.getenv("OPENAI_API_KEY", "") or settings.api_key
+
+    result = await generate_workflow_from_freeform(
+        process_name=process_name,
+        inputs=body.get("inputs", ""),
+        outputs=body.get("outputs", ""),
+        systems=body.get("systems", ""),
+        pain_points=body.get("pain_points", ""),
+        additional_info=body.get("additional_info", ""),
+        api_key=anthropic_key,
+        model=settings.anthropic_model or "claude-sonnet-4-6",
+        openai_api_key=openai_key,
+        openai_model=settings.model or "gpt-5.4",
+    )
+
+    result_dict = result_to_dict(result)
+    _new_workflow_cache.clear()
+    _new_workflow_cache.update(result_dict)
+
+    return {"ok": True, **result_dict}
+
+
 @app.get("/api/new-workflow/result", tags=["NewWorkflow"])
 async def get_new_workflow_result():
     """마지막으로 생성된 New Workflow 결과를 반환합니다."""
