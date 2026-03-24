@@ -12,7 +12,7 @@ const notoSansKR = Noto_Sans_KR({
 
 export const metadata: Metadata = {
   title: "PwC AX Lens System",
-  description: "HR As-Is 프로세스의 L5 Task를 AI/인간 수행 여부로 분류합니다.",
+  description: "Process Innovation System — AI 기반 업무 혁신 설계 플랫폼",
   icons: {
     icon: "/pwc-logo.svg",
     shortcut: "/pwc-logo.svg",

@@ -14,6 +14,8 @@ backend/project_definition.json
 backend/project_design.json
 backend/nw_tasks.json
 backend/settings.json
+backend/current_project.json
+backend/data/
 
 # ── 업로드된 파일 / 클라이언트 데이터 ──────────────────
 backend/uploads/

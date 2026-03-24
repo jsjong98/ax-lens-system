@@ -45,7 +45,7 @@ export default function LoginPage() {
             PwC AX Lens System
           </h1>
           <p className="mt-2 text-sm text-gray-500">
-            HR As-Is 프로세스 AI 분류 시스템
+            Process Innovation System
           </p>
         </div>
 

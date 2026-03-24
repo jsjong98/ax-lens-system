@@ -248,6 +248,35 @@ export async function confirmResetPassword(email: string, code: string, newPassw
   }
 }
 
+// ── Project History API ──────────────────────────────────────────────────────
+
+export interface ProjectInfo {
+  filename: string;
+  dirname: string;
+  created_at?: string;
+  last_accessed?: string;
+  task_count?: number;
+  source?: string;
+  saved_data: Record<string, boolean>;
+  has_any_result: boolean;
+}
+
+export async function getProjectList(): Promise<{ ok: boolean; projects: ProjectInfo[] }> {
+  return apiFetch("/projects");
+}
+
+export async function loadProject(filename: string): Promise<{
+  ok: boolean;
+  filename: string;
+  loaded: Record<string, boolean>;
+  saved: Record<string, boolean>;
+}> {
+  return apiFetch("/projects/load", {
+    method: "POST",
+    body: JSON.stringify({ filename }),
+  });
+}
+
 // ── Task API ─────────────────────────────────────────────────────────────────
 
 export interface TaskListParams {

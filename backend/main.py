@@ -77,13 +77,16 @@ from auth_store import (
     reset_password,
     send_reset_email,
 )
-from data_store import save_data, load_data, clear_data, get_saved_status
+from data_store import (
+    save_data, load_data, clear_data, get_saved_status,
+    set_current_project, get_current_project, list_projects, save_meta,
+)
 
 # ── 앱 초기화 ────────────────────────────────────────────────────────────────
 
 app = FastAPI(
-    title="HR Task 분류 API",
-    description="HR As-Is 프로세스의 L5 Task를 OpenAI / Anthropic으로 분류하는 API",
+    title="PwC AX Lens — Process Innovation API",
+    description="AI 기반 업무 혁신 설계 플랫폼",
     version="2.0.0",
 )
 
@@ -226,8 +229,54 @@ async def get_data_status():
     """각 단계별 데이터 저장 상태를 반환합니다."""
     return {
         "ok": True,
+        "current_project": get_current_project(),
         "tasks_loaded": len(_tasks_cache) > 0,
         "saved": get_saved_status(),
+    }
+
+
+@app.get("/api/projects", tags=["Data"])
+async def get_project_list():
+    """저장된 모든 프로젝트(파일) 목록을 반환합니다."""
+    return {"ok": True, "projects": list_projects()}
+
+
+@app.post("/api/projects/load", tags=["Data"])
+async def load_project(request: Request):
+    """이전 프로젝트의 결과를 로드합니다."""
+    body = await request.json()
+    filename = body.get("filename", "")
+    if not filename:
+        raise HTTPException(400, "파일명이 필요합니다.")
+
+    set_current_project(filename)
+
+    # 저장된 결과 로드
+    loaded = {}
+
+    nw_data = load_data("new_workflow_result", filename)
+    if nw_data:
+        _new_workflow_cache.clear()
+        _new_workflow_cache.update(nw_data)
+        loaded["new_workflow"] = True
+
+    pd_data = load_data("project_definition", filename)
+    if pd_data:
+        _project_definition_cache.clear()
+        _project_definition_cache.update(pd_data)
+        loaded["project_definition"] = True
+
+    pds_data = load_data("project_design", filename)
+    if pds_data:
+        _project_design_cache.clear()
+        _project_design_cache.update(pds_data)
+        loaded["project_design"] = True
+
+    return {
+        "ok": True,
+        "filename": filename,
+        "loaded": loaded,
+        "saved": get_saved_status(filename),
     }
 
 
@@ -743,6 +792,8 @@ async def upload_excel(file: UploadFile = File(...)):
 
     # 파일별 결과 분리를 위해 현재 파일 설정
     set_current_file(file.filename)
+    set_current_project(file.filename)
+    save_meta(file.filename, task_count=len(_tasks_cache), source="tasks_page")
 
     # 추천 시트가 있으면 자동 로드
     recommended = next((s for s in sheets if s["recommended"]), None)
@@ -1237,6 +1288,8 @@ async def upload_new_workflow_excel(file: UploadFile = File(...)):
         raise HTTPException(422, f"엑셀 파싱 실패: {e}")
 
     _nw_excel_path = save_path
+    set_current_project(file.filename)
+    save_meta(file.filename, task_count=len(_nw_tasks_cache), source="new_workflow")
 
     # 추천 시트 자동 로드
     recommended = next((s for s in sheets if s["recommended"]), None)
