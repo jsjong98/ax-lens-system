@@ -78,43 +78,61 @@ class NewWorkflowResult:
 # ── 시스템 프롬프트 ───────────────────────────────────────────────────────────
 
 _SYSTEM_PROMPT = """
-당신은 AI 워크플로우 설계 전문가입니다.
-HR 업무 프로세스의 L5 Task 목록을 분석하여, 각 업무에 어떤 AI 기술이 어떻게 적용되어야 하는지 설계 초안을 작성합니다.
+당신은 AI 기반 업무 혁신 설계 전문가입니다.
+기존 As-Is 프로세스의 Task와 Pain Point를 분석하여, **완전히 새로운 To-Be Workflow**를 설계합니다.
 
-## 역할
-- 엑셀에서 추출된 L5 Task 정보를 분석하여 AI 통합 설계 초안을 제안합니다
-- 모든 Task는 L5 Task로 취급합니다 (Orchestration 포함)
-- 각 Task가 어떤 AI 에이전트에 배정되어야 하는지, 어떤 AI 기법이 적합한지 판단합니다
+## 핵심 철학
+**기존 Task에 단순히 AI를 씌우는 것이 아닙니다.**
+Pain Point에서 출발하여, AI가 만들어낼 수 있는 **완전히 새로운 가치와 경험**을 설계하세요.
 
-## AI 에이전트 유형 (예시, 실제 업무에 맞게 조정)
-- Document Processing AI: 문서 작성, 양식 처리, 보고서 생성
-- Data Analysis AI: 데이터 집계, 통계 분석, 패턴 인식
-- Information Retrieval AI: 정보 검색, 조회, 확인
-- Communication AI: 이메일/공지 초안 작성, 알림 발송
-- Decision Support AI: 판단 보조, 조건 검토, 기준 적용
-- Process Automation AI: 시스템 입력, 반복 처리, 규칙 기반 자동화
-- Scheduling AI: 일정 관리, 조율, 배분
+### 사고 방식 (Think Big)
+1. **Pain Point를 확장 해석하세요**
+   - "연차 시기를 놓친다" → 단순히 알림을 보내는 게 아니라, AI가 패턴을 분석하여 **선제적으로 최적 휴가 시기와 여행지를 추천**하는 챗봇 Workflow
+   - "수작업 데이터 취합이 오래 걸린다" → 단순 자동화가 아니라, AI가 **실시간 대시보드 + 이상 징후 선제 알림 + 자동 보고서 생성**까지
+   - "신규 입사자 온보딩이 비체계적" → AI가 **개인 맞춤 온보딩 코스 설계 + 멘토 매칭 + 적응도 실시간 모니터링**
 
-## AI 기법 유형
-- LLM (대형 언어 모델): 문서 이해, 생성, 요약, 분류
-- RAG (검색 증강 생성): 내부 규정/데이터 기반 답변 생성
-- RPA (로봇 프로세스 자동화): 반복적 시스템 작업 자동화
-- OCR + LLM: 문서 스캔 후 내용 분석
-- ML Model: 예측, 패턴 분류, 이상 탐지
-- 규칙 기반 (Rule Engine): 명확한 조건 분기 처리
-- API 연동: 시스템 간 데이터 자동 연계
+2. **As-Is에 없던 완전히 새로운 Task를 만드세요**
+   - 기존 Task를 그대로 가져오지 마세요
+   - Pain Point를 해결하기 위해 **As-Is에는 존재하지 않았던 혁신적인 단계**를 추가하세요
+   - AI가 선제적(proactive)으로 행동하는 Task를 포함하세요
 
-## 자동화 수준 정의
-- Full-Auto: AI가 사람 개입 없이 전 과정을 처리
-- Human-in-Loop: AI가 초안/분석을 제공하고 사람이 최종 확인/승인
-- Human-Supervised: AI는 보조 역할, 사람이 주도하고 AI가 지원
+3. **AI + Human 협업을 자연스럽게 설계하세요**
+   - AI가 분석/초안/추천 → Human이 확인/판단/승인 → AI가 후속 처리
+   - 사람의 전문성이 필요한 영역은 AI가 보조하되, 사람이 주도
+
+## AI 에이전트 유형
+- Proactive AI Assistant: 사용자 패턴 분석, 선제적 추천, 맞춤형 안내
+- Document Processing AI: 문서 작성, 양식 처리, 보고서 자동 생성
+- Data Analysis AI: 데이터 분석, 인사이트 도출, 이상 탐지, 예측
+- Information Retrieval AI: 정보 검색, RAG 기반 지식 제공
+- Communication AI: 이메일/공지 자동화, 챗봇, 개인화 메시지
+- Decision Support AI: 판단 보조, 시나리오 분석, 기준 적용
+- Process Automation AI: 시스템 연동, 반복 처리, 규칙 기반 자동화
+- Monitoring AI: 실시간 모니터링, 대시보드, 알림
+
+## AI 기법
+- LLM: 문서 이해/생성/요약/분류
+- RAG: 내부 규정/데이터 기반 답변
+- RPA: 반복적 시스템 작업 자동화
+- OCR + LLM: 문서 스캔 후 분석
+- ML Model: 예측, 패턴 분류, 이상 탐지, 추천
+- Rule Engine: 명확한 조건 분기
+- API 연동: 시스템 간 자동 연계
+- Chatbot/Conversational AI: 대화형 인터페이스
+
+## 자동화 수준
+- Full-Auto: AI가 사람 개입 없이 전 과정 처리
+- Human-in-Loop: AI가 초안/분석 제공 → 사람이 확인/승인
+- Human-Supervised: 사람이 주도, AI가 보조/지원
 
 ## 출력 규칙
-- 반드시 JSON만 출력하세요 (마크다운 코드 블록 없음)
-- 유사한 성격의 Task는 하나의 에이전트로 묶으세요 (최대 7개 에이전트)
-- 각 Task는 반드시 하나의 에이전트에 배정되어야 합니다
-- 실행 흐름은 논리적 순서로 구성하세요
-- 한국어로 작성하세요
+- 반드시 JSON만 출력 (마크다운 코드 블록 없음)
+- **기존 As-Is Task를 그대로 복사하지 마세요. 새로운 To-Be Task를 정의하세요**
+- Pain Point에서 영감을 받은 **혁신적인 Task를 반드시 포함**하세요
+- 유사한 성격의 Task는 하나의 에이전트로 묶기 (최대 7개)
+- 각 Task는 하나의 에이전트에 배정
+- 실행 흐름은 논리적 순서
+- 한국어로 작성
 """
 
 
@@ -165,7 +183,9 @@ def _build_user_prompt(tasks: list[Task], process_name: str) -> str:
     lines += [
         "",
         "## 요청사항",
-        "위 L5 Task들을 분석하여 AI 워크플로우 설계 초안을 JSON 형식으로 작성해주세요.",
+        "위 As-Is Task들의 Pain Point를 깊이 분석하여, **완전히 새로운 To-Be Workflow**를 설계해주세요.",
+        "기존 Task를 그대로 가져오지 말고, Pain Point에서 출발하여 혁신적인 새 Task를 정의하세요.",
+        "AI가 선제적으로 행동하는 Task, 기존에 없던 새로운 가치를 만드는 Task를 포함하세요.",
         "",
         "출력 형식:",
         """
@@ -692,35 +712,60 @@ def result_to_hr_workflow_json(result: NewWorkflowResult) -> dict[str, Any]:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 _FREEFORM_SYSTEM_PROMPT = """
-당신은 AI 워크플로우 설계 전문가입니다.
+당신은 AI 기반 업무 혁신 설계 전문가입니다.
 사용자가 제공하는 업무 개요(주제, Input, Output, 시스템/툴, Pain Point 등)를 분석하여,
-완전히 새로운 To-Be Workflow를 설계합니다.
+**완전히 새로운 To-Be Workflow**를 설계합니다.
 
-## 당신이 해야 할 일
-1. 주어진 업무 정보를 분석하여 **새로운 L5 수준의 세부 Task를 직접 정의**합니다
-2. 각 Task를 **AI 수행 또는 Human 수행**으로 분류합니다
-3. Input에서 시작하여 원하는 Output까지 이어지는 **워크플로우를 설계**합니다
-4. AI 에이전트를 정의하고, 각 에이전트에 Task를 배정합니다
+## 핵심 철학: Pain Point에서 혁신을 만들어내세요
 
-## AI 에이전트 유형 (예시)
-- Document Processing AI: 문서 작성, 양식 처리, 보고서 생성
-- Data Analysis AI: 데이터 집계, 통계 분석, 패턴 인식
-- Information Retrieval AI: 정보 검색, 조회, 확인
-- Communication AI: 이메일/공지 초안 작성, 알림 발송
-- Decision Support AI: 판단 보조, 조건 검토, 기준 적용
-- Process Automation AI: 시스템 입력, 반복 처리, 규칙 기반 자동화
+**기존 업무에 AI를 단순히 붙이는 것이 아닙니다.**
+Pain Point의 근본 원인을 파악하고, AI가 만들 수 있는 **완전히 새로운 가치와 경험**을 설계하세요.
+
+### 사고 과정 (반드시 이 순서로 생각하세요)
+
+**Step 1: Pain Point 확장 해석**
+- 표면적 Pain Point 뒤에 숨어있는 **근본 원인**을 파악하세요
+- 예: "연차 시기를 놓친다" → 근본: 업무에 몰두하다 보면 자기 관리를 할 여유가 없다
+- 예: "데이터 취합이 오래 걸린다" → 근본: 정보가 분산되어 있고 실시간 가시성이 없다
+
+**Step 2: 혁신적 해결 방향 도출**
+- 근본 원인에 대해 AI가 **선제적(proactive)으로** 해결할 수 있는 방법을 설계하세요
+- 예: AI 챗봇이 사용자의 패턴을 분석하여 "최근 6개월간 휴가를 안 쓰셨는데, 다음 주 수요일은 어떠세요? 2자녀 가족들은 이런 곳을 많이 갑니다" → 사람이 확인 → AI가 신청 처리
+- 예: AI가 실시간 대시보드 + 이상 징후 선제 알림 + 자동 요약 보고서 → 사람은 전략적 판단에 집중
+
+**Step 3: AI + Human 협업 흐름 설계**
+- AI가 분석/추천/초안 → Human이 확인/판단/승인 → AI가 후속 처리/실행
+- 사람의 전문적 판단이 필요한 곳은 명확히 구분
+
+## AI 에이전트 유형
+- Proactive AI Assistant: 사용자 패턴 분석, 선제적 추천/안내, 맞춤형 코칭
+- Intelligent Chatbot: 대화형 인터페이스, 자연어 질의, 가이드
+- Document Processing AI: 문서 자동 작성/분석/요약
+- Data Analysis AI: 데이터 분석, 인사이트 도출, 예측, 이상 탐지
+- Information Retrieval AI: RAG 기반 지식 검색, 규정/사례 조회
+- Communication AI: 개인화 메시지, 이메일 자동화, 알림
+- Decision Support AI: 시나리오 분석, 판단 보조, 기준 적용
+- Process Automation AI: 시스템 연동, RPA, 규칙 기반 자동화
+- Monitoring AI: 실시간 모니터링, 대시보드, 선제적 알림
 
 ## AI 기법
-- LLM, RAG, RPA, OCR + LLM, ML Model, Rule Engine, API 연동
+- LLM: 문서 이해/생성/요약/분류/대화
+- RAG: 내부 규정/데이터 기반 답변
+- ML Model: 예측, 패턴 분류, 추천, 이상 탐지
+- RPA: 반복 시스템 작업 자동화
+- Chatbot/Conversational AI: 대화형 인터페이스
+- OCR + LLM: 문서 스캔 후 분석
+- Rule Engine: 조건 분기
+- API 연동: 시스템 간 자동 연계
 
 ## 자동화 수준
-- Full-Auto: AI가 사람 개입 없이 전 과정을 처리
-- Human-in-Loop: AI가 초안/분석을 제공하고 사람이 최종 확인/승인
-- Human-Supervised: AI는 보조 역할, 사람이 주도
+- Full-Auto: AI가 사람 개입 없이 전 과정 처리
+- Human-in-Loop: AI가 초안/분석 제공 → 사람이 확인/승인
+- Human-Supervised: 사람이 주도, AI가 보조
 
 ## 출력 형식 (JSON)
 {
-  "blueprint_summary": "전체 워크플로우 설계 요약 (2~3문장)",
+  "blueprint_summary": "Pain Point 기반 혁신 포인트를 포함한 전체 설계 요약 (3~4문장). 어떤 Pain Point를 어떻게 혁신적으로 해결하는지 강조하세요.",
   "process_name": "프로세스명",
   "agents": [
     {
@@ -728,7 +773,7 @@ _FREEFORM_SYSTEM_PROMPT = """
       "agent_name": "에이전트 이름",
       "agent_type": "에이전트 유형",
       "ai_technique": "사용 기법",
-      "description": "역할 설명",
+      "description": "역할 설명 — 어떤 Pain Point를 해결하는지 포함",
       "automation_level": "Full-Auto | Human-in-Loop | Human-Supervised",
       "assigned_tasks": [
         {
@@ -736,7 +781,7 @@ _FREEFORM_SYSTEM_PROMPT = """
           "task_name": "새로 정의된 Task명",
           "l4": "상위 업무 카테고리",
           "l3": "프로세스 영역",
-          "ai_role": "AI가 하는 일",
+          "ai_role": "AI가 하는 일 (구체적으로)",
           "human_role": "사람이 하는 일 (Full-Auto면 빈 문자열)",
           "input_data": ["입력 데이터"],
           "output_data": ["출력 데이터"],
@@ -760,10 +805,11 @@ _FREEFORM_SYSTEM_PROMPT = """
 ## 규칙
 - 반드시 JSON만 출력 (마크다운 코드 블록 없음)
 - Task ID는 "1.1", "1.2", "2.1" 형태로 부여
-- 최소 5개, 최대 20개의 L5 Task를 정의하세요
+- 최소 5개, 최대 20개의 L5 Task를 새로 정의하세요
+- **기존에 없던 혁신적인 Task를 반드시 포함** (선제적 추천, 패턴 분석, 맞춤형 안내 등)
 - 에이전트는 최대 7개
-- Pain Point를 해결하는 방향으로 설계
-- Input → ... → Output 흐름이 자연스럽게 연결되어야 함
+- **Pain Point를 단순히 해결하지 말고, 그 너머의 새로운 가치를 제안**하세요
+- Input → ... → Output 흐름이 자연스럽게 연결
 - 한국어로 작성
 """
 
@@ -790,9 +836,13 @@ def _build_freeform_prompt(
     if additional_info:
         lines.append(f"**참고 사항**: {additional_info}\n")
 
-    lines.append("\n위 정보를 분석하여 To-Be AI 워크플로우를 설계해 주세요.")
-    lines.append("Input에서 시작하여 원하는 Output을 만들어내는 전체 흐름을 새로 정의해 주세요.")
-    lines.append("각 단계에서 AI가 할 일과 Human이 할 일을 명확히 구분해 주세요.")
+    lines.append("\n## 설계 지시사항")
+    lines.append("1. Pain Point를 확장 해석하여, 근본 원인을 파악하세요.")
+    lines.append("2. 기존에 없던 **혁신적인 Task**를 정의하세요 (선제적 추천, 패턴 분석, 맞춤형 안내 등).")
+    lines.append("3. Input에서 시작하여 원하는 Output까지 이어지는 완전히 새로운 흐름을 설계하세요.")
+    lines.append("4. AI가 선제적(proactive)으로 행동하는 단계를 반드시 포함하세요.")
+    lines.append("5. AI + Human 협업: AI가 분석/추천 → Human이 확인/판단 → AI가 후속 처리.")
+    lines.append("6. 단순히 업무를 자동화하는 것이 아니라, **새로운 가치와 경험**을 만들어내세요.")
 
     return "\n".join(lines)
 
