@@ -72,6 +72,8 @@ def init_default_users() -> None:
         {"email": "hyesoo.cho@pwc.com", "name": "조혜수", "password": "strategy&"},
         {"email": "solee.yoon@pwc.com", "name": "윤솔이", "password": "strategy&"},
         {"email": "soyeon.s.back@pwc.com", "name": "백소연", "password": "strategy&"},
+        {"email": "heonsang.h.you@pwc.com", "name": "유헌상", "password": "strategy&"},
+        {"email": "suyeon.y.oh@pwc.com", "name": "오수연", "password": "strategy&"},
     ]
     changed = False
     for d in defaults:
