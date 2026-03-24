@@ -2,7 +2,7 @@
 benchmark_search.py — 웹 벤치마킹 검색 + LLM 기반 Workflow 개선
 
 1단계에서 생성된 To-Be Workflow를 기반으로:
-1. 유사 AI 자동화 사례를 웹에서 검색
+1. Tavily API로 유사 AI 자동화 사례를 검색 (본문 요약 포함)
 2. 벤치마킹 결과를 LLM에 전달하여 Workflow를 가다듬음
 """
 from __future__ import annotations
@@ -15,10 +15,66 @@ import urllib.request
 from typing import Any
 
 
-# ── 웹 검색 ──────────────────────────────────────────────────────────────────
+# ── Tavily API 검색 ──────────────────────────────────────────────────────────
+
+def _search_tavily(query: str, max_results: int = 5) -> list[dict]:
+    """Tavily API로 AI 특화 검색을 수행합니다. 본문 요약 포함."""
+    api_key = os.getenv("TAVILY_API_KEY", "")
+    if not api_key:
+        return []
+
+    payload = json.dumps({
+        "query": query,
+        "max_results": max_results,
+        "search_depth": "advanced",       # 심층 검색
+        "include_answer": True,            # AI 요약 답변 포함
+        "include_raw_content": False,
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        "https://api.tavily.com/search",
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        },
+        method="POST",
+    )
+
+    results = []
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+
+        # Tavily AI 요약 답변
+        answer = data.get("answer", "")
+        if answer:
+            results.append({
+                "title": f"[AI 요약] {query}",
+                "snippet": answer,
+                "url": "",
+                "content": answer,
+            })
+
+        # 개별 검색 결과
+        for r in data.get("results", []):
+            results.append({
+                "title": r.get("title", ""),
+                "snippet": r.get("content", "")[:500],  # 본문 요약 (최대 500자)
+                "url": r.get("url", ""),
+                "content": r.get("content", ""),
+            })
+
+    except Exception as e:
+        print(f"[benchmark] Tavily 검색 실패: {e}")
+
+    return results
+
+
+# ── DuckDuckGo fallback ──────────────────────────────────────────────────────
 
 def _search_duckduckgo(query: str, max_results: int = 8) -> list[dict]:
-    """DuckDuckGo HTML 검색으로 결과 스니펫을 가져옵니다."""
+    """DuckDuckGo HTML 검색 (Tavily 사용 불가 시 fallback)."""
     encoded = urllib.parse.quote_plus(query)
     url = f"https://html.duckduckgo.com/html/?q={encoded}"
 
@@ -31,7 +87,6 @@ def _search_duckduckgo(query: str, max_results: int = 8) -> list[dict]:
         with urllib.request.urlopen(req, timeout=10) as resp:
             html = resp.read().decode("utf-8", errors="replace")
 
-        # 간단한 파싱: result__snippet, result__a 클래스
         snippet_pattern = re.compile(
             r'class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)</a>.*?'
             r'class="result__snippet"[^>]*>(.*?)</(?:td|div)',
@@ -51,47 +106,62 @@ def _search_duckduckgo(query: str, max_results: int = 8) -> list[dict]:
     return results
 
 
+# ── 검색 쿼리 생성 ───────────────────────────────────────────────────────────
+
 def _generate_search_queries(workflow_cache: dict) -> list[str]:
-    """Workflow 결과에서 검색 쿼리를 생성합니다."""
+    """Workflow 결과에서 맥락에 맞는 검색 쿼리를 생성합니다."""
     process_name = workflow_cache.get("process_name", "")
     agents = workflow_cache.get("agents", [])
+    summary = workflow_cache.get("blueprint_summary", "")
 
     queries = []
 
-    # 프로세스 기반 쿼리
-    queries.append(f"{process_name} AI 자동화 사례 벤치마킹")
-    queries.append(f"{process_name} AI transformation best practices")
+    # 핵심 프로세스 쿼리
+    queries.append(f"{process_name} AI 자동화 도입 사례 best practice")
+    queries.append(f"{process_name} AI transformation enterprise case study")
 
-    # 에이전트 기반 쿼리
-    for agent in agents[:3]:  # 상위 3개 에이전트
+    # 에이전트 유형 기반 심화 쿼리
+    for agent in agents[:2]:
         agent_type = agent.get("agent_type", "")
         technique = agent.get("ai_technique", "")
         if agent_type:
-            queries.append(f"{agent_type} {technique} enterprise use case")
+            queries.append(f"enterprise {agent_type} {technique} implementation case study")
 
-    # Pain Point 기반
-    summary = workflow_cache.get("blueprint_summary", "")
-    if summary:
-        queries.append(f"AI proactive automation HR {process_name}")
+    # 선제적 AI 쿼리
+    queries.append(f"proactive AI assistant HR {process_name} innovation")
 
-    return queries[:5]  # 최대 5개 쿼리
+    return queries[:5]
 
+
+# ── 통합 검색 ────────────────────────────────────────────────────────────────
 
 async def search_benchmarks(workflow_cache: dict) -> list[dict]:
-    """Workflow를 기반으로 웹 벤치마킹 검색을 수행합니다."""
+    """
+    Workflow 기반 벤치마킹 검색.
+    Tavily API 우선 사용, 없으면 DuckDuckGo fallback.
+    """
     queries = _generate_search_queries(workflow_cache)
     all_results: list[dict] = []
     seen_titles: set[str] = set()
 
+    use_tavily = bool(os.getenv("TAVILY_API_KEY", ""))
+
     for query in queries:
-        results = _search_duckduckgo(query)
+        if use_tavily:
+            results = _search_tavily(query, max_results=5)
+        else:
+            results = _search_duckduckgo(query, max_results=5)
+
         for r in results:
             if r["title"] not in seen_titles:
                 seen_titles.add(r["title"])
                 r["query"] = query
                 all_results.append(r)
 
-    return all_results[:15]  # 최대 15개 결과
+    search_engine = "Tavily (심층 검색)" if use_tavily else "DuckDuckGo (기본)"
+    print(f"[benchmark] {search_engine} — {len(all_results)}개 결과 수집 ({len(queries)}개 쿼리)")
+
+    return all_results[:20]
 
 
 # ── LLM 벤치마킹 기반 Workflow 개선 ─────────────────────────────────────────
@@ -195,14 +265,17 @@ def _build_benchmark_prompt(
     lines.append("\n## 웹 벤치마킹 검색 결과\n")
     for i, r in enumerate(benchmark_results, 1):
         lines.append(f"### [{i}] {r['title']}")
-        lines.append(f"- 출처: {r.get('url', 'N/A')}")
-        lines.append(f"- 내용: {r['snippet']}")
-        lines.append(f"- 검색 쿼리: {r.get('query', '')}")
+        if r.get("url"):
+            lines.append(f"- 출처: {r['url']}")
+        # Tavily는 content에 풍부한 본문 요약 제공
+        content = r.get("content", r.get("snippet", ""))
+        lines.append(f"- 내용: {content[:800]}")
         lines.append("")
 
     lines.append("\n## 요청")
-    lines.append("위 벤치마킹 사례를 참고하여 현재 To-Be Workflow를 개선해주세요.")
-    lines.append("각 개선 사항에 대해 어떤 벤치마킹에서 영감을 받았는지 명시해주세요.")
+    lines.append("위 벤치마킹 사례를 깊이 분석하여 현재 To-Be Workflow를 개선해주세요.")
+    lines.append("각 개선 사항에 대해 어떤 벤치마킹에서 영감을 받았는지 구체적으로 명시해주세요.")
+    lines.append("벤치마킹 사례에서 발견한 혁신적 패턴을 적극적으로 반영하세요.")
 
     return "\n".join(lines)
 
