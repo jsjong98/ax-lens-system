@@ -90,15 +90,19 @@ app = FastAPI(
     version="2.0.0",
 )
 
-# CORS: ALLOWED_ORIGINS 환경변수로 추가 origin 허용 (쉼표 구분)
+# CORS: ALLOWED_ORIGINS 환경변수 + Railway 도메인 자동 허용
 _default_origins = ["http://localhost:3000", "http://127.0.0.1:3000"]
 _extra_origins = [
     o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()
 ]
+_all_origins = _default_origins + _extra_origins
+
+# Railway 배포 환경이면 모든 .up.railway.app 도메인 허용
+_is_railway = bool(os.getenv("RAILWAY_ENVIRONMENT"))
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_default_origins + _extra_origins,
-    allow_credentials=True,
+    allow_origins=["*"] if _is_railway else _all_origins,
+    allow_credentials=True if not _is_railway else False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
