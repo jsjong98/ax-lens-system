@@ -14,8 +14,9 @@ import secrets
 from pathlib import Path
 from datetime import datetime, timedelta
 
-_USERS_FILE = Path(__file__).parent / "users.json"
-_SESSIONS_FILE = Path(__file__).parent / "sessions.json"
+_PERSIST_ROOT = Path("/app/persist") if Path("/app/persist").exists() else Path(__file__).parent
+_USERS_FILE = _PERSIST_ROOT / "users.json"
+_SESSIONS_FILE = _PERSIST_ROOT / "sessions.json"
 
 # 세션 저장소 (파일 영속)
 _sessions: dict[str, dict] = {}

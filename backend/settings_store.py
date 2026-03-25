@@ -16,8 +16,9 @@ from pathlib import Path
 from models import ClassificationResult, ClassifierSettings
 
 _BASE = Path(__file__).parent
-_SETTINGS_FILE = _BASE / "settings.json"
-_RESULTS_DIR = _BASE / "results"
+_PERSIST_ROOT = Path("/app/persist") if Path("/app/persist").exists() else _BASE
+_SETTINGS_FILE = _PERSIST_ROOT / "settings.json"
+_RESULTS_DIR = _PERSIST_ROOT / "results"
 _RESULTS_DIR.mkdir(exist_ok=True)
 
 # 현재 활성 엑셀 파일명 (확장자 제외)

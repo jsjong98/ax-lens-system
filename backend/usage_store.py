@@ -13,7 +13,8 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-_USAGE_FILE = Path(__file__).parent / "usage.json"
+_PERSIST_ROOT = Path("/app/persist") if Path("/app/persist").exists() else Path(__file__).parent
+_USAGE_FILE = _PERSIST_ROOT / "usage.json"
 
 # 참고 단가 (per 1,000,000 tokens, USD)
 _PRICE: dict[str, dict[str, float]] = {

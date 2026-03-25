@@ -25,10 +25,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-_BASE_DIR = Path(__file__).parent / "data"
+# Railway Volume이 마운트되면 /app/persist 사용, 아니면 로컬 data/ 사용
+_PERSIST_ROOT = Path("/app/persist") if Path("/app/persist").exists() else Path(__file__).parent
+_BASE_DIR = _PERSIST_ROOT / "data"
 _BASE_DIR.mkdir(exist_ok=True)
 
-_CURRENT_FILE = Path(__file__).parent / "current_project.json"
+_CURRENT_FILE = _PERSIST_ROOT / "current_project.json"
 
 # 데이터 키 목록
 DATA_KEYS = [

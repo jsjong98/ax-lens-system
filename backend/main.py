@@ -751,7 +751,8 @@ async def export_comparison():
 # 엑셀 업로드
 # ─────────────────────────────────────────────────────────────────────────────
 
-_UPLOAD_DIR = Path(__file__).parent / "uploads"
+_PERSIST_ROOT = Path("/app/persist") if Path("/app/persist").exists() else Path(__file__).parent
+_UPLOAD_DIR = _PERSIST_ROOT / "uploads"
 _UPLOAD_DIR.mkdir(exist_ok=True)
 _current_excel_path: Path | None = None
 
