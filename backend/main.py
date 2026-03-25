@@ -1607,11 +1607,14 @@ async def export_new_workflow_as_html():
     html = export_workflow_html(_new_workflow_cache)
     process_name = _new_workflow_cache.get("process_name", "workflow")
     filename = f"AI_Service_Flow_{process_name}.html"
+    # 한글 파일명 인코딩
+    from urllib.parse import quote
+    encoded_filename = quote(filename)
 
     return StreamingResponse(
         io.BytesIO(html.encode("utf-8")),
         media_type="text/html; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"},
     )
 
 
@@ -1687,10 +1690,12 @@ async def export_new_workflow_as_hr_json():
     hr_json = result_to_hr_workflow_json(result)
     filename = f"{result.process_name or 'new_workflow'}.json"
 
+    from urllib.parse import quote
+    encoded_fn = quote(filename)
     return StreamingResponse(
         io.BytesIO(json.dumps(hr_json, ensure_ascii=False, indent=2).encode("utf-8")),
         media_type="application/json",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_fn}"},
     )
 
 

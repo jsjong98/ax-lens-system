@@ -812,7 +812,7 @@ Pain Point의 근본 원인을 파악하고, AI가 만들 수 있는 **완전히
           "l4": "상위 카테고리",
           "l3": "프로세스 영역",
           "ai_role": "구체적 처리 방법 한 줄",
-          "human_role": "사람 역할 (AI 자율이면 빈 문자열)",
+          "human_role": "사람이 하는 구체적 행동 (예: '스크리닝 결과 최종 확정'). task_name과 같은 내용 금지. AI 자율이면 빈 문자열",
           "input_data": ["입력"],
           "output_data": ["출력"],
           "automation_level": "Human-on-the-Loop | Human-in-the-Loop | Human-Supervised"
