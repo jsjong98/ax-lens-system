@@ -61,6 +61,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Malgun Gothic', sans-ser
 .ah { display: flex; align-items: center; gap: 7px; margin-bottom: 9px; }
 .an { width: 20px; height: 20px; border-radius: 50%; background: #1A5CB0; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; color: #fff; flex-shrink: 0; }
 .aname { font-size: 11px; font-weight: 700; color: #2C2C2A; }
+.ah-sub { font-size: 8px; color: #888780; margin-left: 2px; }
 .bl { display: flex; flex-direction: column; gap: 6px; }
 .b { border-radius: 6px; padding: 6px 8px 5px; border: 0.5px solid #D3D1C7; background: #F5F4F1; text-align: center; }
 .b.hf { background: #FAEEDA; border: 0.5px dashed #BA7517; }
@@ -139,21 +140,49 @@ def export_workflow_html(workflow: dict) -> str:
     for inp in all_inputs[:6]:
         input_boxes += f'<div class="ibox"><div class="ibox-t">{inp}</div></div>\n'
 
-    # Senior AI 행
+    # Senior AI 행 — 레퍼런스처럼 구체적 오케스트레이션 설명
     agent_names = [a.get("agent_name", f"Agent {i+1}") for i, a in enumerate(agents)]
-    orchestrator_desc = ""
+    steps = []
     for i, name in enumerate(agent_names):
-        orchestrator_desc += f"Agent {i+1} "
-    orchestrator_desc = f"({orchestrator_desc.strip()} 기동 → 결과 수령 → HR 담당자 전달)"
+        steps.append(f"Agent {i+1}")
+    if len(steps) >= 2:
+        parallel = "·".join(steps[:2]) + " 병렬 기동"
+        rest = " → ".join(f"{s} 결과 수령" for s in steps[:2])
+        if len(steps) > 2:
+            orchestrator_desc = f"({parallel} → {rest} → {steps[2]} 기동 → 최종 결과 수령)"
+        else:
+            orchestrator_desc = f"({parallel} → {rest} → HR 담당자 전달)"
+    else:
+        orchestrator_desc = f"({steps[0]} 기동 → 결과 수령 → HR 담당자 전달)"
 
-    # Junior AI 행 — 각 Agent 컬럼 (커넥터 + 박스 + HR 화살표 통합)
+    # Junior AI 행 — 레퍼런스 형태: 커넥터 grid + 에이전트 grid 분리
     circled = "①②③④⑤⑥⑦⑧⑨⑩"
-    junior_columns = ""
 
+    # 커넥터 행
+    connectors_html = ""
     for i, agent in enumerate(agents):
         num = circled[i] if i < len(circled) else str(i + 1)
+        desc = agent.get("description", "") or f"{agent.get('agent_name', '')} 수행"
+        short_desc = desc[:20] if len(desc) > 20 else desc
 
-        # Task 박스들
+        parallel = " (병렬)" if i > 0 and i < len(agents) - 1 else ""
+        sequential = " (순차)" if i == len(agents) - 1 and len(agents) > 1 else ""
+
+        connectors_html += f"""
+          <div class="conn">
+            <div class="cs">
+              <span class="lbl-r">{num} {agent.get('agent_name', '')}<br>지시{parallel}{sequential}</span>
+              <div class="ard"><div class="ln"></div><div class="hd"></div></div>
+            </div>
+            <div class="cs">
+              <div class="aru"><div class="ln"></div><div class="hd"></div></div>
+              <span class="lbl-b">{agent.get('agent_name', '')}<br>결과 반환</span>
+            </div>
+          </div>"""
+
+    # 에이전트 박스 행
+    agents_html = ""
+    for i, agent in enumerate(agents):
         tasks_html = ""
         has_human_task = False
         for task in agent.get("assigned_tasks", []):
@@ -164,37 +193,44 @@ def export_workflow_html(workflow: dict) -> str:
             technique = agent.get("ai_technique", "")
             badges = _badge_html(technique)
             if is_human:
-                badges += ' <span class="badge bh">Human 확인</span>'
+                human_role = task.get("human_role", "Human 확인")
+                badges += f' <span class="badge bh">{human_role[:15]}</span>'
+
+            task_name = task.get("task_name", "")
+            ai_role = task.get("ai_role", "")
 
             tasks_html += f"""
                 <div class="b{hf_cls}">
-                  <div class="bt">{task.get('task_id', '')} {task.get('task_name', '')}</div>
-                  <div class="bs">{task.get('ai_role', '')}</div>
+                  <div class="bt">{task_name}</div>
+                  <div class="bs">{ai_role}</div>
                   <div class="bbr">{badges}</div>
                 </div>"""
+
+        # L4 서브타이틀
+        l4_sub = ""
+        first_task = (agent.get("assigned_tasks") or [{}])[0] if agent.get("assigned_tasks") else {}
+        l4_val = first_task.get("l4", "")
+        if l4_val:
+            l4_sub = f'<div class="ah-sub">L4: {l4_val}</div>'
 
         arrow_html = ""
         if has_human_task:
             arrow_html = f"""
             <div class="bot-arr">
-              <span style="font-size:7.5px;color:#1A5CB0;font-weight:600;">{agent.get('agent_name', '')} 결과 HR 확인</span>
+              <span style="font-size:7.5px;color:#1A5CB0;font-weight:600;">{agent.get('agent_name', '')} 결과 HR 담당자 전달</span>
               <div class="ardb"><div class="ln"></div><div class="hd"></div></div>
             </div>"""
 
-        junior_columns += f"""
+        agents_html += f"""
           <div class="agent-col">
-            <div class="conn">
-              <div class="cs">
-                <span class="lbl-r">{num} {agent.get('agent_name', '')}<br>지시</span>
-                <div class="ard"><div class="ln"></div><div class="hd"></div></div>
+            <div class="agent-box">
+              <div class="ah">
+                <div class="an">{i+1}</div>
+                <div>
+                  <div class="aname">{agent.get('agent_name', '')}</div>
+                  {l4_sub}
+                </div>
               </div>
-              <div class="cs">
-                <div class="aru"><div class="ln"></div><div class="hd"></div></div>
-                <span class="lbl-b">결과 반환</span>
-              </div>
-            </div>
-            <div class="agent-box" style="margin-top:4px;">
-              <div class="ah"><div class="an">{i+1}</div><div class="aname">{agent.get('agent_name', '')}</div></div>
               <div class="bl">{tasks_html}
               </div>
             </div>{arrow_html}
@@ -257,7 +293,10 @@ def export_workflow_html(workflow: dict) -> str:
       <div class="row-label"><div class="row-icon">🤖</div><div class="row-name name-junior">Junior<br>AI</div></div>
       <div class="row-content">
         <div class="agents-grid" style="grid-template-columns: {grid_cols};">
-          {junior_columns}
+          {connectors_html}
+        </div>
+        <div class="agents-grid" style="grid-template-columns: {grid_cols}; margin-top: 4px;">
+          {agents_html}
         </div>
       </div>
     </div>
