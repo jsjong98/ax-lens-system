@@ -1709,9 +1709,9 @@ def _build_classification_from_workflow(workflow_cache: dict) -> dict[str, dict]
     for agent in workflow_cache.get("agents", []):
         for task in agent.get("assigned_tasks", []):
             level = task.get("automation_level", "")
-            if "Full-Auto" in level:
+            if "on-the-Loop" in level or "out-of-the-Loop" in level:
                 label = "AI"
-            elif "Human-in-Loop" in level:
+            elif "in-the-Loop" in level:
                 label = "AI + Human"
             else:
                 label = "Human"

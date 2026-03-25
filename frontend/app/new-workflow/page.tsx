@@ -27,7 +27,7 @@ import {
 const PWC = { primary: "#A62121", bg: "#FFF5F7", cardBg: "#FFFFFF" };
 
 const AUTO_COLOR: Record<string, { bg: string; text: string; border: string }> = {
-  "Full-Auto":        { bg: "#D6F5E3", text: "#1a7a45", border: "#6fcf97" },
+  "Human-on-the-Loop":        { bg: "#D6F5E3", text: "#1a7a45", border: "#6fcf97" },
   "Human-in-Loop":    { bg: "#FFF9DB", text: "#7a5c00", border: "#f2c94c" },
   "Human-Supervised": { bg: "#FFE0E0", text: "#A62121", border: "#eb5757" },
 };
@@ -206,10 +206,10 @@ export default function NewWorkflowPage() {
 
   // AI / Human Task 분리
   const aiTasks = result?.agents.flatMap((a) =>
-    a.assigned_tasks.filter((t) => t.automation_level === "Full-Auto")
+    a.assigned_tasks.filter((t) => t.automation_level === "Human-on-the-Loop")
   ) ?? [];
   const humanTasks = result?.agents.flatMap((a) =>
-    a.assigned_tasks.filter((t) => t.automation_level !== "Full-Auto")
+    a.assigned_tasks.filter((t) => t.automation_level !== "Human-on-the-Loop")
   ) ?? [];
 
   return (
@@ -478,9 +478,9 @@ export default function NewWorkflowPage() {
                     <span className="text-lg font-bold text-gray-900">{result.total_tasks}</span>
                     <span className="text-[10px] text-gray-500 ml-1">Task</span>
                   </div>
-                  <div className="rounded-lg px-3 py-1.5 text-center" style={{ backgroundColor: AUTO_COLOR["Full-Auto"].bg }}>
-                    <span className="text-lg font-bold" style={{ color: AUTO_COLOR["Full-Auto"].text }}>{aiTasks.length}</span>
-                    <span className="text-[10px] ml-1" style={{ color: AUTO_COLOR["Full-Auto"].text }}>AI</span>
+                  <div className="rounded-lg px-3 py-1.5 text-center" style={{ backgroundColor: AUTO_COLOR["Human-on-the-Loop"].bg }}>
+                    <span className="text-lg font-bold" style={{ color: AUTO_COLOR["Human-on-the-Loop"].text }}>{aiTasks.length}</span>
+                    <span className="text-[10px] ml-1" style={{ color: AUTO_COLOR["Human-on-the-Loop"].text }}>AI</span>
                   </div>
                   <div className="rounded-lg px-3 py-1.5 text-center" style={{ backgroundColor: AUTO_COLOR["Human-in-Loop"].bg }}>
                     <span className="text-lg font-bold" style={{ color: AUTO_COLOR["Human-in-Loop"].text }}>{humanTasks.length}</span>

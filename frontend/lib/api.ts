@@ -806,7 +806,7 @@ export interface NewWorkflowAssignedTask {
   human_role: string;
   input_data: string[];
   output_data: string[];
-  automation_level: "Full-Auto" | "Human-in-Loop" | "Human-Supervised";
+  automation_level: "Human-on-the-Loop" | "Human-in-the-Loop" | "Human-Supervised";
 }
 
 export interface NewWorkflowAgent {
@@ -815,7 +815,7 @@ export interface NewWorkflowAgent {
   agent_type: string;
   ai_technique: string;
   description: string;
-  automation_level: "Full-Auto" | "Human-in-Loop" | "Human-Supervised";
+  automation_level: "Human-on-the-Loop" | "Human-in-the-Loop" | "Human-Supervised";
   task_count: number;
   assigned_tasks: NewWorkflowAssignedTask[];
 }

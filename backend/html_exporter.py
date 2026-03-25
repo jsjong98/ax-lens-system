@@ -99,7 +99,7 @@ def _badge_html(technique: str) -> str:
 def _has_human(task: dict) -> bool:
     """Task에 Human 확인이 필요한지 판단."""
     level = task.get("automation_level", "")
-    return level != "Full-Auto"
+    return "in-the-Loop" in level or "Supervised" in level
 
 
 def export_workflow_html(workflow: dict) -> str:

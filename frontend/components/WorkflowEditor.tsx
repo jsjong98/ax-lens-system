@@ -109,9 +109,9 @@ function workflowToSwimlane(result: NewWorkflowResult): SwimlaneData {
       title: t.task_name,
       description: t.ai_role || "",
       badges: a.ai_technique ? a.ai_technique.split(/[,·+]/).map((s) => s.trim()).filter(Boolean) : [],
-      needsHumanConfirm: t.automation_level !== "Full-Auto",
+      needsHumanConfirm: t.automation_level !== "Human-on-the-Loop",
     })),
-    arrowToHuman: a.assigned_tasks.some((t) => t.automation_level !== "Full-Auto")
+    arrowToHuman: a.assigned_tasks.some((t) => t.automation_level !== "Human-on-the-Loop")
       ? `${a.agent_name} 결과 HR 담당자 확인 요청`
       : undefined,
   }));
@@ -120,7 +120,7 @@ function workflowToSwimlane(result: NewWorkflowResult): SwimlaneData {
   const humanTasks: HumanTask[] = [];
   result.agents.forEach((a, i) => {
     a.assigned_tasks
-      .filter((t) => t.automation_level !== "Full-Auto")
+      .filter((t) => t.automation_level !== "Human-on-the-Loop")
       .forEach((t) => {
         humanTasks.push({
           id: `human-${t.task_id}`,
