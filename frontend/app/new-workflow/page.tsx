@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
   uploadNewWorkflowExcel,
@@ -15,12 +15,16 @@ import {
   type ExcelSheet,
   type NewWorkflowResult,
   type BenchmarkInsight,
+  getProjectList,
+  loadProject,
+  getNewWorkflowResult,
+  type ProjectInfo,
 } from "@/lib/api";
 import WorkflowEditor from "@/components/WorkflowEditor";
 import {
   Sparkles, Loader2,
   Zap, Download, Upload, FileSpreadsheet, ArrowRight,
-  FolderKanban,
+  FolderKanban, FolderOpen, Clock, CheckCircle2,
 } from "lucide-react";
 
 /* ── 색상 ────────────────────────────────────────────────────────────────── */
@@ -82,8 +86,34 @@ export default function NewWorkflowPage() {
   const [improvementSummary, setImprovementSummary] = useState("");
   const [isBenchmarked, setIsBenchmarked] = useState(false);
 
+  // 이전 프로젝트
+  const [projects, setProjects] = useState<ProjectInfo[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const [loadingProject, setLoadingProject] = useState<string | null>(null);
+
   const updateForm = (key: string, value: string) =>
     setFormData((prev) => ({ ...prev, [key]: value }));
+
+  // 이전 프로젝트 목록 로드
+  useEffect(() => {
+    getProjectList()
+      .then((r) => setProjects(r.projects.filter((p) => p.source === "new_workflow")))
+      .catch(() => {});
+  }, []);
+
+  // 이전 프로젝트 불러오기
+  const handleLoadProject = async (filename: string) => {
+    setLoadingProject(filename);
+    try {
+      await loadProject(filename);
+      const nwResult = await getNewWorkflowResult();
+      setResult(nwResult);
+    } catch {
+    } finally {
+      setLoadingProject(null);
+      setShowHistory(false);
+    }
+  };
 
   // 업로드 형식 (project vs l5_tasks)
   const [uploadFormat, setUploadFormat] = useState<string>("");
@@ -226,6 +256,53 @@ export default function NewWorkflowPage() {
             As-Is 프로세스 엑셀을 업로드하면, AI가 L4 기반으로 새로운 L5 Task를 정의하고 AI/Human 역할을 설계합니다.
           </p>
         </div>
+
+        {/* ── 이전 프로젝트 불러오기 ───────────────────────────────────────── */}
+        {projects.length > 0 && (
+          <div className="rounded-xl border bg-white shadow-sm overflow-hidden mb-6">
+            <button onClick={() => setShowHistory((v) => !v)}
+              className="w-full flex items-center justify-between px-5 py-3 hover:bg-gray-50 transition-colors">
+              <div className="flex items-center gap-2">
+                <FolderOpen className="h-4 w-4" style={{ color: "#A62121" }} />
+                <span className="text-sm font-semibold text-gray-900">이전 Workflow 불러오기</span>
+                <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold bg-gray-100 text-gray-500">{projects.length}</span>
+              </div>
+              <span className="text-xs text-gray-400">{showHistory ? "접기" : "펼치기"}</span>
+            </button>
+            {showHistory && (
+              <div className="border-t divide-y">
+                {projects.map((p) => (
+                  <div key={p.dirname} className="flex items-center justify-between px-5 py-3 hover:bg-gray-50">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <FileSpreadsheet className="h-4 w-4 text-gray-400 flex-shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-gray-900 truncate">{p.filename || p.dirname}</p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          {p.created_at && (
+                            <span className="flex items-center gap-1 text-[10px] text-gray-400">
+                              <Clock className="h-3 w-3" />{new Date(p.created_at).toLocaleDateString("ko-KR")}
+                            </span>
+                          )}
+                          {p.saved_data?.new_workflow_result && (
+                            <span className="flex items-center gap-0.5 text-[10px] text-green-600">
+                              <CheckCircle2 className="h-3 w-3" /> Workflow 있음
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <button onClick={() => handleLoadProject(p.filename || p.dirname)}
+                      disabled={loadingProject === (p.filename || p.dirname)}
+                      className="flex-shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                      style={{ backgroundColor: "#A62121" }}>
+                      {loadingProject === (p.filename || p.dirname) ? "로딩..." : "불러오기"}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ── 입력 모드 선택 ────────────────────────────────────────────────── */}
         <div className="rounded-xl shadow-sm overflow-hidden mb-6" style={{ backgroundColor: PWC.cardBg, border: "1px solid #f0e0e0" }}>
