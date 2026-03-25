@@ -210,19 +210,43 @@ _BENCHMARK_SYSTEM_PROMPT = """
 - Human-in-the-Loop: AI 수행 + 사람 확인/승인
 - Human-Supervised: 사람 주도, AI 보조
 
-## 출력 형식 (JSON)
+## 출력 형식 (JSON) — agents 안에 assigned_tasks를 반드시 포함하세요
 {
   "benchmark_insights": [
-    {"source": "실제 기업명", "insight": "구체적 AI 적용 사례 한 줄", "application": "우리 적용 방안 한 줄"}
+    {"source": "실제 기업명", "insight": "구체적 사례 한 줄", "application": "적용 방안 한 줄"}
   ],
-  "improvement_summary": "2~3문장. 어떤 기업 사례를 참고하여 어떻게 개선했는지.",
-  "blueprint_summary": "2~3문장 간결 요약",
+  "improvement_summary": "2~3문장",
+  "blueprint_summary": "2~3문장",
   "process_name": "프로세스명",
-  "agents": [...],
-  "execution_flow": [...]
+  "agents": [
+    {
+      "agent_id": "agent_1",
+      "agent_name": "에이전트명",
+      "agent_type": "유형",
+      "ai_technique": "기법",
+      "description": "역할 한 줄",
+      "automation_level": "Human-on-the-Loop | Human-in-the-Loop | Human-Supervised",
+      "assigned_tasks": [
+        {
+          "task_id": "1.1",
+          "task_name": "짧은 Task명",
+          "l4": "카테고리",
+          "l3": "영역",
+          "ai_role": "처리 방법 한 줄 (task_name과 다른 내용)",
+          "human_role": "사람 역할 (없으면 빈 문자열)",
+          "input_data": ["입력"],
+          "output_data": ["출력"],
+          "automation_level": "Human-on-the-Loop | Human-in-the-Loop | Human-Supervised"
+        }
+      ]
+    }
+  ],
+  "execution_flow": [
+    {"step": 1, "step_name": "단계명", "step_type": "sequential", "description": "설명", "agent_ids": ["agent_1"], "task_ids": ["1.1"]}
+  ]
 }
 
-(agents와 execution_flow는 기존 Workflow와 동일한 구조)
+**중요: agents 안의 assigned_tasks를 절대 생략하지 마세요. 기존 Task를 유지하면서 개선하세요.**
 
 ## 규칙
 - JSON만 출력
@@ -241,12 +265,13 @@ def _build_benchmark_prompt(
     lines.append(f"**프로세스명**: {workflow_cache.get('process_name', '')}\n")
     lines.append(f"**설계 요약**: {workflow_cache.get('blueprint_summary', '')}\n")
 
-    # 현재 에이전트/Task 요약
-    lines.append("**현재 AI 에이전트:**\n")
+    # 현재 에이전트/Task 상세 (LLM이 기존 Task를 유지할 수 있도록)
+    lines.append("**현재 AI 에이전트 및 Task 상세:**\n")
     for agent in workflow_cache.get("agents", []):
-        lines.append(f"- {agent['agent_name']} ({agent['agent_type']}, {agent['automation_level']})")
-        lines.append(f"  기법: {agent['ai_technique']}")
-        lines.append(f"  Task: {', '.join(t['task_name'] for t in agent.get('assigned_tasks', []))}")
+        lines.append(f"### {agent['agent_name']} ({agent.get('ai_technique', '')})")
+        lines.append(f"  automation_level: {agent['automation_level']}")
+        for t in agent.get("assigned_tasks", []):
+            lines.append(f"  - [{t.get('task_id','')}] {t.get('task_name','')} | ai_role: {t.get('ai_role','')} | level: {t.get('automation_level','')}")
         lines.append("")
 
     # 벤치마킹 결과
