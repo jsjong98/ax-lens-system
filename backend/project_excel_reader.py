@@ -46,33 +46,46 @@ def _detect_columns(ws: Any) -> dict[str, int] | None:
         headers_r1[col] = v1
         headers_r2[col] = v2
 
+    # 디버그: 헤더 내용 출력
+    print(f"[project_excel] Row 1 headers: { {c: v for c, v in headers_r1.items() if v} }")
+    print(f"[project_excel] Row 2 headers: { {c: v for c, v in headers_r2.items() if v} }")
+
     # 키워드 매핑 (row1 또는 row2에서 찾기)
     keyword_map = {
-        "project_no":       ["과제번호"],
-        "name":             ["이름"],
-        "overview":         ["과제개요", "주요과제내용"],
-        "as_is":            ["업무현황", "as-is", "asis"],
-        "pain_point":       ["pain-point", "painpoint", "pain_point"],
-        "needs":            ["needs"],
-        "to_be":            ["개선모습", "to-be", "tobe"],
-        "level":            ["과제수준"],
-        "considerations":   ["고려사항", "추진시고려"],
+        "project_no":       ["과제번호", "no", "번호"],
+        "name":             ["이름", "과제명"],
+        "overview":         ["과제개요", "주요과제내용", "주요과제", "개요"],
+        "as_is":            ["업무현황", "as-is", "asis", "현황"],
+        "pain_point":       ["pain-point", "painpoint", "pain_point", "pain"],
+        "needs":            ["needs", "니즈"],
+        "to_be":            ["개선모습", "to-be", "tobe", "개선방향", "개선"],
+        "level":            ["과제수준", "수준", "level"],
+        "considerations":   ["고려사항", "추진시고려", "고려"],
         "effect_quant":     ["정량적효과", "정량적"],
         "effect_qual":      ["정성적효과", "정성적"],
         "input_internal":   ["input(내부)", "input내부", "내부"],
         "input_external":   ["input(외부)", "input외부", "외부"],
-        "output":           ["output"],
+        "output":           ["output", "산출물"],
     }
 
+    # row1과 row2 합쳐서 검색
+    all_headers = {}
+    for col in set(list(headers_r1.keys()) + list(headers_r2.keys())):
+        combined = (headers_r1.get(col, "") + " " + headers_r2.get(col, "")).strip()
+        all_headers[col] = combined
+
     for key, keywords in keyword_map.items():
-        for col, val in {**headers_r1, **headers_r2}.items():
+        for col in sorted(all_headers.keys()):
+            val = all_headers[col]
             for kw in keywords:
                 if kw in val:
                     if key not in mapping:
                         mapping[key] = col
                     break
 
-    # 최소한 이름, pain_point 또는 overview가 있어야 유효
+    print(f"[project_excel] Column mapping result: {mapping}")
+
+    # 최소한 이름 또는 overview가 있어야 유효
     if "name" not in mapping and "overview" not in mapping:
         return None
 
