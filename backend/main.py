@@ -1869,12 +1869,14 @@ _restore_cache("project_design", _project_design_cache)
 @app.post("/api/project-management/design/generate", tags=["ProjectManagement"])
 async def generate_project_design(
     provider: str = Query("openai", description="분류 결과 제공자 (openai | anthropic)"),
+    source: str = Query("", description="데이터 소스 (new-workflow이면 NW 캐시 사용)"),
     process_name: str = Query("", description="프로세스 이름 (빈 값이면 자동 추론)"),
     l3: Optional[str] = Query(None, description="특정 L3로 필터"),
     l4: Optional[str] = Query(None, description="특정 L4로 필터"),
 ):
     """
     분류 결과 + To-Be Workflow 결과를 기반으로 과제 설계서를 자동 생성합니다.
+    source=new-workflow이면 New Workflow 캐시에서 데이터를 사용합니다.
     """
     from project_design_generator import (
         generate_project_design_with_llm,
@@ -1882,44 +1884,63 @@ async def generate_project_design(
         project_design_to_dict,
     )
 
-    if not _tasks_cache:
-        raise HTTPException(400, "로드된 Task가 없습니다. 먼저 엑셀 파일을 업로드하세요.")
+    use_nw = source == "new-workflow"
+    src_tasks = _nw_tasks_cache if use_nw else _tasks_cache
 
-    # 필터 적용
-    tasks = _tasks_cache
-    if l3:
-        tasks = [t for t in tasks if t.l3 == l3 or t.l3_id == l3]
-    if l4:
-        tasks = [t for t in tasks if t.l4 == l4 or t.l4_id == l4]
+    # New Workflow source면서 Task가 없으면 (과제 엑셀 등) workflow 캐시에서 처리
+    if use_nw and not src_tasks and _new_workflow_cache:
+        # Workflow 결과에서 Task를 추출
+        task_dicts = []
+        classification_dict = _build_classification_from_workflow(_new_workflow_cache)
+        for agent in _new_workflow_cache.get("agents", []):
+            for t in agent.get("assigned_tasks", []):
+                task_dicts.append({
+                    "id": t.get("task_id", ""), "l2": "", "l3": t.get("l3", ""),
+                    "l4": t.get("l4", ""), "l4_id": "", "name": t.get("task_name", ""),
+                    "description": t.get("ai_role", ""), "performer": "",
+                })
+    else:
+        if not src_tasks:
+            raise HTTPException(400, "로드된 Task가 없습니다. 먼저 엑셀 파일을 업로드하세요.")
 
-    if not tasks:
-        raise HTTPException(400, "필터 조건에 맞는 Task가 없습니다.")
+        tasks = src_tasks
+        if l3:
+            tasks = [t for t in tasks if t.l3 == l3 or t.l3_id == l3]
+        if l4:
+            tasks = [t for t in tasks if t.l4 == l4 or t.l4_id == l4]
 
-    # 분류 결과 로드
-    results_store = load_results(provider)
-    if not results_store:
-        raise HTTPException(400, f"'{provider}' 분류 결과가 없습니다. 먼저 분류를 실행하세요.")
+        if not tasks:
+            raise HTTPException(400, "필터 조건에 맞는 Task가 없습니다.")
 
-    # Task → dict 변환 + 분류 결과 매핑
-    task_dicts = []
-    classification_dict: dict[str, dict] = {}
-    for t in tasks:
-        td = {
-            "id": t.id, "l2": t.l2, "l3": t.l3, "l4": t.l4,
-            "l4_id": t.l4_id, "name": t.name,
-            "description": t.description, "performer": t.performer,
-        }
-        task_dicts.append(td)
+        if use_nw:
+            if not _new_workflow_cache:
+                raise HTTPException(400, "New Workflow 결과가 없습니다.")
+            classification_dict = _build_classification_from_workflow(_new_workflow_cache)
+        else:
+            results_store = load_results(provider)
+            if not results_store:
+                raise HTTPException(400, f"'{provider}' 분류 결과가 없습니다. 먼저 분류를 실행하세요.")
+            classification_dict = {}
 
-        cr = results_store.get(t.id)
-        if cr:
-            classification_dict[t.id] = {
-                "label": cr.label,
-                "reason": cr.reason,
-                "hybrid_note": cr.hybrid_note,
-                "input_types": cr.input_types,
-                "output_types": cr.output_types,
+        task_dicts = []
+        for t in tasks:
+            td = {
+                "id": t.id, "l2": t.l2, "l3": t.l3, "l4": t.l4,
+                "l4_id": t.l4_id, "name": t.name,
+                "description": t.description, "performer": t.performer,
             }
+            task_dicts.append(td)
+
+            if not use_nw:
+                cr = results_store.get(t.id)
+                if cr:
+                    classification_dict[t.id] = {
+                        "label": cr.label,
+                        "reason": cr.reason,
+                        "hybrid_note": cr.hybrid_note,
+                        "input_types": cr.input_types,
+                        "output_types": cr.output_types,
+                    }
 
     # 프로세스명 자동 추론
     if not process_name:

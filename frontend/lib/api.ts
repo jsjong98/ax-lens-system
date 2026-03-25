@@ -490,7 +490,9 @@ export async function uploadExcel(
       }
     };
     xhr.onerror = () => reject(new Error("네트워크 오류"));
-    xhr.open("POST", "/api/upload");
+    xhr.open("POST", `${BACKEND_DIRECT}/api/upload`);
+    const authToken = getAuthToken();
+    if (authToken) xhr.setRequestHeader("Authorization", `Bearer ${authToken}`);
     xhr.send(formData);
   });
 }
