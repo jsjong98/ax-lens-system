@@ -84,19 +84,27 @@ export default function NewWorkflowPage() {
   const updateForm = (key: string, value: string) =>
     setFormData((prev) => ({ ...prev, [key]: value }));
 
+  // 업로드 형식 (project vs l5_tasks)
+  const [uploadFormat, setUploadFormat] = useState<string>("");
+  const [projectCount, setProjectCount] = useState(0);
+
   // 파일 업로드
   const handleUpload = useCallback(async (file: File) => {
     setUploading(true);
     setError(null);
     try {
-      const res = await uploadNewWorkflowExcel(file);
+      const res = await uploadNewWorkflowExcel(file) as any;
       setUploadedFile(res.filename);
-      setTaskCount(res.task_count);
-      setSheets(res.sheets);
+      setUploadFormat(res.format || "");
+      setProjectCount(res.project_count || 0);
+      setTaskCount(res.task_count || 0);
+      setSheets(res.sheets || []);
       setResult(null);
-      // 필터 옵션 로드
-      const filters = await getNewWorkflowFilters();
-      setL3Options(filters.l3_options);
+      // 필터 옵션 로드 (L5 형식일 때만)
+      if (res.format !== "project") {
+        const filters = await getNewWorkflowFilters();
+        setL3Options(filters.l3_options);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "업로드 실패");
     } finally {
@@ -388,7 +396,11 @@ export default function NewWorkflowPage() {
                       <FileSpreadsheet className="h-5 w-5 text-green-600" />
                       <div>
                         <p className="text-sm font-medium text-gray-900">{uploadedFile}</p>
-                        <p className="text-xs text-gray-500">{taskCount}개 Task 로드됨</p>
+                        <p className="text-xs text-gray-500">
+                          {uploadFormat === "project"
+                            ? `${projectCount}개 과제 로드됨`
+                            : `${taskCount}개 Task 로드됨`}
+                        </p>
                       </div>
                     </div>
                     <label className="text-sm cursor-pointer font-medium" style={{ color: PWC.primary }}>
@@ -413,16 +425,23 @@ export default function NewWorkflowPage() {
                   </div>
                 )}
 
-                {uploadedFile && taskCount > 0 && (
+                {uploadedFile && (taskCount > 0 || projectCount > 0) && (
                   <div className="flex flex-col sm:flex-row gap-3 items-end pt-2">
-                    <div className="flex-1">
-                      <label className="block text-sm font-medium text-gray-700 mb-1">L3 필터 (선택)</label>
-                      <select className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#A62121]"
-                        value={selectedL3} onChange={(e) => setSelectedL3(e.target.value)}>
-                        <option value="">전체</option>
-                        {l3Options.map((o) => <option key={o.id} value={o.name}>{o.name}</option>)}
-                      </select>
-                    </div>
+                    {uploadFormat !== "project" && (
+                      <div className="flex-1">
+                        <label className="block text-sm font-medium text-gray-700 mb-1">L3 필터 (선택)</label>
+                        <select className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#A62121]"
+                          value={selectedL3} onChange={(e) => setSelectedL3(e.target.value)}>
+                          <option value="">전체</option>
+                          {l3Options.map((o) => <option key={o.id} value={o.name}>{o.name}</option>)}
+                        </select>
+                      </div>
+                    )}
+                    {uploadFormat === "project" && (
+                      <div className="flex-1 text-sm text-gray-500">
+                        {projectCount}개 과제 데이터가 준비되었습니다.
+                      </div>
+                    )}
                     <button onClick={handleGenerateFromExcel} disabled={loading}
                       className="flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-semibold text-white transition-opacity disabled:opacity-60"
                       style={{ backgroundColor: PWC.primary }}>
