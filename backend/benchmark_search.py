@@ -109,26 +109,31 @@ def _search_duckduckgo(query: str, max_results: int = 8) -> list[dict]:
 # ── 검색 쿼리 생성 ───────────────────────────────────────────────────────────
 
 def _generate_search_queries(workflow_cache: dict) -> list[str]:
-    """Workflow 결과에서 맥락에 맞는 검색 쿼리를 생성합니다."""
+    """선도 기업의 AI 적용 사례를 찾기 위한 검색 쿼리 생성."""
     process_name = workflow_cache.get("process_name", "")
     agents = workflow_cache.get("agents", [])
-    summary = workflow_cache.get("blueprint_summary", "")
 
     queries = []
 
-    # 핵심 프로세스 쿼리
-    queries.append(f"{process_name} AI 자동화 도입 사례 best practice")
-    queries.append(f"{process_name} AI transformation enterprise case study")
+    # 선도 기업 AI 적용 사례 (Best Practice)
+    queries.append(f"'{process_name}' AI automation best practice company case study 2024 2025")
+    queries.append(f"leading company '{process_name}' AI implementation success story enterprise")
 
-    # 에이전트 유형 기반 심화 쿼리
-    for agent in agents[:2]:
-        agent_type = agent.get("agent_type", "")
-        technique = agent.get("ai_technique", "")
-        if agent_type:
-            queries.append(f"enterprise {agent_type} {technique} implementation case study")
+    # 글로벌 기업 HR AI 적용 사례
+    queries.append(f"Google Amazon Microsoft '{process_name}' AI HR automation case study")
 
-    # 선제적 AI 쿼리
-    queries.append(f"proactive AI assistant HR {process_name} innovation")
+    # 에이전트 기술 기반 사례
+    techniques = set()
+    for agent in agents[:3]:
+        tech = agent.get("ai_technique", "")
+        if tech:
+            techniques.add(tech.split(",")[0].strip())
+    if techniques:
+        tech_str = " ".join(list(techniques)[:2])
+        queries.append(f"enterprise {tech_str} '{process_name}' real world deployment results")
+
+    # 컨설팅 펌 리서치
+    queries.append(f"McKinsey Deloitte PwC '{process_name}' AI transformation benchmark report")
 
     return queries[:5]
 
@@ -169,77 +174,60 @@ async def search_benchmarks(workflow_cache: dict) -> list[dict]:
 _BENCHMARK_SYSTEM_PROMPT = """
 당신은 AI 업무 혁신 컨설턴트이자 벤치마킹 전문가입니다.
 
-## 역할
-현재 설계된 To-Be Workflow와 웹에서 검색한 벤치마킹 사례를 분석하여,
-Workflow를 **더 혁신적이고 실용적으로 개선**합니다.
+## 벤치마킹이란
+선도 기업(Best Practice)의 AI 적용 사례를 분석하여, 현재 Workflow를 개선하는 것입니다.
+단순히 문서에서 정보를 떼오는 것이 아니라, **실제 기업이 해당 분야에서 AI를 어떻게 적용했는지** 사례를 분석합니다.
 
-## 사고 과정
+## 분석 과정
 
-**Step 1: 벤치마킹 사례 분석**
-- 검색된 사례들에서 핵심 인사이트를 추출하세요
-- 현재 Workflow에 빠져있는 혁신 포인트를 식별하세요
-- 업계 트렌드와 best practice를 파악하세요
+**Step 1: 선도 기업 AI 적용 사례 분석**
+- 검색 결과에서 **실제 기업명과 구체적 AI 적용 방법**을 추출
+- 예: "Google은 채용에서 AI 기반 이력서 스크리닝으로 처리 시간 75% 단축"
+- 예: "Unilever는 HireVue AI 면접으로 초기 스크리닝 자동화, 연간 100만 달러 절감"
+- 사례가 없는 일반 문서는 무시하세요
 
-**Step 2: Workflow 개선**
-- 벤치마킹에서 발견한 아이디어를 현재 Workflow에 반영하세요
-- 새로운 Task를 추가하거나, 기존 Task의 AI 역할을 강화하세요
-- 실현 가능성과 혁신성 사이의 균형을 맞추세요
+**Step 2: 현재 Workflow에 적용**
+- 선도 기업 사례에서 발견한 구체적 방법론을 현재 Workflow에 반영
+- AI 자율 수행(Human-on-the-Loop) Task를 늘리는 방향으로 개선
+- **Human Task를 늘리지 마세요** — 벤치마킹의 목적은 AI 자율화 강화
 
-**Step 3: 개선 근거 제시**
-- 각 개선 사항에 대해 어떤 벤치마킹 사례에서 영감을 받았는지 설명하세요
+**Step 3: 개선 근거**
+- 각 개선에 대해 "어떤 기업의 어떤 사례"를 참고했는지 명시
+
+## benchmark_insights 작성 규칙
+- source: **실제 기업명** (예: "Google", "Unilever", "삼성SDS")
+- insight: 그 기업이 **구체적으로 무엇을 했는지** 한 줄
+- application: 우리 Workflow에 **어떻게 적용**할지 한 줄
+
+## Task 작성 규칙 (반드시 지키세요)
+- task_name: 짧게 (예: "이력서 AI 스크리닝")
+- ai_role: task_name과 다른 구체적 처리 방법
+- human_role: task_name과 같은 내용 금지. 구체적 행동만 (예: "최종 합격자 확정")
+- **벤치마킹으로 Human Task를 추가하지 마세요. AI Task를 강화하세요.**
+
+## automation_level
+- Human-on-the-Loop: AI 자율 수행, 사람 모니터링만
+- Human-in-the-Loop: AI 수행 + 사람 확인/승인
+- Human-Supervised: 사람 주도, AI 보조
 
 ## 출력 형식 (JSON)
 {
   "benchmark_insights": [
-    {
-      "source": "벤치마킹 출처/사례명",
-      "insight": "핵심 인사이트",
-      "application": "현재 Workflow에 적용할 점"
-    }
+    {"source": "실제 기업명", "insight": "구체적 AI 적용 사례 한 줄", "application": "우리 적용 방안 한 줄"}
   ],
-  "improvement_summary": "개선 요약 (3~4문장). 어떤 벤치마킹을 참고하여 어떻게 개선했는지.",
-  "blueprint_summary": "개선된 전체 Workflow 설계 요약 (3~4문장)",
+  "improvement_summary": "2~3문장. 어떤 기업 사례를 참고하여 어떻게 개선했는지.",
+  "blueprint_summary": "2~3문장 간결 요약",
   "process_name": "프로세스명",
-  "agents": [
-    {
-      "agent_id": "agent_1",
-      "agent_name": "에이전트 이름",
-      "agent_type": "에이전트 유형",
-      "ai_technique": "사용 기법",
-      "description": "역할 설명",
-      "automation_level": "Full-Auto | Human-in-Loop | Human-Supervised",
-      "assigned_tasks": [
-        {
-          "task_id": "1.1",
-          "task_name": "Task명",
-          "l4": "상위 카테고리",
-          "l3": "프로세스 영역",
-          "ai_role": "AI가 하는 일",
-          "human_role": "사람이 하는 일",
-          "input_data": ["입력"],
-          "output_data": ["출력"],
-          "automation_level": "Full-Auto | Human-in-Loop | Human-Supervised"
-        }
-      ]
-    }
-  ],
-  "execution_flow": [
-    {
-      "step": 1,
-      "step_name": "단계명",
-      "step_type": "sequential | parallel",
-      "description": "설명",
-      "agent_ids": ["agent_1"],
-      "task_ids": ["1.1"]
-    }
-  ]
+  "agents": [...],
+  "execution_flow": [...]
 }
 
+(agents와 execution_flow는 기존 Workflow와 동일한 구조)
+
 ## 규칙
-- 반드시 JSON만 출력 (마크다운 코드 블록 없음)
-- 기존 Workflow의 좋은 점은 유지하면서 개선하세요
-- 벤치마킹에서 영감받은 새로운 Task를 추가할 수 있습니다
-- 비현실적인 개선은 피하세요 — 실제 구현 가능한 수준으로
+- JSON만 출력
+- 기존 Workflow의 좋은 점은 유지
+- **Human Task를 늘리지 말고 AI Task를 강화**
 - 한국어로 작성
 """
 
