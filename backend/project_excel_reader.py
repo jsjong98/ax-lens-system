@@ -68,19 +68,28 @@ def _detect_columns(ws: Any) -> dict[str, int] | None:
         "output":           ["output", "산출물"],
     }
 
-    # row1과 row2 합쳐서 검색
-    all_headers = {}
-    for col in set(list(headers_r1.keys()) + list(headers_r2.keys())):
-        combined = (headers_r1.get(col, "") + " " + headers_r2.get(col, "")).strip()
-        all_headers[col] = combined
-
+    # Row 2를 우선 검색 (세부 헤더), 못 찾으면 Row 1에서 검색
     for key, keywords in keyword_map.items():
-        for col in sorted(all_headers.keys()):
-            val = all_headers[col]
+        # 먼저 Row 2에서 찾기
+        for col in sorted(headers_r2.keys()):
+            val = headers_r2[col]
             for kw in keywords:
                 if kw in val:
                     if key not in mapping:
                         mapping[key] = col
+                    break
+            if key in mapping:
+                break
+        # Row 2에서 못 찾으면 Row 1에서 (단, row1==row2인 병합셀만)
+        if key not in mapping:
+            for col in sorted(headers_r1.keys()):
+                if headers_r1[col] == headers_r2[col]:  # 병합 셀 (row1==row2)
+                    val = headers_r1[col]
+                    for kw in keywords:
+                        if kw in val:
+                            mapping[key] = col
+                            break
+                if key in mapping:
                     break
 
     print(f"[project_excel] Column mapping result: {mapping}")
