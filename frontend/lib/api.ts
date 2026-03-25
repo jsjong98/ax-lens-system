@@ -918,7 +918,9 @@ export async function downloadNewWorkflowAsHtml(): Promise<void> {
 }
 
 export async function downloadNewWorkflowAsHrJson(): Promise<void> {
-  const res = await fetch(`${BACKEND_DIRECT}/api/new-workflow/export-hr-json`);
+  const token = getAuthToken();
+  const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+  const res = await fetch(`${BACKEND_DIRECT}/api/new-workflow/export-hr-json`, { headers });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: "다운로드 실패" }));
     throw new Error(err.detail ?? "다운로드 실패");
@@ -1086,7 +1088,9 @@ export async function clearProjectDesign(): Promise<{ ok: boolean }> {
 }
 
 export async function downloadProjectPpt(): Promise<void> {
-  const res = await fetch(`${BACKEND_DIRECT}/api/project-management/export-ppt`);
+  const token = getAuthToken();
+  const hdrs: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+  const res = await fetch(`${BACKEND_DIRECT}/api/project-management/export-ppt`, { headers: hdrs });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: "PPT 다운로드 실패" }));
     throw new Error(err.detail ?? "PPT 다운로드 실패");

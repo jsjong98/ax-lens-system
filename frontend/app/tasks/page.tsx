@@ -41,7 +41,7 @@ export default function TasksPage() {
 
   useEffect(() => {
     getFilterOptions().then(setFilters).catch(() => {});
-    getProjectList().then((r) => setProjects(r.projects)).catch(() => {});
+    getProjectList().then((r) => setProjects(r.projects.filter((p) => p.source !== "new_workflow"))).catch(() => {});
   }, []);
 
   const handleLoadProject = async (filename: string) => {
@@ -83,7 +83,7 @@ export default function TasksPage() {
       {/* 엑셀 업로드 */}
       <ExcelUploader onUploaded={() => {
         fetchData(1);
-        getProjectList().then((r) => setProjects(r.projects)).catch(() => {});
+        getProjectList().then((r) => setProjects(r.projects.filter((p) => p.source !== "new_workflow"))).catch(() => {});
       }} />
 
       {/* 이전 프로젝트 불러오기 */}
