@@ -238,6 +238,36 @@ async def get_data_status():
     }
 
 
+@app.delete("/api/data/reset-all", tags=["Data"])
+async def reset_all_data():
+    """모든 데이터를 초기화합니다 (Volume 포함)."""
+    import shutil
+    # 인메모리 캐시 초기화
+    _new_workflow_cache.clear()
+    _project_definition_cache.clear()
+    _project_design_cache.clear()
+    _nw_tasks_cache.clear()
+    _nw_projects_cache.clear()
+    # Volume 데이터 삭제
+    data_dir = _PERSIST_ROOT / "data"
+    if data_dir.exists():
+        shutil.rmtree(data_dir, ignore_errors=True)
+        data_dir.mkdir(exist_ok=True)
+    results_dir = _PERSIST_ROOT / "results"
+    if results_dir.exists():
+        shutil.rmtree(results_dir, ignore_errors=True)
+        results_dir.mkdir(exist_ok=True)
+    uploads_dir = _PERSIST_ROOT / "uploads"
+    if uploads_dir.exists():
+        shutil.rmtree(uploads_dir, ignore_errors=True)
+        uploads_dir.mkdir(exist_ok=True)
+    for f in ["current_project.json", "new_workflow_result.json", "project_definition.json", "project_design.json"]:
+        p = _PERSIST_ROOT / f
+        if p.exists():
+            p.unlink(missing_ok=True)
+    return {"ok": True, "message": "모든 데이터가 초기화되었습니다."}
+
+
 @app.get("/api/projects", tags=["Data"])
 async def get_project_list():
     """저장된 모든 프로젝트(파일) 목록을 반환합니다."""
