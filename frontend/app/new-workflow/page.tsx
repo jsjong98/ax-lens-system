@@ -52,14 +52,21 @@ export default function NewWorkflowPage() {
   const [l3Options, setL3Options] = useState<{ id: string; name: string }[]>([]);
   const [selectedL3, setSelectedL3] = useState("");
 
-  // 직접 입력 상태
+  // 직접 입력 상태 (과제 엑셀 양식과 동일)
   const [formData, setFormData] = useState({
-    process_name: "",
-    inputs: "",
-    outputs: "",
-    systems: "",
-    pain_points: "",
-    additional_info: "",
+    process_name: "",       // 이름
+    overview: "",           // 과제개요
+    as_is: "",              // 업무 현황(As-Is)
+    pain_points: "",        // Pain-Point
+    needs: "",              // Needs
+    to_be: "",              // 개선모습(To-Be)
+    level: "",              // 과제 수준
+    considerations: "",     // 과제 추진 시 고려사항
+    effect_quant: "",       // 정량적 효과
+    effect_qual: "",        // 정성적 효과
+    input_internal: "",     // Input(내부)
+    input_external: "",     // Input(외부)
+    output: "",             // Output
   });
 
   // 생성 상태
@@ -126,16 +133,33 @@ export default function NewWorkflowPage() {
     }
   };
 
-  // Workflow 생성 (직접 입력 모드)
+  // Workflow 생성 (직접 입력 모드) — 과제 양식 필드를 freeform API에 매핑
   const handleGenerateFromForm = async () => {
     if (!formData.process_name.trim()) {
-      setError("프로세스/주제명을 입력해 주세요.");
+      setError("과제명을 입력해 주세요.");
       return;
     }
     setLoading(true);
     setError(null);
     try {
-      const res = await generateNewWorkflowFreeform(formData);
+      const additional = [
+        formData.overview && `과제개요: ${formData.overview}`,
+        formData.as_is && `현황(As-Is): ${formData.as_is}`,
+        formData.needs && `Needs: ${formData.needs}`,
+        formData.to_be && `개선방향(To-Be): ${formData.to_be}`,
+        formData.level && `과제 수준: ${formData.level}`,
+        formData.considerations && `고려사항: ${formData.considerations}`,
+        formData.effect_quant && `정량적 효과: ${formData.effect_quant}`,
+        formData.effect_qual && `정성적 효과: ${formData.effect_qual}`,
+      ].filter(Boolean).join("\n");
+
+      const res = await generateNewWorkflowFreeform({
+        process_name: formData.process_name,
+        inputs: [formData.input_internal && `내부: ${formData.input_internal}`, formData.input_external && `외부: ${formData.input_external}`].filter(Boolean).join("\n"),
+        outputs: formData.output,
+        pain_points: formData.pain_points,
+        additional_info: additional,
+      });
       setResult(res);
       // result updated
     } catch (e) {
@@ -220,74 +244,114 @@ export default function NewWorkflowPage() {
             {/* ── 직접 입력 모드 ──────────────────────────────────────────── */}
             {inputMode === "form" && (
               <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    프로세스 / 주제명 <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.process_name}
-                    onChange={(e) => updateForm("process_name", e.target.value)}
-                    placeholder="예: 채용 프로세스, 교육 운영 관리, 급여 정산 등"
-                    className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-[#A62121] focus:ring-1 focus:ring-[#A62121] outline-none"
-                  />
-                </div>
-
+                {/* 과제명 + 과제개요 */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Input (투입 자료/데이터)</label>
-                    <textarea
-                      value={formData.inputs}
-                      onChange={(e) => updateForm("inputs", e.target.value)}
-                      placeholder="예: 이력서, 채용 공고, 면접 평가서 등"
-                      rows={3}
-                      className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-[#A62121] focus:ring-1 focus:ring-[#A62121] outline-none resize-none"
-                    />
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      이름 (과제명) <span className="text-red-500">*</span>
+                    </label>
+                    <input type="text" value={formData.process_name}
+                      onChange={(e) => updateForm("process_name", e.target.value)}
+                      placeholder="예: 의료비 판독 Agent, 채용 프로세스 자동화"
+                      className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-[#A62121] focus:ring-1 focus:ring-[#A62121] outline-none" />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Output (산출물/결과물)</label>
-                    <textarea
-                      value={formData.outputs}
-                      onChange={(e) => updateForm("outputs", e.target.value)}
-                      placeholder="예: 최종 합격자 리스트, 채용 보고서, 온보딩 계획 등"
-                      rows={3}
-                      className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-[#A62121] focus:ring-1 focus:ring-[#A62121] outline-none resize-none"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">사용 시스템 / 툴</label>
-                    <textarea
-                      value={formData.systems}
-                      onChange={(e) => updateForm("systems", e.target.value)}
-                      placeholder="예: SAP, Workday, Excel, Outlook 등"
-                      rows={2}
-                      className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-[#A62121] focus:ring-1 focus:ring-[#A62121] outline-none resize-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Pain Point (현재 문제점)</label>
-                    <textarea
-                      value={formData.pain_points}
-                      onChange={(e) => updateForm("pain_points", e.target.value)}
-                      placeholder="예: 수작업 반복, 데이터 불일치, 처리 시간 과다 등"
-                      rows={2}
-                      className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-[#A62121] focus:ring-1 focus:ring-[#A62121] outline-none resize-none"
-                    />
+                    <label className="block text-sm font-medium text-gray-700 mb-1">과제 수준</label>
+                    <select value={formData.level} onChange={(e) => updateForm("level", e.target.value)}
+                      className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-[#A62121] focus:ring-1 focus:ring-[#A62121] outline-none">
+                      <option value="">선택</option>
+                      <option value="Level 1">Level 1</option>
+                      <option value="Level 2">Level 2</option>
+                      <option value="Level 3">Level 3</option>
+                    </select>
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">추가 참고사항</label>
-                  <textarea
-                    value={formData.additional_info}
-                    onChange={(e) => updateForm("additional_info", e.target.value)}
-                    placeholder="기타 참고할 정보가 있으면 자유롭게 입력해 주세요"
-                    rows={2}
-                    className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-[#A62121] focus:ring-1 focus:ring-[#A62121] outline-none resize-none"
-                  />
+                  <label className="block text-sm font-medium text-gray-700 mb-1">과제 개요 (주요 과제 내용)</label>
+                  <textarea value={formData.overview} onChange={(e) => updateForm("overview", e.target.value)}
+                    placeholder="표준화된 병명과 진료 내역을 기준으로 의료비 지급 요건·한도·중복 규정을 검증해..."
+                    rows={3} className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-[#A62121] focus:ring-1 focus:ring-[#A62121] outline-none resize-none" />
+                </div>
+
+                {/* 현황 및 Pain Point vs. 개선 방향 */}
+                <div className="rounded-lg border border-gray-200 p-4 space-y-3">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">현황 및 Pain Point vs. 개선 방향</p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">업무 현황 (As-Is)</label>
+                      <textarea value={formData.as_is} onChange={(e) => updateForm("as_is", e.target.value)}
+                        placeholder="구성원의 의료비 지원 신청 내역을 건별 수기 검토하여..."
+                        rows={3} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-[#A62121] focus:ring-1 focus:ring-[#A62121] outline-none resize-none" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-red-600 mb-1">Pain-Point</label>
+                      <textarea value={formData.pain_points} onChange={(e) => updateForm("pain_points", e.target.value)}
+                        placeholder="명확하지 않은 검토 기준으로 판단의 일관성 부족, 검토 공수 증가..."
+                        rows={3} className="w-full rounded-lg border border-red-200 px-3 py-2 text-sm focus:border-red-500 focus:ring-1 focus:ring-red-500 outline-none resize-none bg-red-50/30" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Needs</label>
+                      <textarea value={formData.needs} onChange={(e) => updateForm("needs", e.target.value)}
+                        placeholder="지급 기준을 명확히 정의하고 일관되게 적용할 수 있는 체계..."
+                        rows={3} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-[#A62121] focus:ring-1 focus:ring-[#A62121] outline-none resize-none" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-green-700 mb-1">개선모습 (To-Be)</label>
+                      <textarea value={formData.to_be} onChange={(e) => updateForm("to_be", e.target.value)}
+                        placeholder="Agent가 기존 처리 사례를 기반으로 모호한 규정의 해석·판단 방향성을 자동 제안..."
+                        rows={3} className="w-full rounded-lg border border-green-200 px-3 py-2 text-sm focus:border-green-500 focus:ring-1 focus:ring-green-500 outline-none resize-none bg-green-50/30" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* 기대효과 */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">정량적 효과</label>
+                    <textarea value={formData.effect_quant} onChange={(e) => updateForm("effect_quant", e.target.value)}
+                      placeholder="의료비 검토 및 승인 공수 nn% 이상 절감..."
+                      rows={2} className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-[#A62121] focus:ring-1 focus:ring-[#A62121] outline-none resize-none" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">정성적 효과</label>
+                    <textarea value={formData.effect_qual} onChange={(e) => updateForm("effect_qual", e.target.value)}
+                      placeholder="지급 기준 표준화로 판단 일관성 확보..."
+                      rows={2} className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-[#A62121] focus:ring-1 focus:ring-[#A62121] outline-none resize-none" />
+                  </div>
+                </div>
+
+                {/* 활용 Data/System */}
+                <div className="rounded-lg border border-gray-200 p-4 space-y-3">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">활용 Data / System (Input/Output)</p>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Input (내부)</label>
+                      <textarea value={formData.input_internal} onChange={(e) => updateForm("input_internal", e.target.value)}
+                        placeholder="의료비 청구 병명, 진료 항목·금액, 지급 기준..."
+                        rows={3} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-[#A62121] focus:ring-1 focus:ring-[#A62121] outline-none resize-none" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Input (외부)</label>
+                      <textarea value={formData.input_external} onChange={(e) => updateForm("input_external", e.target.value)}
+                        placeholder="표준 질병분류 코드 (KCD/ICD)..."
+                        rows={3} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-[#A62121] focus:ring-1 focus:ring-[#A62121] outline-none resize-none" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Output</label>
+                      <textarea value={formData.output} onChange={(e) => updateForm("output", e.target.value)}
+                        placeholder="지급 가능 여부 판정 결과, 지급 가능 금액..."
+                        rows={3} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-[#A62121] focus:ring-1 focus:ring-[#A62121] outline-none resize-none" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* 고려사항 */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">과제 추진 시 고려사항</label>
+                  <textarea value={formData.considerations} onChange={(e) => updateForm("considerations", e.target.value)}
+                    placeholder="의료비 증빙서류의 형식이 다양하여 데이터 추출 정확도 확보 필요..."
+                    rows={2} className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-[#A62121] focus:ring-1 focus:ring-[#A62121] outline-none resize-none" />
                 </div>
 
                 <button
