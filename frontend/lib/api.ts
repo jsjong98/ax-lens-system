@@ -897,6 +897,26 @@ export async function clearNewWorkflowResult(): Promise<{ ok: boolean }> {
   return apiFetch("/new-workflow/result", { method: "DELETE" });
 }
 
+export async function downloadNewWorkflowAsHtml(): Promise<void> {
+  const token = getAuthToken();
+  const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+  const res = await fetch(`${BACKEND_DIRECT}/api/new-workflow/export-html`, { headers });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "HTML 다운로드 실패" }));
+    throw new Error(err.detail ?? "HTML 다운로드 실패");
+  }
+  const blob = await res.blob();
+  const disposition = res.headers.get("Content-Disposition") ?? "";
+  const match = disposition.match(/filename="?([^"]+)"?/);
+  const filename = match?.[1] ?? "AI_Service_Flow.html";
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = decodeURIComponent(filename);
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export async function downloadNewWorkflowAsHrJson(): Promise<void> {
   const res = await fetch(`${BACKEND_DIRECT}/api/new-workflow/export-hr-json`);
   if (!res.ok) {

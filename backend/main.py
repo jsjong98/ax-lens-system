@@ -1596,6 +1596,25 @@ async def clear_new_workflow_result():
     return {"ok": True}
 
 
+@app.get("/api/new-workflow/export-html", tags=["NewWorkflow"])
+async def export_new_workflow_as_html():
+    """AI Service Flow를 PwC 표준 HTML로 내보냅니다."""
+    from html_exporter import export_workflow_html
+
+    if not _new_workflow_cache:
+        raise HTTPException(404, "Workflow 결과가 없습니다.")
+
+    html = export_workflow_html(_new_workflow_cache)
+    process_name = _new_workflow_cache.get("process_name", "workflow")
+    filename = f"AI_Service_Flow_{process_name}.html"
+
+    return StreamingResponse(
+        io.BytesIO(html.encode("utf-8")),
+        media_type="text/html; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @app.get("/api/new-workflow/export-hr-json", tags=["NewWorkflow"])
 async def export_new_workflow_as_hr_json():
     """

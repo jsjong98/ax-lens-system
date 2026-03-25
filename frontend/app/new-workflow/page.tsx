@@ -10,6 +10,7 @@ import {
   generateNewWorkflowFreeform,
   benchmarkNewWorkflow,
   saveEditedWorkflow,
+  downloadNewWorkflowAsHtml,
   downloadNewWorkflowAsHrJson,
   type ExcelSheet,
   type NewWorkflowResult,
@@ -490,6 +491,12 @@ export default function NewWorkflowPage() {
                     style={{ borderColor: PWC.primary, color: PWC.primary }}>
                     {exporting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
                     JSON
+                  </button>
+                  <button onClick={async () => { try { await downloadNewWorkflowAsHtml(); } catch (e) { setError(e instanceof Error ? e.message : "HTML 내보내기 실패"); } }}
+                    className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium"
+                    style={{ borderColor: "#1A5CB0", color: "#1A5CB0" }}>
+                    <Download className="h-3 w-3" />
+                    HTML
                   </button>
                 </div>
               </div>
