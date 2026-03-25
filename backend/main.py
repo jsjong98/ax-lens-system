@@ -1265,6 +1265,7 @@ async def generate_tobe_workflow(
 
 # New Workflow 전용 캐시 (독립 운영) + 자동 복원
 _nw_tasks_cache: list[Task] = []
+_nw_projects_cache: list[dict] = []  # 과제 엑셀 형식일 때 사용
 _nw_excel_path: Path | None = None
 _new_workflow_cache: dict = {}
 _restore_cache("new_workflow", _new_workflow_cache)
@@ -1272,9 +1273,14 @@ _restore_cache("new_workflow", _new_workflow_cache)
 
 @app.post("/api/new-workflow/upload", tags=["NewWorkflow"])
 async def upload_new_workflow_excel(file: UploadFile = File(...)):
-    """New Workflow 전용 엑셀 업로드 — 독립적으로 운영됩니다."""
+    """
+    New Workflow 전용 엑셀 업로드.
+    과제 엑셀 형식 (2행 병합 헤더) 자동 감지 → 과제 데이터로 파싱.
+    L5 Task 형식이면 기존 방식으로 파싱.
+    """
     global _nw_tasks_cache, _nw_excel_path
     from excel_reader import list_sheets
+    from project_excel_reader import parse_project_excel, projects_to_freeform_params
 
     if not file.filename or not file.filename.endswith(".xlsx"):
         raise HTTPException(400, ".xlsx 파일만 업로드 가능합니다.")
@@ -1286,17 +1292,41 @@ async def upload_new_workflow_excel(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(500, f"파일 저장 실패: {e}")
 
+    _nw_excel_path = save_path
+    set_current_project(file.filename)
+
+    # 1차: 과제 엑셀 형식 시도 (2행 병합 헤더)
+    projects = []
+    try:
+        projects = parse_project_excel(save_path)
+    except Exception:
+        pass
+
+    if projects:
+        # 과제 형식 감지됨 — 프로젝트 데이터를 별도 저장
+        _nw_projects_cache.clear()
+        _nw_projects_cache.extend(projects)
+        _nw_tasks_cache = []  # L5 Task는 없음
+
+        save_meta(file.filename, task_count=0, project_count=len(projects), source="new_workflow", format="project")
+
+        return {
+            "message": "과제 엑셀 업로드 성공",
+            "filename": file.filename,
+            "format": "project",
+            "project_count": len(projects),
+            "task_count": 0,
+            "projects": [{"no": p.get("project_no", ""), "name": p.get("name", "")} for p in projects],
+            "sheets": [],
+        }
+
+    # 2차: L5 Task 형식 시도
     try:
         sheets = list_sheets(save_path)
     except Exception as e:
         save_path.unlink(missing_ok=True)
         raise HTTPException(422, f"엑셀 파싱 실패: {e}")
 
-    _nw_excel_path = save_path
-    set_current_project(file.filename)
-    save_meta(file.filename, task_count=len(_nw_tasks_cache), source="new_workflow")
-
-    # 추천 시트 자동 로드
     recommended = next((s for s in sheets if s["recommended"]), None)
     if recommended:
         try:
@@ -1304,9 +1334,13 @@ async def upload_new_workflow_excel(file: UploadFile = File(...)):
         except Exception:
             pass
 
+    save_meta(file.filename, task_count=len(_nw_tasks_cache), source="new_workflow", format="l5_tasks")
+
     return {
         "message": "업로드 성공",
         "filename": file.filename,
+        "format": "l5_tasks",
+        "project_count": 0,
         "task_count": len(_nw_tasks_cache),
         "sheets": sheets,
     }
@@ -1370,11 +1404,36 @@ async def generate_new_workflow(
     l4: Optional[str] = Query(None, description="특정 L4 Activity로 필터 (비우면 전체)"),
 ):
     """
-    New Workflow 전용 Task를 분석하여 AI 워크플로우 설계 초안을 생성합니다.
-    _nw_tasks_cache 우선, 없으면 _tasks_cache fallback.
+    New Workflow 전용 Task 또는 과제 데이터를 분석하여 AI 워크플로우 설계 초안을 생성합니다.
+    과제 엑셀이 업로드된 경우 자동으로 freeform 방식으로 생성합니다.
     """
     from new_workflow_generator import generate_new_workflow as _gen, result_to_dict
+    from new_workflow_generator import generate_workflow_from_freeform, result_to_dict as _rtd
 
+    # 과제 형식이 로드된 경우 → freeform 방식으로 생성
+    if _nw_projects_cache:
+        from project_excel_reader import projects_to_freeform_params
+        params = projects_to_freeform_params(_nw_projects_cache)
+        if process_name:
+            params["process_name"] = process_name
+
+        settings = load_settings()
+        anthropic_key = os.getenv("ANTHROPIC_API_KEY", "") or settings.anthropic_api_key
+        openai_key = os.getenv("OPENAI_API_KEY", "") or settings.api_key
+
+        result = await generate_workflow_from_freeform(
+            **params,
+            api_key=anthropic_key,
+            model=settings.anthropic_model or "claude-sonnet-4-6",
+            openai_api_key=openai_key,
+            openai_model=settings.model or "gpt-5.4",
+        )
+        result_dict = _rtd(result)
+        _new_workflow_cache.update(result_dict)
+        _persist_cache("new_workflow", _new_workflow_cache)
+        return {"ok": True, **result_dict}
+
+    # L5 Task 형식
     source_tasks = _nw_tasks_cache if _nw_tasks_cache else _tasks_cache
     if not source_tasks:
         raise HTTPException(400, "로드된 Task가 없습니다. 먼저 엑셀 파일을 업로드하세요.")
