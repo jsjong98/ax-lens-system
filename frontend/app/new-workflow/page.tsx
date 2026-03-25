@@ -118,6 +118,8 @@ export default function NewWorkflowPage() {
   // 업로드 형식 (project vs l5_tasks)
   const [uploadFormat, setUploadFormat] = useState<string>("");
   const [projectCount, setProjectCount] = useState(0);
+  const [projectList, setProjectList] = useState<Array<{ no: string; name: string }>>([]);
+  const [selectedProjectIdx, setSelectedProjectIdx] = useState<number | null>(null);
 
   // 파일 업로드
   const handleUpload = useCallback(async (file: File) => {
@@ -128,6 +130,8 @@ export default function NewWorkflowPage() {
       setUploadedFile(res.filename);
       setUploadFormat(res.format || "");
       setProjectCount(res.project_count || 0);
+      setProjectList(res.projects || []);
+      setSelectedProjectIdx(null);
       setTaskCount(res.task_count || 0);
       setSheets(res.sheets || []);
       setResult(null);
@@ -162,7 +166,12 @@ export default function NewWorkflowPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await generateNewWorkflow({ l3: selectedL3 || undefined });
+      const params: Record<string, string> = {};
+      if (selectedL3) params.l3 = selectedL3;
+      if (uploadFormat === "project" && selectedProjectIdx !== null) {
+        params.project_index = String(selectedProjectIdx);
+      }
+      const res = await generateNewWorkflow(params as any);
       setResult(res);
       // result updated
     } catch (e) {
@@ -504,28 +513,66 @@ export default function NewWorkflowPage() {
                 )}
 
                 {uploadedFile && (taskCount > 0 || projectCount > 0) && (
-                  <div className="flex flex-col sm:flex-row gap-3 items-end pt-2">
+                  <div className="pt-2 space-y-3">
                     {uploadFormat !== "project" && (
-                      <div className="flex-1">
-                        <label className="block text-sm font-medium text-gray-700 mb-1">L3 필터 (선택)</label>
-                        <select className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#A62121]"
-                          value={selectedL3} onChange={(e) => setSelectedL3(e.target.value)}>
-                          <option value="">전체</option>
-                          {l3Options.map((o) => <option key={o.id} value={o.name}>{o.name}</option>)}
-                        </select>
+                      <div className="flex flex-col sm:flex-row gap-3 items-end">
+                        <div className="flex-1">
+                          <label className="block text-sm font-medium text-gray-700 mb-1">L3 필터 (선택)</label>
+                          <select className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#A62121]"
+                            value={selectedL3} onChange={(e) => setSelectedL3(e.target.value)}>
+                            <option value="">전체</option>
+                            {l3Options.map((o) => <option key={o.id} value={o.name}>{o.name}</option>)}
+                          </select>
+                        </div>
+                        <button onClick={handleGenerateFromExcel} disabled={loading}
+                          className="flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-semibold text-white transition-opacity disabled:opacity-60"
+                          style={{ backgroundColor: PWC.primary }}>
+                          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                          {loading ? "설계 중..." : "AI Workflow 설계 시작"}
+                        </button>
                       </div>
                     )}
-                    {uploadFormat === "project" && (
-                      <div className="flex-1 text-sm text-gray-500">
-                        {projectCount}개 과제 데이터가 준비되었습니다.
+
+                    {/* 과제 형식: 개별 과제 선택 */}
+                    {uploadFormat === "project" && projectList.length > 0 && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          과제 선택 ({projectCount}개)
+                        </label>
+                        <div className="space-y-2 max-h-[300px] overflow-y-auto">
+                          {projectList.map((p, i) => (
+                            <div key={i}
+                              onClick={() => setSelectedProjectIdx(i)}
+                              className={`flex items-center gap-3 rounded-lg border p-3 cursor-pointer transition-colors ${
+                                selectedProjectIdx === i
+                                  ? "border-[#A62121] bg-red-50/50"
+                                  : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
+                              }`}>
+                              <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${
+                                selectedProjectIdx === i
+                                  ? "bg-[#A62121] text-white"
+                                  : "bg-gray-100 text-gray-500"
+                              }`}>
+                                {p.no || i + 1}
+                              </div>
+                              <span className="text-sm font-medium text-gray-900">{p.name}</span>
+                            </div>
+                          ))}
+                        </div>
+                        <button
+                          onClick={handleGenerateFromExcel}
+                          disabled={loading || selectedProjectIdx === null}
+                          className="w-full mt-3 flex items-center justify-center gap-2 rounded-lg px-5 py-2.5 text-sm font-semibold text-white transition-opacity disabled:opacity-60"
+                          style={{ backgroundColor: PWC.primary }}>
+                          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                          {loading
+                            ? "AI가 새 Workflow를 설계하고 있습니다..."
+                            : selectedProjectIdx !== null
+                              ? `"${projectList[selectedProjectIdx]?.name}" Workflow 설계 시작`
+                              : "과제를 선택해 주세요"}
+                        </button>
                       </div>
                     )}
-                    <button onClick={handleGenerateFromExcel} disabled={loading}
-                      className="flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-semibold text-white transition-opacity disabled:opacity-60"
-                      style={{ backgroundColor: PWC.primary }}>
-                      {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                      {loading ? "AI가 새 Workflow를 설계하고 있습니다..." : "AI Workflow 설계 시작"}
-                    </button>
                   </div>
                 )}
               </div>

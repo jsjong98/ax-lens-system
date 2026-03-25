@@ -1430,20 +1430,25 @@ async def get_new_workflow_filters():
 @app.post("/api/new-workflow/generate", tags=["NewWorkflow"])
 async def generate_new_workflow(
     process_name: str = Query("", description="프로세스 이름 (비우면 자동 추론)"),
+    project_index: int = Query(-1, description="과제 엑셀에서 선택된 과제 인덱스 (0부터)"),
     l3: Optional[str] = Query(None, description="특정 L3 Unit Process로 필터 (비우면 전체)"),
     l4: Optional[str] = Query(None, description="특정 L4 Activity로 필터 (비우면 전체)"),
 ):
     """
     New Workflow 전용 Task 또는 과제 데이터를 분석하여 AI 워크플로우 설계 초안을 생성합니다.
-    과제 엑셀이 업로드된 경우 자동으로 freeform 방식으로 생성합니다.
+    과제 엑셀이 업로드된 경우 project_index로 개별 과제를 선택합니다.
     """
     from new_workflow_generator import generate_new_workflow as _gen, result_to_dict
     from new_workflow_generator import generate_workflow_from_freeform, result_to_dict as _rtd
 
-    # 과제 형식이 로드된 경우 → freeform 방식으로 생성
+    # 과제 형식이 로드된 경우 → 선택된 과제만 처리
     if _nw_projects_cache:
         from project_excel_reader import projects_to_freeform_params
-        params = projects_to_freeform_params(_nw_projects_cache)
+        if 0 <= project_index < len(_nw_projects_cache):
+            selected = [_nw_projects_cache[project_index]]
+        else:
+            selected = _nw_projects_cache  # fallback: 전체
+        params = projects_to_freeform_params(selected)
         if process_name:
             params["process_name"] = process_name
 

@@ -843,13 +843,15 @@ export interface NewWorkflowResult {
 
 export async function generateNewWorkflow(params: {
   process_name?: string;
+  project_index?: string;
   l3?: string;
   l4?: string;
 } = {}): Promise<NewWorkflowResult> {
   const qs = new URLSearchParams();
-  if (params.process_name) qs.set("process_name", params.process_name);
-  if (params.l3)           qs.set("l3", params.l3);
-  if (params.l4)           qs.set("l4", params.l4);
+  if (params.process_name)  qs.set("process_name", params.process_name);
+  if (params.project_index) qs.set("project_index", params.project_index);
+  if (params.l3)            qs.set("l3", params.l3);
+  if (params.l4)            qs.set("l4", params.l4);
   const query = qs.toString() ? `?${qs}` : "";
   return apiFetch(`/new-workflow/generate${query}`, { method: "POST" });
 }
