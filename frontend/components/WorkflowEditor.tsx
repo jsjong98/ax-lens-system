@@ -317,6 +317,14 @@ export default function WorkflowEditor({ result, onSave }: WorkflowEditorProps) 
           </div>
         </div>
 
+        {/* Input → Senior AI 연결선 */}
+        <div className="flex justify-center py-1" style={{ borderBottom: "0.5px solid #D3D1C7" }}>
+          <div className="flex flex-col items-center">
+            <div className="w-[2px] h-4 bg-[#888780]" />
+            <div className="w-0 h-0 border-l-[5px] border-r-[5px] border-t-[7px] border-l-transparent border-r-transparent border-t-[#888780]" />
+          </div>
+        </div>
+
         {/* ── SENIOR AI 레인 ───────────────────────────────────────────── */}
         <div className="grid" style={{ gridTemplateColumns: "56px 1fr", borderBottom: "0.5px solid #D3D1C7" }}>
           <div className="flex flex-col items-center justify-center gap-1 p-2 border-r bg-white" style={{ borderColor: "#D3D1C7" }}>
@@ -343,25 +351,17 @@ export default function WorkflowEditor({ result, onSave }: WorkflowEditorProps) 
             <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${Math.max(data.agents.length, 1)}, 1fr)` }}>
               {data.agents.map((agent, ai) => (
                 <div key={agent.id} className="flex flex-col">
-                  {/* 연결 화살표 (Senior ↔ Junior) */}
-                  <div className="flex justify-between px-2 mb-2">
-                    <div className="flex flex-col items-center gap-0.5">
-                      <span className="text-[7px] font-semibold text-[#CC0000] text-center leading-tight">
-                        ①{agent.name}<br/>지시
-                      </span>
-                      <div className="flex flex-col items-center">
-                        <div className="w-[1.5px] h-3 bg-[#CC0000]" />
-                        <div className="w-0 h-0 border-l-[4px] border-r-[4px] border-t-[6px] border-l-transparent border-r-transparent border-t-[#CC0000]" />
-                      </div>
+                  {/* 연결 화살표 (Senior → Junior ↔ Senior) */}
+                  <div className="flex justify-center gap-6 mb-2">
+                    {/* Senior → Junior (빨간 하향) */}
+                    <div className="flex flex-col items-center">
+                      <div className="w-[2px] h-5 bg-[#CC0000]" />
+                      <div className="w-0 h-0 border-l-[5px] border-r-[5px] border-t-[7px] border-l-transparent border-r-transparent border-t-[#CC0000]" />
                     </div>
-                    <div className="flex flex-col items-center gap-0.5">
-                      <div className="flex flex-col-reverse items-center">
-                        <div className="w-[1.5px] h-3 bg-[#1A5CB0]" />
-                        <div className="w-0 h-0 border-l-[4px] border-r-[4px] border-b-[6px] border-l-transparent border-r-transparent border-b-[#1A5CB0]" />
-                      </div>
-                      <span className="text-[7px] font-semibold text-[#1A5CB0] text-center leading-tight">
-                        결과 반환
-                      </span>
+                    {/* Junior → Senior (파란 상향) */}
+                    <div className="flex flex-col items-center">
+                      <div className="w-0 h-0 border-l-[5px] border-r-[5px] border-b-[7px] border-l-transparent border-r-transparent border-b-[#1A5CB0]" />
+                      <div className="w-[2px] h-5 bg-[#1A5CB0]" />
                     </div>
                   </div>
 
@@ -410,14 +410,11 @@ export default function WorkflowEditor({ result, onSave }: WorkflowEditorProps) 
                     </div>
                   </div>
 
-                  {/* HR 전달 화살표 */}
+                  {/* Junior → HR 전달 화살표 */}
                   {agent.arrowToHuman && (
-                    <div className="flex flex-col items-center pt-1 gap-0.5">
-                      <span className="text-[7.5px] font-semibold text-[#1A5CB0] text-center">{agent.arrowToHuman}</span>
-                      <div className="flex flex-col items-center">
-                        <div className="w-[1.5px] h-3 bg-[#1A5CB0]" />
-                        <div className="w-0 h-0 border-l-[4px] border-r-[4px] border-t-[6px] border-l-transparent border-r-transparent border-t-[#1A5CB0]" />
-                      </div>
+                    <div className="flex flex-col items-center pt-2">
+                      <div className="w-[2px] h-5 bg-[#1A5CB0]" />
+                      <div className="w-0 h-0 border-l-[5px] border-r-[5px] border-t-[7px] border-l-transparent border-r-transparent border-t-[#1A5CB0]" />
                     </div>
                   )}
                 </div>
