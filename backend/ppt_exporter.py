@@ -98,11 +98,14 @@ def _set_multiline_text(shape, lines: list[str], font_size=Pt(11), bold=False,
     tf.clear()
     tf.word_wrap = True
     # 줄 수에 따라 폰트 크기 자동 조절
-    if len(lines) > 8:
+    total_chars = sum(len(l) for l in lines)
+    if len(lines) > 10 or total_chars > 300:
+        font_size = Pt(6)
+    elif len(lines) > 7 or total_chars > 200:
         font_size = Pt(7)
-    elif len(lines) > 5:
+    elif len(lines) > 4 or total_chars > 120:
         font_size = Pt(8)
-    elif len(lines) > 3:
+    elif len(lines) > 2:
         font_size = Pt(9)
 
     for i, line in enumerate(lines):
@@ -426,45 +429,60 @@ def _fill_agent_slide(slide, agent: dict, design: dict, definition: dict | None 
         _set_multiline_text(role_shape, roles, font_size=Pt(9), bullet_char="•", color=DARK)
 
     # 처리 로직 — Input / 방법론 / Output
-    # Input 영역 (그룹 47 내부에 텍스트 추가)
     input_data = agent.get("input_data", [])
     processing_steps = agent.get("processing_steps", [])
     output_data = agent.get("output_data", [])
 
-    # Input 텍스트 박스 — 그룹 47 근처에 추가 (left=655656, top=4303065 근처)
+    # 항목 수 제한 + 텍스트 길이 제한
+    MAX_ITEMS = 10
+    MAX_LEN = 25
+
+    def _truncate(items: list, max_items=MAX_ITEMS, max_len=MAX_LEN) -> list:
+        result = []
+        for item in items[:max_items]:
+            s = str(item)
+            result.append(s[:max_len] if len(s) > max_len else s)
+        if len(items) > max_items:
+            result.append(f"... 외 {len(items) - max_items}건")
+        return result
+
+    # 항목 수에 따른 폰트 크기
+    def _auto_font(count: int) -> Pt:
+        if count > 12: return Pt(5)
+        if count > 8: return Pt(6)
+        if count > 5: return Pt(7)
+        return Pt(8)
+
+    # Input
     if input_data:
+        items = _truncate(input_data)
         _add_multiline_textbox(
-            slide,
-            left=Emu(700000), top=Emu(4700000),
+            slide, left=Emu(700000), top=Emu(4700000),
             width=Emu(2700000), height=Emu(1500000),
-            lines=input_data, font_size=Pt(8), bullet="•",
+            lines=items, font_size=_auto_font(len(items)), bullet="•",
         )
 
-    # 방법론 및 주요 기술 — 그룹 45 근처
+    # 방법론
     if processing_steps:
         method_lines = []
-        for ps in processing_steps:
-            step_num = ps.get("step_number", "")
-            step_name = ps.get("step_name", "")
-            method = ps.get("method", "")
-            result = ps.get("result", "")
-            method_lines.append(f"{step_num}  {step_name}")
-            method_lines.append(f"    {method} → {result}")
+        for ps in processing_steps[:6]:
+            name = str(ps.get("step_name", ""))[:30]
+            method = str(ps.get("method", ""))[:30]
+            method_lines.append(f"{name}: {method}")
 
         _add_multiline_textbox(
-            slide,
-            left=Emu(4050000), top=Emu(4700000),
+            slide, left=Emu(4050000), top=Emu(4700000),
             width=Emu(3500000), height=Emu(1500000),
-            lines=method_lines, font_size=Pt(7.5), bullet="",
+            lines=method_lines, font_size=_auto_font(len(method_lines)), bullet="",
         )
 
-    # Output — 그룹 46 근처
+    # Output
     if output_data:
+        items = _truncate(output_data)
         _add_multiline_textbox(
-            slide,
-            left=Emu(8100000), top=Emu(4700000),
+            slide, left=Emu(8100000), top=Emu(4700000),
             width=Emu(3500000), height=Emu(1500000),
-            lines=output_data, font_size=Pt(8), bullet="•",
+            lines=items, font_size=_auto_font(len(items)), bullet="•",
         )
 
 
