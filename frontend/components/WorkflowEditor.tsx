@@ -260,7 +260,9 @@ export default function WorkflowEditor({ result, onSave }: WorkflowEditorProps) 
     setEditingHuman(null);
   };
 
-  const [zoom, setZoom] = useState(100);
+  // 에이전트 수에 따라 자동 줌 계산 (4개 이하: 100%, 5~6개: 70%, 7개+: 50%)
+  const autoZoom = data.agents.length <= 3 ? 100 : data.agents.length <= 5 ? 70 : data.agents.length <= 7 ? 55 : 45;
+  const [zoom, setZoom] = useState(autoZoom);
 
   return (
     <div className="space-y-3">
@@ -272,7 +274,7 @@ export default function WorkflowEditor({ result, onSave }: WorkflowEditorProps) 
           <span className="text-xs text-gray-500 w-12 text-center">{zoom}%</span>
           <button onClick={() => setZoom((z) => Math.min(150, z + 10))}
             className="rounded border px-2 py-1 text-xs text-gray-600 hover:bg-gray-50">+</button>
-          <button onClick={() => setZoom(100)}
+          <button onClick={() => setZoom(autoZoom)}
             className="rounded border px-2 py-1 text-xs text-gray-500 hover:bg-gray-50">맞춤</button>
         </div>
         <div className="flex items-center gap-2">
