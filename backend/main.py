@@ -1787,12 +1787,73 @@ async def generate_project_definition(
 
     # 데이터 소스 선택
     use_nw = source == "new-workflow"
-    src_tasks = _nw_tasks_cache if use_nw else _tasks_cache
+
+    # New Workflow source: Workflow 캐시에서 Task 추출 (과제 엑셀은 L5 Task 없음)
+    if use_nw:
+        if not _new_workflow_cache:
+            raise HTTPException(400, "New Workflow 결과가 없습니다. 먼저 New Workflow에서 설계를 실행하세요.")
+
+        classification_dict = _build_classification_from_workflow(_new_workflow_cache)
+        task_dicts = []
+        for agent in _new_workflow_cache.get("agents", []):
+            for t in agent.get("assigned_tasks", []):
+                td = {
+                    "id": t.get("task_id", ""), "l2": "", "l2_id": "",
+                    "l3": t.get("l3", ""), "l3_id": "",
+                    "l4": t.get("l4", ""), "l4_id": "",
+                    "name": t.get("task_name", ""),
+                    "description": t.get("ai_role", ""),
+                    "performer": "",
+                }
+                for attr in ["pain_time", "pain_accuracy", "pain_repetition",
+                              "pain_data", "pain_system", "pain_communication", "pain_other"]:
+                    td[attr] = ""
+                task_dicts.append(td)
+
+        if not task_dicts:
+            raise HTTPException(400, "Workflow에 Task가 없습니다.")
+
+        if not process_name:
+            process_name = _new_workflow_cache.get("process_name", "HR 프로세스")
+
+        tobe_data = _new_workflow_cache
+
+        settings = load_settings()
+        anthropic_key = os.getenv("ANTHROPIC_API_KEY", "") or settings.anthropic_api_key
+
+        try:
+            result = await generate_project_definition_with_llm(
+                tasks=task_dicts,
+                classification_results=classification_dict,
+                tobe_data=tobe_data,
+                process_name=process_name,
+                api_key=anthropic_key,
+                model=settings.anthropic_model or "claude-sonnet-4-6",
+                author=author,
+            )
+        except Exception as e:
+            print(f"[과제 정의서] LLM 실패, fallback 사용: {e}")
+            result = generate_project_definition_fallback(
+                tasks=task_dicts,
+                classification_results=classification_dict,
+                tobe_data=tobe_data,
+                process_name=process_name,
+                author=author,
+            )
+
+        result_dict = project_definition_to_dict(result)
+        _project_definition_cache.clear()
+        _project_definition_cache.update(result_dict)
+        _persist_cache("project_definition", _project_definition_cache)
+
+        return {"ok": True, **result_dict}
+
+    # 기존 방식: Tasks 페이지에서 업로드한 파일 기반
+    src_tasks = _tasks_cache
 
     if not src_tasks:
         raise HTTPException(400, "로드된 Task가 없습니다. 먼저 엑셀 파일을 업로드하세요.")
 
-    # 필터 적용
     tasks = src_tasks
     if l3:
         tasks = [t for t in tasks if t.l3 == l3 or t.l3_id == l3]
@@ -1802,20 +1863,12 @@ async def generate_project_definition(
     if not tasks:
         raise HTTPException(400, "필터 조건에 맞는 Task가 없습니다.")
 
-    # 분류 결과 로드
-    if use_nw:
-        if not _new_workflow_cache:
-            raise HTTPException(400, "New Workflow 결과가 없습니다. 먼저 생성을 실행하세요.")
-        classification_dict = _build_classification_from_workflow(_new_workflow_cache)
-    else:
-        results_store = load_results(provider)
-        if not results_store:
-            raise HTTPException(400, f"'{provider}' 분류 결과가 없습니다. 먼저 분류를 실행하세요.")
+    results_store = load_results(provider)
+    if not results_store:
+        raise HTTPException(400, f"'{provider}' 분류 결과가 없습니다. 먼저 분류를 실행하세요.")
 
-    # Task → dict 변환 + 분류 결과 매핑
     task_dicts = []
-    if not use_nw:
-        classification_dict = {}
+    classification_dict = {}
     for t in tasks:
         td = {
             "id": t.id, "l2": t.l2, "l2_id": t.l2_id,

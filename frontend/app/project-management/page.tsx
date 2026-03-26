@@ -160,6 +160,7 @@ export default function ProjectManagementPage() {
         <h2 className="text-lg font-semibold text-gray-800">생성 설정</h2>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+          {!isNwSource && (
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">분류 결과 Provider</label>
             <select
@@ -171,6 +172,7 @@ export default function ProjectManagementPage() {
               <option value="anthropic">Anthropic</option>
             </select>
           </div>
+          )}
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">프로세스명 (선택)</label>
