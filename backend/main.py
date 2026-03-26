@@ -2133,7 +2133,7 @@ async def export_project_ppt():
     if not definition and not design:
         raise HTTPException(404, "과제 정의서 또는 설계서가 없습니다. 먼저 생성을 실행하세요.")
 
-    ppt_bytes = export_ppt(definition=definition, design=design)
+    ppt_bytes = export_ppt(definition=definition, design=design, workflow=_new_workflow_cache or None)
 
     title = definition.get("project_title", "과제정의서") if definition else "과제정의서"
     filename = f"{title}.pptx"

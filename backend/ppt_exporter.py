@@ -468,45 +468,83 @@ def _fill_agent_slide(slide, agent: dict, design: dict, definition: dict | None 
 
 # ── 메인 함수 ─────────────────────────────────────────────────────────────────
 
+def _insert_workflow_image(slide, workflow_cache: dict | None):
+    """AI Service Flow HTML을 이미지로 변환하여 PPT 슬라이드에 삽입합니다."""
+    if not workflow_cache:
+        return
+    try:
+        from html_exporter import export_workflow_html
+        from html_to_image import html_to_png
+
+        html = export_workflow_html(workflow_cache)
+        png_bytes = html_to_png(html, width=960)
+
+        if not png_bytes:
+            return
+
+        # 이미지를 임시 파일로 저장 후 삽입
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            f.write(png_bytes)
+            img_path = f.name
+
+        # 슬라이드의 AI Service Flow 영역에 이미지 삽입
+        # 위치: 왼쪽 여백, 슬라이드 상단 ~ 중간 (대략적 위치)
+        left = Inches(0.3)
+        top = Inches(1.8)
+        width = Inches(6.5)
+        slide.shapes.add_picture(img_path, left, top, width=width)
+
+        Path(img_path).unlink(missing_ok=True)
+        print("[ppt_exporter] AI Service Flow 이미지 삽입 완료")
+    except Exception as e:
+        print(f"[ppt_exporter] AI Service Flow 이미지 삽입 실패: {e}")
+
+
 def export_ppt(
     definition: dict | None = None,
     design: dict | None = None,
+    workflow: dict | None = None,
 ) -> io.BytesIO:
-    """과제 정의서/설계서를 PPT로 내보냅니다."""
+    """과제 정의서/설계서를 PPT로 내보냅니다. 표지/Thank You 슬라이드는 제거."""
     prs = Presentation(str(TEMPLATE_PATH))
 
-    # Slide 1: 표지
-    if definition:
-        _fill_cover_slide(prs.slides[0], definition.get("project_title", ""))
+    # 삭제할 슬라이드 인덱스 (역순으로 삭제)
+    slides_to_remove = []
 
-    # Slide 2: 과제 정의서
+    # Slide 0: 표지 → 제거 대상
+    slides_to_remove.append(0)
+
+    # Slide 1: 과제 정의서
     if definition:
         _fill_definition_slide(prs.slides[1], definition)
 
-    # Slide 3: 과제 설계서
+    # Slide 2: 과제 설계서
     if design:
         _fill_design_slide(prs.slides[2], design, definition)
+    # AI Service Flow 이미지 삽입
+    if workflow:
+        _insert_workflow_image(prs.slides[2], workflow)
 
-    # Slide 4+: Agent 정의서
+    # Slide 3+: Agent 정의서
     agents = design.get("agent_definitions", []) if design else []
 
     if agents:
-        # 첫 번째 Agent는 기존 슬라이드 4에 채움
         _fill_agent_slide(prs.slides[3], agents[0], design, definition)
-
-        # 나머지 Agent는 슬라이드 복제
         for agent in agents[1:]:
             new_slide = _duplicate_slide(prs, 3)
             _fill_agent_slide(new_slide, agent, design, definition)
 
-        # 슬라이드 순서 정리: Thank You 슬라이드를 맨 뒤로
-        # (복제된 슬라이드가 맨 뒤에 추가되므로, Thank You 슬라이드를 이동)
-        # Thank You는 원래 index 4였지만, 복제 후에는 위치가 바뀜
-        # → python-pptx에서 슬라이드 순서 변경은 XML 조작 필요
-        _move_slide_to_end(prs, 4)  # Thank You 슬라이드를 맨 뒤로
-    elif not agents:
-        # Agent가 없으면 슬라이드 4를 빈 상태로 유지
-        pass
+    # Thank You 슬라이드 (마지막) → 제거 대상
+    thank_you_idx = 4 if not agents else 4  # 복제 전 기준
+    slides_to_remove.append(thank_you_idx)
+
+    # 슬라이드 제거 (역순)
+    for idx in sorted(slides_to_remove, reverse=True):
+        if idx < len(prs.slides):
+            rId = prs.slides._sldIdLst[idx].get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id', '')
+            sldId = prs.slides._sldIdLst[idx]
+            prs.slides._sldIdLst.remove(sldId)
 
     # BytesIO로 저장
     output = io.BytesIO()

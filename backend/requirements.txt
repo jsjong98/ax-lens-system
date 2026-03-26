@@ -7,3 +7,4 @@ anthropic>=0.40.0
 python-multipart>=0.0.9
 pydantic>=2.0.0
 python-pptx>=0.6.21
+playwright>=1.40.0
