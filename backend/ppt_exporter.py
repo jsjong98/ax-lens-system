@@ -23,7 +23,7 @@ from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
 from lxml import etree
 
 
-TEMPLATE_PATH = Path(__file__).parent.parent / "PwC_두산_AI 기반 HR 업무혁신_과제정의서_v1.0_템플릿.pptx"
+TEMPLATE_PATH = Path(__file__).parent / "template.pptx"
 
 PWC_RED = RGBColor(0xA6, 0x21, 0x21)
 WHITE = RGBColor(0xFF, 0xFF, 0xFF)

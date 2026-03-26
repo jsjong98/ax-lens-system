@@ -2111,9 +2111,11 @@ async def export_project_ppt():
 
     title = definition.get("project_title", "과제정의서") if definition else "과제정의서"
     filename = f"{title}.pptx"
+    from urllib.parse import quote
+    encoded_fn = quote(filename)
 
     return StreamingResponse(
         ppt_bytes,
         media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_fn}"},
     )
