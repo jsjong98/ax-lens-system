@@ -542,24 +542,19 @@ def export_ppt(
     agents = design.get("agent_definitions", []) if design else []
 
     if agents:
-        # 기존 미니맵 배경 제거 (그룹 132)
-        _remove_shapes_by_ids(prs.slides[3], [133])
-        _fill_agent_slide(prs.slides[3], agents[0], design, definition)
-        if workflow:
-            try:
-                from ppt_flow_drawer import draw_minimap
-                draw_minimap(prs.slides[3], workflow, highlight_agent_id=agents[0].get("agent_id", ""))
-            except Exception as e:
-                print(f"[ppt_exporter] 미니맵 실패: {e}")
+        # 1) 먼저 필요한 슬라이드 수만큼 복제 (빈 상태에서 복제)
+        agent_slides = [prs.slides[3]]  # 첫 번째는 원본
+        for _ in agents[1:]:
+            agent_slides.append(_duplicate_slide(prs, 3))
 
-        for agent in agents[1:]:
-            new_slide = _duplicate_slide(prs, 3)
-            _remove_shapes_by_ids(new_slide, [133])
-            _fill_agent_slide(new_slide, agent, design, definition)
+        # 2) 그 다음 각 슬라이드에 개별 Agent 데이터 채우기
+        for slide, agent in zip(agent_slides, agents):
+            _remove_shapes_by_ids(slide, [133])  # 기존 미니맵 배경 제거
+            _fill_agent_slide(slide, agent, design, definition)
             if workflow:
                 try:
                     from ppt_flow_drawer import draw_minimap
-                    draw_minimap(new_slide, workflow, highlight_agent_id=agent.get("agent_id", ""))
+                    draw_minimap(slide, workflow, highlight_agent_id=agent.get("agent_id", ""))
                 except Exception as e:
                     print(f"[ppt_exporter] 미니맵 실패: {e}")
 
