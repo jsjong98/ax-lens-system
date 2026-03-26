@@ -319,11 +319,19 @@ export default function WorkflowEditor({ result, onSave }: WorkflowEditorProps) 
           </div>
         </div>
 
-        {/* Input → Senior AI 연결선 */}
-        <div className="flex justify-center py-1" style={{ borderBottom: "0.5px solid #D3D1C7" }}>
-          <div className="flex flex-col items-center">
-            <div className="w-[2px] h-4 bg-[#888780]" />
-            <div className="w-0 h-0 border-l-[5px] border-r-[5px] border-t-[7px] border-l-transparent border-r-transparent border-t-[#888780]" />
+        {/* ── Input → Senior AI 연결선 ──────────────────────────────── */}
+        <div className="grid" style={{ gridTemplateColumns: "56px 1fr" }}>
+          <div className="border-r bg-white" style={{ borderColor: "#D3D1C7" }} />
+          <div className="py-1 px-3" style={{ backgroundColor: "#FAFAF8" }}>
+            <div className="flex gap-2" style={{ paddingLeft: data.inputs.length > 0 ? "0" : "40%" }}>
+              {data.inputs.map((inp, i) => (
+                <div key={`conn-${i}`} className="flex-1 flex justify-center">
+                  <div className="flex flex-col items-center">
+                    <div className="w-[1.5px] h-3" style={{ backgroundColor: "#5B9BD5" }} />
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -343,6 +351,35 @@ export default function WorkflowEditor({ result, onSave }: WorkflowEditorProps) 
           </div>
         </div>
 
+        {/* ── Senior ↔ Junior 커넥터 ──────────────────────────────────── */}
+        <div className="grid" style={{ gridTemplateColumns: "56px 1fr" }}>
+          <div className="border-r bg-white" style={{ borderColor: "#D3D1C7" }} />
+          <div className="px-3 py-1" style={{ backgroundColor: "#FEFAF0" }}>
+            <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${Math.max(data.agents.length, 1)}, 1fr)` }}>
+              {data.agents.map((agent, ai) => (
+                <div key={`conn-${agent.id}`} className="flex justify-between px-3">
+                  {/* Senior → Junior (빨간 하향) */}
+                  <div className="flex flex-col items-center gap-0.5">
+                    <span className="text-[6px] font-semibold text-[#CC0000] text-center leading-tight">
+                      {"①②③④⑤⑥⑦⑧⑨⑩"[ai]}{agent.name}<br/>지시
+                    </span>
+                    <div className="w-[1.5px] h-4 bg-[#CC0000]" />
+                    <div className="w-0 h-0 border-l-[4px] border-r-[4px] border-t-[5px] border-l-transparent border-r-transparent border-t-[#CC0000]" />
+                  </div>
+                  {/* Junior → Senior (파란 상향) */}
+                  <div className="flex flex-col items-center gap-0.5">
+                    <div className="w-0 h-0 border-l-[4px] border-r-[4px] border-b-[5px] border-l-transparent border-r-transparent border-b-[#1A5CB0]" />
+                    <div className="w-[1.5px] h-4 bg-[#1A5CB0]" />
+                    <span className="text-[6px] font-semibold text-[#1A5CB0] text-center leading-tight">
+                      결과 반환
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
         {/* ── JUNIOR AI 레인 ──────────────────────────────────────────── */}
         <div className="grid" style={{ gridTemplateColumns: "56px 1fr", borderBottom: "0.5px solid #D3D1C7" }}>
           <div className="flex flex-col items-center justify-center gap-1 p-2 border-r bg-white" style={{ borderColor: "#D3D1C7" }}>
@@ -353,19 +390,6 @@ export default function WorkflowEditor({ result, onSave }: WorkflowEditorProps) 
             <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${Math.max(data.agents.length, 1)}, 1fr)` }}>
               {data.agents.map((agent, ai) => (
                 <div key={agent.id} className="flex flex-col">
-                  {/* 연결 화살표 (Senior → Junior ↔ Senior) */}
-                  <div className="flex justify-center gap-6 mb-2">
-                    {/* Senior → Junior (빨간 하향) */}
-                    <div className="flex flex-col items-center">
-                      <div className="w-[2px] h-5 bg-[#CC0000]" />
-                      <div className="w-0 h-0 border-l-[5px] border-r-[5px] border-t-[7px] border-l-transparent border-r-transparent border-t-[#CC0000]" />
-                    </div>
-                    {/* Junior → Senior (파란 상향) */}
-                    <div className="flex flex-col items-center">
-                      <div className="w-0 h-0 border-l-[5px] border-r-[5px] border-b-[7px] border-l-transparent border-r-transparent border-b-[#1A5CB0]" />
-                      <div className="w-[2px] h-5 bg-[#1A5CB0]" />
-                    </div>
-                  </div>
 
                   {/* 에이전트 박스 */}
                   <div className="rounded-lg p-3 flex-1" style={{ border: "1.5px dashed #1A5CB0", backgroundColor: "#fff" }}>
