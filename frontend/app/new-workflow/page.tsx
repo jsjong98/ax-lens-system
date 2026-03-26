@@ -218,21 +218,46 @@ export default function NewWorkflowPage() {
   };
 
   // 벤치마킹
+  // 벤치마킹 전 상태 저장 (롤백용)
+  const [preBenchmarkResult, setPreBenchmarkResult] = useState<NewWorkflowResult | null>(null);
+
   const handleBenchmark = async () => {
     setBenchmarking(true);
     setError(null);
+    // 벤치마킹 전 상태 저장
+    if (result && !preBenchmarkResult) {
+      setPreBenchmarkResult({ ...result });
+    }
     try {
       const res = await benchmarkNewWorkflow();
       setResult(res);
       setBenchmarkInsights(res.benchmark_insights || []);
       setImprovementSummary(res.improvement_summary || "");
       setIsBenchmarked(true);
-      // result updated
     } catch (e) {
       setError(e instanceof Error ? e.message : "벤치마킹 중 오류 발생");
     } finally {
       setBenchmarking(false);
     }
+  };
+
+  // 벤치마킹 롤백 (벤치마킹 전 상태로 복원)
+  const handleBenchmarkRollback = async () => {
+    if (preBenchmarkResult) {
+      setResult(preBenchmarkResult);
+      setBenchmarkInsights([]);
+      setImprovementSummary("");
+      setIsBenchmarked(false);
+      setPreBenchmarkResult(null);
+      try {
+        await saveEditedWorkflow(preBenchmarkResult as unknown as Record<string, unknown>);
+      } catch {}
+    }
+  };
+
+  // 특정 인사이트 제외
+  const handleRemoveInsight = (index: number) => {
+    setBenchmarkInsights((prev) => prev.filter((_, i) => i !== index));
   };
 
   // Export
@@ -690,12 +715,32 @@ export default function NewWorkflowPage() {
                 {improvementSummary && <p className="text-sm text-green-700 mb-3">{improvementSummary}</p>}
                 {benchmarkInsights.length > 0 && (
                   <div className="space-y-2 mt-3">
-                    <p className="text-xs font-semibold text-green-700">참고 벤치마킹 사례 ({benchmarkInsights.length}건)</p>
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-semibold text-green-700">참고 벤치마킹 사례 ({benchmarkInsights.length}건)</p>
+                      {preBenchmarkResult && (
+                        <button onClick={handleBenchmarkRollback}
+                          className="text-[10px] font-medium text-red-600 hover:text-red-800 underline">
+                          벤치마킹 전으로 되돌리기
+                        </button>
+                      )}
+                    </div>
                     {benchmarkInsights.map((insight, i) => (
                       <div key={i} className="rounded-lg border border-green-200 bg-white p-3">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="rounded-full bg-green-100 text-green-700 text-[10px] font-bold w-5 h-5 flex items-center justify-center flex-shrink-0">{i + 1}</span>
-                          <span className="text-sm font-semibold text-gray-900">{insight.source}</span>
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="flex items-center gap-2">
+                            <span className="rounded-full bg-green-100 text-green-700 text-[10px] font-bold w-5 h-5 flex items-center justify-center flex-shrink-0">{i + 1}</span>
+                            <span className="text-sm font-semibold text-gray-900">{insight.source}</span>
+                            {insight.url && (
+                              <a href={insight.url} target="_blank" rel="noopener noreferrer"
+                                className="text-[10px] text-blue-600 hover:underline">
+                                출처 확인 ↗
+                              </a>
+                            )}
+                          </div>
+                          <button onClick={() => handleRemoveInsight(i)}
+                            className="text-[10px] text-gray-400 hover:text-red-600 transition-colors">
+                            제외
+                          </button>
                         </div>
                         <p className="text-xs text-gray-600 ml-7">{insight.insight}</p>
                         <p className="text-xs mt-1 ml-7" style={{ color: PWC.primary }}>→ {insight.application}</p>

@@ -213,7 +213,7 @@ _BENCHMARK_SYSTEM_PROMPT = """
 ## 출력 형식 (JSON) — agents 안에 assigned_tasks를 반드시 포함하세요
 {
   "benchmark_insights": [
-    {"source": "실제 기업명", "insight": "구체적 사례 한 줄", "application": "적용 방안 한 줄"}
+    {"source": "실제 기업명", "insight": "구체적 사례 한 줄", "application": "적용 방안 한 줄", "url": "검색 결과에서 가져온 출처 URL (없으면 빈 문자열)"}
   ],
   "improvement_summary": "2~3문장",
   "blueprint_summary": "2~3문장",
@@ -286,9 +286,9 @@ def _build_benchmark_prompt(
         lines.append("")
 
     lines.append("\n## 요청")
-    lines.append("위 벤치마킹 사례를 깊이 분석하여 현재 To-Be Workflow를 개선해주세요.")
-    lines.append("각 개선 사항에 대해 어떤 벤치마킹에서 영감을 받았는지 구체적으로 명시해주세요.")
-    lines.append("벤치마킹 사례에서 발견한 혁신적 패턴을 적극적으로 반영하세요.")
+    lines.append("위 벤치마킹 사례를 분석하여 현재 To-Be Workflow를 개선해주세요.")
+    lines.append("각 benchmark_insight의 url 필드에 해당 검색 결과의 출처 URL을 반드시 포함하세요.")
+    lines.append("URL이 없는 검색 결과는 url을 빈 문자열로 두세요.")
 
     return "\n".join(lines)
 

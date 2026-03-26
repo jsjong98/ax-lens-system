@@ -874,6 +874,7 @@ export interface BenchmarkInsight {
   source: string;
   insight: string;
   application: string;
+  url?: string;
 }
 
 export interface BenchmarkResult extends NewWorkflowResult {
