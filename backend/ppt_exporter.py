@@ -220,16 +220,19 @@ def _fill_definition_slide(slide, definition: dict):
     created_date = definition.get("created_date", "")
     author = definition.get("author", "")
 
-    # 헤더: 과제번호/이름
+    # 헤더: "■ 과제번호/이름" 뒤에 제목 넣기
     header_shape = _find_shape(slide, "직사각형 7")
     if header_shape:
-        title_text = f"■ 과제번호/이름     {project_number}. {project_title}"
-        _set_text(header_shape, title_text)
+        _set_text(header_shape, f"■ 과제번호/이름     {project_number}. {project_title}")
 
-    # 과제번호/이름 입력 영역
-    title_input = _find_shape(slide, "직사각형 9")
-    if title_input:
-        _set_text(title_input, f"{project_number}. {project_title}")
+    # 그룹 12 안의 입력 필드 텍스트 제거 (기존 "AI 자동화 과제/이름을입력해주세요" 제거)
+    group12 = _find_shape(slide, "그룹 12")
+    if group12 and hasattr(group12, 'shapes'):
+        for sub in group12.shapes:
+            if sub.has_text_frame:
+                for para in sub.text_frame.paragraphs:
+                    for run in para.runs:
+                        run.text = ""
 
     # 작성일/작성자
     date_shape = _find_shape(slide, "직사각형 13")
@@ -240,7 +243,6 @@ def _fill_definition_slide(slide, definition: dict):
     overview = definition.get("overview", [])
     overview_shape = _find_shape(slide, "직사각형 26")
     if overview_shape and overview:
-        overview_text = "\n".join(f"• {item}" for item in overview)
         _set_multiline_text(overview_shape, overview, font_size=Pt(10), bullet_char="•", color=DARK)
 
     # 2. 매핑 프로세스 테이블
@@ -468,11 +470,24 @@ def _fill_agent_slide(slide, agent: dict, design: dict, definition: dict | None 
 
 # ── 메인 함수 ─────────────────────────────────────────────────────────────────
 
+def _remove_shapes_by_ids(slide, shape_ids: list[int]):
+    """슬라이드에서 특정 shape_id의 도형을 제거합니다."""
+    spTree = slide.shapes._spTree
+    for shape in list(slide.shapes):
+        if shape.shape_id in shape_ids:
+            sp = shape._element
+            spTree.remove(sp)
+            print(f"[ppt_exporter] 도형 제거: id={shape.shape_id} name={shape.name}")
+
+
 def _insert_workflow_shapes(slide, workflow_cache: dict | None):
     """AI Service Flow를 PPT 도형으로 직접 그립니다 (수정 가능)."""
     if not workflow_cache:
         return
     try:
+        # 기존 AI Service Flow 배경 도형 제거 (그룹 127)
+        _remove_shapes_by_ids(slide, [128])
+
         from ppt_flow_drawer import draw_service_flow
         draw_service_flow(slide, workflow_cache)
         print("[ppt_exporter] AI Service Flow 도형 삽입 완료")
@@ -509,8 +524,9 @@ def export_ppt(
     agents = design.get("agent_definitions", []) if design else []
 
     if agents:
+        # 기존 미니맵 배경 제거 (그룹 132)
+        _remove_shapes_by_ids(prs.slides[3], [133])
         _fill_agent_slide(prs.slides[3], agents[0], design, definition)
-        # Agent 미니맵 추가
         if workflow:
             try:
                 from ppt_flow_drawer import draw_minimap
@@ -520,6 +536,7 @@ def export_ppt(
 
         for agent in agents[1:]:
             new_slide = _duplicate_slide(prs, 3)
+            _remove_shapes_by_ids(new_slide, [133])
             _fill_agent_slide(new_slide, agent, design, definition)
             if workflow:
                 try:
