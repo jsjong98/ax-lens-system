@@ -1,7 +1,38 @@
 # PwC AX Lens System
 
-HR As-Is 프로세스의 **L5 Task**를 3단계 Knock-out 기준으로  
-**AI 수행 가능 / AI + Human / 인간 수행 필요** 세 가지 레이블로 자동 분류하는 풀스택 웹 애플리케이션입니다.
+**Process Innovation System** — AI 기반 업무 혁신 설계 플랫폼
+
+Pain Point 분석부터 To-Be Workflow 설계, 벤치마킹, 과제 정의서/설계서 자동 생성까지
+HR 업무 혁신의 전 과정을 지원하는 풀스택 웹 애플리케이션입니다.
+
+> **Live**: [https://pwc-ax-lens.com](https://pwc-ax-lens.com)
+
+---
+
+## 핵심 기능
+
+### 1. Task 분류 (AI / AI+Human / Human)
+- HR As-Is 프로세스 엑셀 업로드 → LLM 기반 3단계 Knock-out 분류
+- OpenAI / Anthropic 동시 지원, 결과 비교 가능
+- 엑셀 다운로드 (`{원본파일명}_a_results.xlsx`)
+
+### 2. New Workflow (To-Be 설계)
+- **3단계 설계 프로세스**:
+  - **1단계**: Pain Point 기반 AI Workflow 자동 설계 (직접 입력 또는 과제 엑셀 업로드)
+  - **2단계**: 웹 벤치마킹 — 선도 기업 AI 적용 사례 검색 (Tavily API) → LLM이 Workflow 개선
+  - **3단계**: 스윔레인 에디터에서 직접 편집 (Input → Senior AI → Junior AI → HR)
+- **HR AX 프레임워크**: Human-on-the-Loop / Human-in-the-Loop / Human-Supervised
+- **내보내기**: HTML (PwC 표준 AI Service Flow) / JSON
+
+### 3. 과제 관리
+- New Workflow 결과 기반 과제 정의서 자동 생성
+- 과제 설계서 자동 생성 (AI Service Flow, 기술 스택, Agent 정의)
+- PPT 내보내기
+
+### 4. 기타
+- 로그인/계정 관리 (비밀번호 변경, 이메일 인증번호 재설정)
+- 파일별 결과 분리 저장 + 이전 프로젝트 불러오기
+- Railway Volume 영구 저장
 
 ---
 
@@ -9,161 +40,107 @@ HR As-Is 프로세스의 **L5 Task**를 3단계 Knock-out 기준으로
 
 | 레이어 | 기술 |
 |--------|------|
-| 백엔드 | Python 3.11+, FastAPI, uvicorn, OpenAI API (gpt-5.4) |
-| 프론트엔드 | Next.js 15, React, TypeScript, Tailwind CSS v4 |
-| 데이터 처리 | openpyxl (Excel 읽기/쓰기) |
+| Backend | Python 3.12, FastAPI, uvicorn |
+| Frontend | Next.js 16, React 19, TypeScript, Tailwind CSS v4 |
+| AI/LLM | OpenAI (GPT-5.4), Anthropic (Claude Sonnet 4.6) |
+| 검색 | Tavily API (벤치마킹 심층 검색) |
+| 이메일 | Resend API (비밀번호 재설정) |
+| 배포 | Railway (Docker, Volume) |
+| 도메인 | pwc-ax-lens.com |
 
 ---
 
 ## 프로젝트 구조
 
 ```
-.
 ├── backend/
-│   ├── main.py              # FastAPI 엔트리포인트
-│   ├── models.py            # Pydantic 데이터 모델
-│   ├── llm_classifier.py   # LLM 분류 로직 (3단계 Knock-out + AI+Human 판정)
-│   ├── classifier.py        # 분류기 팩토리
-│   ├── excel_reader.py      # Excel 파싱 (스마트 시트 감지)
-│   ├── settings_store.py    # 설정 저장/로드
-│   ├── requirements.txt     # Python 의존성
-│   └── .env.example         # 환경변수 템플릿 (API Key)
+│   ├── main.py                    # FastAPI 엔트리포인트
+│   ├── models.py                  # Pydantic 데이터 모델
+│   ├── llm_classifier.py         # LLM 분류 (3단계 Knock-out)
+│   ├── anthropic_classifier.py   # Anthropic Claude 분류기
+│   ├── new_workflow_generator.py # New Workflow AI 설계
+│   ├── benchmark_search.py       # 웹 벤치마킹 (Tavily/DuckDuckGo)
+│   ├── project_definition_generator.py  # 과제 정의서
+│   ├── project_design_generator.py     # 과제 설계서
+│   ├── project_excel_reader.py   # 과제 엑셀 파서 (2행 병합 헤더)
+│   ├── html_exporter.py          # AI Service Flow HTML 내보내기
+│   ├── ppt_exporter.py           # PPT 내보내기
+│   ├── auth_store.py             # 인증 (세션/비밀번호)
+│   ├── data_store.py             # 파일별 영속 저장
+│   ├── settings_store.py         # 설정 저장
+│   ├── Dockerfile                # Railway 배포용
+│   └── requirements.txt
 ├── frontend/
-│   ├── app/                 # Next.js App Router 페이지
-│   ├── components/          # 공통 UI 컴포넌트
-│   └── lib/api.ts           # 백엔드 API 클라이언트
-├── start.sh                 # macOS/Linux 원클릭 실행 스크립트
-└── requirements.txt         # 루트 Python 의존성
+│   ├── app/                      # Next.js App Router
+│   │   ├── login/                # 로그인
+│   │   ├── tasks/                # Task 목록
+│   │   ├── classify/             # 분류 실행
+│   │   ├── results/              # 결과 확인
+│   │   ├── new-workflow/         # New Workflow (1-2-3단계)
+│   │   ├── project-management/   # 과제 관리
+│   │   └── settings/             # 설정
+│   ├── components/
+│   │   ├── WorkflowEditor.tsx    # 스윔레인 에디터
+│   │   ├── AuthProvider.tsx      # 인증 컨텍스트
+│   │   └── ...
+│   ├── lib/api.ts                # API 클라이언트
+│   ├── Dockerfile                # Railway 배포용
+│   └── package.json
+└── README.md
 ```
 
 ---
 
-## 빠른 시작
+## 배포 (Railway)
 
-### Windows (원클릭 설치)
+### 서비스 구성
+- **Backend**: `backend/` → Dockerfile 빌드
+- **Frontend**: `frontend/` → Dockerfile 빌드
+- **Volume**: `/app/persist` (데이터 영구 저장)
 
-> **최초 1회** — `SETUP.bat`을 더블클릭합니다.
-> - Python 3.11, Node.js LTS가 없으면 **winget으로 자동 설치**합니다.
-> - pip/npm 의존성 설치 + OpenAI API Key 설정까지 자동으로 진행됩니다.
+### 환경변수 (Backend)
 
-```
-SETUP.bat   ← 최초 1회 실행 (설치 + API Key 설정)
-START.bat   ← 이후 매번 실행 (서버 기동 + 브라우저 자동 열기)
-```
+| 변수 | 설명 |
+|------|------|
+| `OPENAI_API_KEY` | OpenAI API 키 |
+| `ANTHROPIC_API_KEY` | Anthropic API 키 |
+| `TAVILY_API_KEY` | Tavily 검색 API 키 (벤치마킹) |
+| `RESEND_API_KEY` | Resend 이메일 API 키 |
+| `DEFAULT_USERS` | 초기 계정 (JSON 배열) |
+| `ALLOWED_ORIGINS` | CORS 허용 도메인 |
 
-> **주의**: Windows 10/11에 `winget`이 내장되어 있어야 합니다.  
-> 없는 경우 Python(<https://python.org>) 및 Node.js(<https://nodejs.org>)를 직접 설치 후 `SETUP.bat`을 실행하세요.
+### 환경변수 (Frontend)
+
+| 변수 | 설명 |
+|------|------|
+| `NEXT_PUBLIC_BACKEND_URL` | Backend 공개 URL |
+| `BACKEND_URL` | Backend 내부 URL (rewrites용) |
 
 ---
 
-### macOS / Linux
+## 로컬 개발
 
 ```bash
-chmod +x start.sh
-./start.sh
-```
-
-스크립트가 자동으로:
-- Python 환경 탐지 (conda `nlp` → `base` → 시스템 python3)
-- 백엔드/프론트엔드 의존성 설치
-- 서버 2개 기동 후 브라우저 자동 열기
-
----
-
-### 수동 실행
-
-```bash
-# 터미널 1 — 백엔드
+# 백엔드
 cd backend
 pip install -r requirements.txt
 uvicorn main:app --reload --port 8000
 
-# 터미널 2 — 프론트엔드
+# 프론트엔드
 cd frontend
 npm install
 npm run dev
 ```
 
-앱 주소: http://localhost:3000  
-API 문서: http://localhost:8000/docs
+- 앱: http://localhost:3000
+- API 문서: http://localhost:8000/docs
 
 ---
 
-## 사용 방법
+## HR AX 프레임워크
 
-1. **Task 목록** 탭에서 HR As-Is 엑셀 템플릿 `.xlsx` 파일을 업로드합니다.
-2. **분류 실행** 탭에서 전체 또는 선택 Task를 분류합니다.
-3. **결과 확인** 탭에서 결과를 검토하고 수동으로 수정하거나 Excel로 다운로드합니다.
-
----
-
-## 분류 레이블
-
-| 레이블 | 정의 |
-|--------|------|
-| **AI 수행 가능** | 3단계 Knock-out 기준 모두 해당 없음. 완전 자동화 대상 |
-| **AI + Human** | Knock-out 기준 일부에 해당하나, 업무 내 AI 파트와 Human 파트가 명확히 분리 가능. To-be 설계 시 역할 분담 기준으로 활용 |
-| **인간 수행 필요** | Knock-out 기준에 해당하며, AI 보조 파트가 분리되지 않는 Human 고유 업무 |
-
----
-
-## 분류 기준
-
-### Step 1 — 3단계 Knock-out
-
-해당 항목이 하나라도 있으면 1차로 **"인간 수행 필요"** 판정
-
-| 단계 | 기준 |
-|------|------|
-| 1단계 | 규제 측면 — AI 기본법·EU AI Act 금지 또는 고위험 AI 감독 의무 영역 |
-| 2단계 | 확정/승인 업무 — 전사 정책 확정, 고영향·비가역 의사결정 |
-| 3단계 | 상호작용 업무 — 공감·심리안전, 협상·중재, 공정성 설득, 변화/리더십, 창의적 설계 |
-
-### Step 2 — AI + Human 판정
-
-Knock-out 해당 시 추가 검토. 아래 패턴 중 하나에 해당하면 **"AI + Human"** 으로 분류
-
-| 패턴 | 구조 | 핵심 신호 |
-|------|------|-----------|
-| **패턴 A** | 준비·정리는 AI / 판단·확정은 Human | "보고", "확인", "검토 후 반영", "협의", "논의" |
-| **패턴 B** | 발송·취합은 AI / 대면 조율은 Human | "의견 수렴", "취합", "공유" → "조율", "합의", "공감대 형성" |
-| **패턴 C** | 규칙 기반 처리는 AI / 예외·맥락 판단은 Human | "기준에 따라", "조건 설정 시", "원칙·규정이 합의된 경우" |
-
-> AI + Human 판정 결과는 `hybrid_note` 필드에 `[패턴 X] AI 파트: ~~ / Human 파트: ~~` 형식으로 기록됩니다.
-
----
-
-## 분석 입력 데이터
-
-LLM은 각 Task를 분류할 때 아래 정보를 종합하여 업무 흐름을 재구성합니다.
-
-| 항목 | 엑셀 열 |
-|------|---------|
-| L2 Major Process 명 | C열 |
-| L3 Unit Process 명 | E열 |
-| L4 Activity 명 | G열 |
-| L4 Activity 설명 *(있는 경우)* | H열 |
-| L5 Task 명 | J열 |
-| L5 Task 설명 | K열 |
-| 수행주체, Pain Point, Output 유형, 업무 판단 로직 | L~AE열 |
-
----
-
-## 로고 교체
-
-기본 로고는 플레이스홀더 SVG입니다. 원하는 로고로 교체하려면:
-
-```
-frontend/public/strategyand-logo.svg   # 네비게이션 바 로고
-frontend/public/pwc-logo.svg           # 브라우저 탭 파비콘
-```
-
----
-
-## 환경변수
-
-`backend/.env` 파일 (`.env.example` 참고):
-
-```env
-OPENAI_API_KEY=sk-...
-```
+| 수준 | 설명 | 비율 목표 |
+|------|------|----------|
+| **Human-on-the-Loop** | Senior AI가 프로세스 전 영역 관리, Human은 감독·조율만 | 60~70% |
+| **Human-in-the-Loop** | Junior AI가 일부 보조, Human이 의사결정·직접 개입 | 20~30% |
+| **Human-out-of-the-Loop** | AI 자율 수행, Human 개입 최소 | 지향점 |
