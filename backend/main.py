@@ -1978,13 +1978,14 @@ async def generate_project_design(
     )
 
     use_nw = source == "new-workflow"
-    src_tasks = _nw_tasks_cache if use_nw else _tasks_cache
 
-    # New Workflow source면서 Task가 없으면 (과제 엑셀 등) workflow 캐시에서 처리
-    if use_nw and not src_tasks and _new_workflow_cache:
-        # Workflow 결과에서 Task를 추출
-        task_dicts = []
+    # New Workflow source: Workflow 캐시에서 직접 Task 추출
+    if use_nw:
+        if not _new_workflow_cache:
+            raise HTTPException(400, "New Workflow 결과가 없습니다. 먼저 New Workflow에서 설계를 실행하세요.")
+
         classification_dict = _build_classification_from_workflow(_new_workflow_cache)
+        task_dicts = []
         for agent in _new_workflow_cache.get("agents", []):
             for t in agent.get("assigned_tasks", []):
                 task_dicts.append({
@@ -1992,63 +1993,88 @@ async def generate_project_design(
                     "l4": t.get("l4", ""), "l4_id": "", "name": t.get("task_name", ""),
                     "description": t.get("ai_role", ""), "performer": "",
                 })
-    else:
-        if not src_tasks:
-            raise HTTPException(400, "로드된 Task가 없습니다. 먼저 엑셀 파일을 업로드하세요.")
 
-        tasks = src_tasks
-        if l3:
-            tasks = [t for t in tasks if t.l3 == l3 or t.l3_id == l3]
-        if l4:
-            tasks = [t for t in tasks if t.l4 == l4 or t.l4_id == l4]
+        if not task_dicts:
+            raise HTTPException(400, "Workflow에 Task가 없습니다.")
 
-        if not tasks:
-            raise HTTPException(400, "필터 조건에 맞는 Task가 없습니다.")
+        if not process_name:
+            process_name = _new_workflow_cache.get("process_name", "HR 프로세스")
 
-        if use_nw:
-            if not _new_workflow_cache:
-                raise HTTPException(400, "New Workflow 결과가 없습니다.")
-            classification_dict = _build_classification_from_workflow(_new_workflow_cache)
-        else:
-            results_store = load_results(provider)
-            if not results_store:
-                raise HTTPException(400, f"'{provider}' 분류 결과가 없습니다. 먼저 분류를 실행하세요.")
-            classification_dict = {}
+        tobe_data = _new_workflow_cache
+        project_title = _project_definition_cache.get("project_title", f"{process_name} AI 자동화")
 
-        task_dicts = []
-        for t in tasks:
-            td = {
-                "id": t.id, "l2": t.l2, "l3": t.l3, "l4": t.l4,
-                "l4_id": t.l4_id, "name": t.name,
-                "description": t.description, "performer": t.performer,
+        settings = load_settings()
+        anthropic_key = os.getenv("ANTHROPIC_API_KEY", "") or settings.anthropic_api_key
+
+        try:
+            result = await generate_project_design_with_llm(
+                tasks=task_dicts,
+                classification_results=classification_dict,
+                tobe_data=tobe_data,
+                process_name=process_name,
+                project_title=project_title,
+                api_key=anthropic_key,
+                model=settings.anthropic_model or "claude-sonnet-4-6",
+            )
+        except Exception as e:
+            print(f"[과제 설계서] LLM 실패, fallback 사용: {e}")
+            result = generate_project_design_fallback(
+                tasks=task_dicts,
+                classification_results=classification_dict,
+                tobe_data=tobe_data,
+                process_name=process_name,
+                project_title=project_title,
+            )
+
+        result_dict = project_design_to_dict(result)
+        _project_design_cache.clear()
+        _project_design_cache.update(result_dict)
+        _persist_cache("project_design", _project_design_cache)
+
+        return {"ok": True, **result_dict}
+
+    # 기존 방식: Tasks 페이지 기반
+    src_tasks = _tasks_cache
+    if not src_tasks:
+        raise HTTPException(400, "로드된 Task가 없습니다. 먼저 엑셀 파일을 업로드하세요.")
+
+    tasks = src_tasks
+    if l3:
+        tasks = [t for t in tasks if t.l3 == l3 or t.l3_id == l3]
+    if l4:
+        tasks = [t for t in tasks if t.l4 == l4 or t.l4_id == l4]
+
+    if not tasks:
+        raise HTTPException(400, "필터 조건에 맞는 Task가 없습니다.")
+
+    results_store = load_results(provider)
+    if not results_store:
+        raise HTTPException(400, f"'{provider}' 분류 결과가 없습니다. 먼저 분류를 실행하세요.")
+
+    task_dicts = []
+    classification_dict = {}
+    for t in tasks:
+        td = {
+            "id": t.id, "l2": t.l2, "l3": t.l3, "l4": t.l4,
+            "l4_id": t.l4_id, "name": t.name,
+            "description": t.description, "performer": t.performer,
+        }
+        task_dicts.append(td)
+        cr = results_store.get(t.id)
+        if cr:
+            classification_dict[t.id] = {
+                "label": cr.label, "reason": cr.reason,
+                "hybrid_note": cr.hybrid_note,
+                "input_types": cr.input_types, "output_types": cr.output_types,
             }
-            task_dicts.append(td)
 
-            if not use_nw:
-                cr = results_store.get(t.id)
-                if cr:
-                    classification_dict[t.id] = {
-                        "label": cr.label,
-                        "reason": cr.reason,
-                        "hybrid_note": cr.hybrid_note,
-                        "input_types": cr.input_types,
-                        "output_types": cr.output_types,
-                    }
-
-    # 프로세스명 자동 추론
     if not process_name:
         l2_names = list({t.l2 for t in tasks if t.l2})
         process_name = l2_names[0] if l2_names else "HR 프로세스"
 
-    # To-Be 데이터 (있으면 활용)
-    tobe_data = None
-    if _new_workflow_cache:
-        tobe_data = _new_workflow_cache
-
-    # 과제 정의서의 제목 가져오기
+    tobe_data = _new_workflow_cache if _new_workflow_cache else None
     project_title = _project_definition_cache.get("project_title", f"{process_name} AI 자동화")
 
-    # 설정에서 API 키 로드
     settings = load_settings()
     anthropic_key = os.getenv("ANTHROPIC_API_KEY", "") or settings.anthropic_api_key
 
