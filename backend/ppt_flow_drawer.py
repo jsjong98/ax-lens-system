@@ -58,18 +58,19 @@ def _add_rect(slide, left, top, width, height, fill=None, border_color=None,
     return shape
 
 
-def _add_arrow(slide, start_left, start_top, end_left, end_top, color=BLUE, width=Pt(1.5)):
-    """화살표 선을 추가합니다."""
-    connector = slide.shapes.add_connector(
-        1,  # straight connector
-        start_left, start_top,
-        end_left, end_top,
-    )
+def _add_arrow_line(slide, x1, y1, x2, y2, color=BLUE, width=Pt(1.5)):
+    """화살표가 달린 직선을 추가합니다."""
+    from lxml import etree
+    connector = slide.shapes.add_connector(1, x1, y1, x2, y2)
     connector.line.color.rgb = color
     connector.line.width = width
-    # 화살표 헤드
-    connector.end_x = end_left
-    connector.end_y = end_top
+    # 화살표 헤드 추가 (XML 직접)
+    ln = connector._element.find('.//{http://schemas.openxmlformats.org/drawingml/2006/main}ln')
+    if ln is not None:
+        tailEnd = etree.SubElement(ln, '{http://schemas.openxmlformats.org/drawingml/2006/main}tailEnd')
+        tailEnd.set('type', 'triangle')
+        tailEnd.set('w', 'med')
+        tailEnd.set('len', 'med')
     return connector
 
 
@@ -252,36 +253,56 @@ def draw_service_flow(slide, workflow: dict,
                   fill=WHITE, text=agent.get("agent_name", ""),
                   font_size=Pt(5), font_color=BLACK, bold=True, align=PP_ALIGN.LEFT)
 
-        # Task 박스들
+        # Task 박스들 + Task간 화살표
         tasks = agent.get("assigned_tasks", [])
         task_h = Cm(0.6)
-        max_tasks = min(len(tasks), int((row_heights[2] - Cm(1.5)) / task_h))
+        task_gap = Cm(0.15)
+        max_tasks = min(len(tasks), int((row_heights[2] - Cm(1.5)) / (task_h + task_gap)))
 
         for j in range(max_tasks):
             task = tasks[j]
             is_human = task.get("automation_level", "") != "Human-on-the-Loop"
-            task_top = row_tops[2] + Cm(1.1) + j * (task_h + Cm(0.1))
+            task_top = row_tops[2] + Cm(1.1) + j * (task_h + task_gap)
 
             task_fill = RGBColor(0xFA, 0xEE, 0xDA) if is_human else INPUT_BG
             task_border = RGBColor(0xBA, 0x75, 0x17) if is_human else LIGHT_GRAY
 
             _add_rect(slide, box_left + Cm(0.15), task_top, box_w - Cm(0.3), task_h,
                       fill=task_fill, border_color=task_border, border_width=Pt(0.5),
-                      text=task.get("task_name", ""), font_size=Pt(5), font_color=BLACK)
+                      text=task.get("task_name", "")[:20], font_size=Pt(5), font_color=BLACK)
 
-        # 연결선: Senior ↔ Junior
+            # Task 간 화살표 (이전 Task → 현재 Task)
+            if j > 0:
+                arrow_x = box_left + box_w / 2
+                prev_bottom = task_top - task_gap
+                _add_arrow_line(slide, arrow_x, prev_bottom, arrow_x, task_top,
+                               color=LIGHT_GRAY, width=Pt(0.7))
+
+        # ── 연결선: Input → Senior (꺾임) ──
         center_x = col_left + agent_col_w / 2
-        _add_line(slide, center_x - Cm(0.1), row_tops[1] + row_heights[1],
-                  center_x - Cm(0.1), row_tops[2] + Cm(0.1), color=RED, width=Pt(1))
-        _add_line(slide, center_x + Cm(0.1), row_tops[2] + Cm(0.1),
-                  center_x + Cm(0.1), row_tops[1] + row_heights[1], color=BLUE, width=Pt(1))
+        # Input 박스 하단 → Senior 상단
+        if i < len(inputs_list):
+            input_bottom_y = row_tops[0] + row_heights[0]
+            senior_top_y = row_tops[1]
+            _add_line(slide, center_x, input_bottom_y, center_x, senior_top_y,
+                      color=RGBColor(0x5B, 0x9B, 0xD5), width=Pt(0.7))
 
-        # 연결선: Junior → HR (Human 확인 필요한 경우만)
+        # ── 연결선: Senior → Junior (화살표) ──
+        _add_arrow_line(slide, center_x - Cm(0.15), row_tops[1] + row_heights[1],
+                        center_x - Cm(0.15), row_tops[2] + Cm(0.1),
+                        color=RED, width=Pt(1))
+        # Junior → Senior (화살표)
+        _add_arrow_line(slide, center_x + Cm(0.15), row_tops[2] + Cm(0.1),
+                        center_x + Cm(0.15), row_tops[1] + row_heights[1],
+                        color=BLUE, width=Pt(1))
+
+        # ── 연결선: Junior → HR (화살표, Human 확인 필요한 경우) ──
         has_human = any(t.get("automation_level", "") != "Human-on-the-Loop"
                         for t in tasks)
         if has_human:
-            _add_line(slide, center_x, row_tops[2] + row_heights[2],
-                      center_x, row_tops[3], color=BLUE, width=Pt(1))
+            _add_arrow_line(slide, center_x, row_tops[2] + row_heights[2],
+                            center_x, row_tops[3] + Cm(0.1),
+                            color=BLUE, width=Pt(1))
 
     # ── HR 행 ──
     _add_rect(slide, left, row_tops[3], label_w, row_heights[3],
