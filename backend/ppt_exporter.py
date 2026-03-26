@@ -468,37 +468,16 @@ def _fill_agent_slide(slide, agent: dict, design: dict, definition: dict | None 
 
 # ── 메인 함수 ─────────────────────────────────────────────────────────────────
 
-def _insert_workflow_image(slide, workflow_cache: dict | None):
-    """AI Service Flow HTML을 이미지로 변환하여 PPT 슬라이드에 삽입합니다."""
+def _insert_workflow_shapes(slide, workflow_cache: dict | None):
+    """AI Service Flow를 PPT 도형으로 직접 그립니다 (수정 가능)."""
     if not workflow_cache:
         return
     try:
-        from html_exporter import export_workflow_html
-        from html_to_image import html_to_png
-
-        html = export_workflow_html(workflow_cache)
-        png_bytes = html_to_png(html, width=960)
-
-        if not png_bytes:
-            return
-
-        # 이미지를 임시 파일로 저장 후 삽입
-        import tempfile
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
-            f.write(png_bytes)
-            img_path = f.name
-
-        # 슬라이드의 AI Service Flow 영역에 이미지 삽입
-        # 위치: 왼쪽 여백, 슬라이드 상단 ~ 중간 (대략적 위치)
-        left = Inches(0.3)
-        top = Inches(1.8)
-        width = Inches(6.5)
-        slide.shapes.add_picture(img_path, left, top, width=width)
-
-        Path(img_path).unlink(missing_ok=True)
-        print("[ppt_exporter] AI Service Flow 이미지 삽입 완료")
+        from ppt_flow_drawer import draw_service_flow
+        draw_service_flow(slide, workflow_cache)
+        print("[ppt_exporter] AI Service Flow 도형 삽입 완료")
     except Exception as e:
-        print(f"[ppt_exporter] AI Service Flow 이미지 삽입 실패: {e}")
+        print(f"[ppt_exporter] AI Service Flow 도형 삽입 실패: {e}")
 
 
 def export_ppt(
@@ -522,18 +501,32 @@ def export_ppt(
     # Slide 2: 과제 설계서
     if design:
         _fill_design_slide(prs.slides[2], design, definition)
-    # AI Service Flow 이미지 삽입
+    # AI Service Flow 도형 그리기
     if workflow:
-        _insert_workflow_image(prs.slides[2], workflow)
+        _insert_workflow_shapes(prs.slides[2], workflow)
 
     # Slide 3+: Agent 정의서
     agents = design.get("agent_definitions", []) if design else []
 
     if agents:
         _fill_agent_slide(prs.slides[3], agents[0], design, definition)
+        # Agent 미니맵 추가
+        if workflow:
+            try:
+                from ppt_flow_drawer import draw_minimap
+                draw_minimap(prs.slides[3], workflow, highlight_agent_id=agents[0].get("agent_id", ""))
+            except Exception as e:
+                print(f"[ppt_exporter] 미니맵 실패: {e}")
+
         for agent in agents[1:]:
             new_slide = _duplicate_slide(prs, 3)
             _fill_agent_slide(new_slide, agent, design, definition)
+            if workflow:
+                try:
+                    from ppt_flow_drawer import draw_minimap
+                    draw_minimap(new_slide, workflow, highlight_agent_id=agent.get("agent_id", ""))
+                except Exception as e:
+                    print(f"[ppt_exporter] 미니맵 실패: {e}")
 
     # Thank You 슬라이드 (마지막) → 제거 대상
     thank_you_idx = 4 if not agents else 4  # 복제 전 기준
