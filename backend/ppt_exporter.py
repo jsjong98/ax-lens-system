@@ -91,12 +91,19 @@ def _set_text(shape, text: str, font_size: Pt | None = None, bold: bool | None =
 
 def _set_multiline_text(shape, lines: list[str], font_size=Pt(11), bold=False,
                         color=DARK, bullet_char="", line_spacing=1.2):
-    """Shape에 여러 줄 텍스트를 설정합니다."""
+    """Shape에 여러 줄 텍스트를 설정합니다. 줄 수에 따라 폰트 자동 축소."""
     if not shape or not shape.has_text_frame:
         return
     tf = shape.text_frame
     tf.clear()
     tf.word_wrap = True
+    # 줄 수에 따라 폰트 크기 자동 조절
+    if len(lines) > 8:
+        font_size = Pt(7)
+    elif len(lines) > 5:
+        font_size = Pt(8)
+    elif len(lines) > 3:
+        font_size = Pt(9)
 
     for i, line in enumerate(lines):
         if i == 0:
@@ -104,7 +111,11 @@ def _set_multiline_text(shape, lines: list[str], font_size=Pt(11), bold=False,
         else:
             para = tf.add_paragraph()
 
-        full_text = f"{bullet_char} {line}" if bullet_char else line
+        # bullet_char 중복 방지: 이미 •로 시작하면 추가하지 않음
+        if bullet_char and not line.startswith(bullet_char):
+            full_text = f"{bullet_char}{line}"
+        else:
+            full_text = line
         run = para.add_run()
         run.text = full_text
         run.font.size = font_size
@@ -146,7 +157,10 @@ def _add_multiline_textbox(slide, left, top, width, height, lines: list[str],
         else:
             para = tf.add_paragraph()
 
-        full_text = f"{bullet} {line}" if bullet else line
+        if bullet and not line.startswith(bullet):
+            full_text = f"{bullet}{line}"
+        else:
+            full_text = line
         run = para.add_run()
         run.text = full_text
         run.font.size = font_size
