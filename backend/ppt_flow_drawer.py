@@ -142,97 +142,152 @@ def draw_minimap(slide, workflow: dict, highlight_agent_id: str = "",
     """
     축소된 AI Service Flow 미니맵을 그립니다.
     highlight_agent_id에 해당하는 Agent만 두꺼운 테두리로 강조합니다.
+    레인 간 간격을 확보하여 화살표가 정확히 연결됩니다.
     """
     agents = workflow.get("agents", [])
     if not agents:
         return
 
     agent_count = len(agents)
-    row_height = total_height / 5
-    agent_width = (total_width - Cm(1.5)) / max(agent_count, 1)
-    agent_left_start = left + Cm(1.5)
+    label_w = Cm(1.3)
+    content_w = total_width - label_w - Cm(0.2)  # 오른쪽 감독라인 공간
+    agent_col_w = content_w / max(agent_count, 1)
+    content_left = left + label_w
 
-    # ── Input 행 ──
-    input_top = top
-    # 레이블
-    _add_rect(slide, left, input_top, Cm(1.3), row_height,
+    # 레인 높이 + 레인 간 간격 (화살표 공간)
+    input_h  = Cm(0.9)
+    gap_is   = Cm(0.4)   # Input→Senior 간격
+    senior_h = Cm(0.9)
+    gap_sj   = Cm(0.5)   # Senior→Junior 간격
+    junior_h = Cm(2.8)
+    gap_jh   = Cm(0.4)   # Junior→HR 간격
+    hr_h     = Cm(0.9)
+
+    # 각 레인 top 좌표
+    input_top  = top
+    senior_top = input_top + input_h + gap_is
+    junior_top = senior_top + senior_h + gap_sj
+    hr_top_y   = junior_top + junior_h + gap_jh
+
+    # ── 레인 배경 ──
+    _add_rect(slide, content_left, junior_top, content_w, junior_h,
+              fill=YELLOW_BG, border_color=None)
+
+    # ══════════════════════════════════════════════════════════════════
+    # 1. Input 행
+    # ══════════════════════════════════════════════════════════════════
+    _add_rect(slide, left, input_top, label_w, input_h,
               fill=WHITE, border_color=LIGHT_GRAY,
               text="Input", font_size=Pt(5), font_color=GRAY)
-    # Input 박스들
-    for i in range(min(agent_count, 6)):
-        box_w = agent_width * 0.8
-        box_left = agent_left_start + i * agent_width + (agent_width - box_w) / 2
-        _add_rect(slide, box_left, input_top + Cm(0.1), box_w, row_height - Cm(0.2),
-                  fill=INPUT_BG, border_color=BLUE, border_width=Pt(0.5))
 
-    # ── Senior AI 행 ──
-    senior_top = top + row_height
-    _add_rect(slide, left, senior_top, Cm(1.3), row_height,
+    for i in range(min(agent_count, 6)):
+        color = _get_agent_color(i)
+        box_w = agent_col_w * 0.75
+        box_left = content_left + i * agent_col_w + (agent_col_w - box_w) / 2
+        _add_rect(slide, box_left, input_top + Cm(0.08), box_w, input_h - Cm(0.16),
+                  fill=WHITE, border_color=color, border_width=Pt(0.7))
+
+    # ══════════════════════════════════════════════════════════════════
+    # 2. Senior AI 행
+    # ══════════════════════════════════════════════════════════════════
+    _add_rect(slide, left, senior_top, label_w, senior_h,
               fill=WHITE, border_color=LIGHT_GRAY,
               text="Senior\nAI", font_size=Pt(5), font_color=RED)
-    _add_rect(slide, agent_left_start, senior_top + Cm(0.1),
-              total_width - Cm(1.5), row_height - Cm(0.2),
-              fill=RED_BG, border_color=RED, border_width=Pt(1))
+    _add_rect(slide, content_left, senior_top + Cm(0.06),
+              content_w, senior_h - Cm(0.12),
+              fill=RED_BG, border_color=RED, border_width=Pt(0.8))
 
-    # ── Junior AI 행 ──
-    junior_top = top + row_height * 2
-    _add_rect(slide, left, junior_top, Cm(1.3), row_height * 2,
+    # ══════════════════════════════════════════════════════════════════
+    # 3. Junior AI 행
+    # ══════════════════════════════════════════════════════════════════
+    _add_rect(slide, left, junior_top, label_w, junior_h,
               fill=WHITE, border_color=LIGHT_GRAY,
               text="Junior\nAI", font_size=Pt(5), font_color=GOLD)
 
     for i, agent in enumerate(agents):
-        box_left = agent_left_start + i * agent_width + Cm(0.1)
-        box_w = agent_width - Cm(0.2)
+        box_left = content_left + i * agent_col_w + Cm(0.08)
+        box_w = agent_col_w - Cm(0.16)
         is_highlight = agent.get("agent_id") == highlight_agent_id
 
-        _add_rect(slide, box_left, junior_top + Cm(0.1), box_w, row_height * 2 - Cm(0.3),
+        _add_rect(slide, box_left, junior_top + Cm(0.08), box_w, junior_h - Cm(0.16),
                   fill=YELLOW_BG if is_highlight else WHITE,
                   border_color=GOLD,
-                  border_width=Pt(3) if is_highlight else Pt(0.5),
-                  border_dash=7 if not is_highlight else None)  # 7 = dash
+                  border_width=Pt(2.5) if is_highlight else Pt(0.5))
 
-        # Agent 번호
-        _add_rect(slide, box_left + Cm(0.1), junior_top + Cm(0.2), Cm(0.5), Cm(0.5),
+        # Agent 번호 배지
+        _add_rect(slide, box_left + Cm(0.06), junior_top + Cm(0.15), Cm(0.4), Cm(0.4),
                   fill=GOLD if is_highlight else LIGHT_GRAY,
                   text=str(i + 1), font_size=Pt(5),
                   font_color=WHITE if is_highlight else BLACK, bold=True)
 
         # Task 박스들 (간략)
         tasks = agent.get("assigned_tasks", [])
-        for j in range(min(len(tasks), 3)):
-            task_top = junior_top + Cm(0.9) + j * Cm(0.5)
-            _add_rect(slide, box_left + Cm(0.15), task_top,
-                      box_w - Cm(0.3), Cm(0.4),
-                      fill=INPUT_BG, border_color=LIGHT_GRAY, border_width=Pt(0.3))
+        max_vis = min(len(tasks), 3)
+        task_h_each = Cm(0.35)
+        task_gap_each = Cm(0.12)
+        for j in range(max_vis):
+            t_top = junior_top + Cm(0.7) + j * (task_h_each + task_gap_each)
+            _add_rect(slide, box_left + Cm(0.1), t_top,
+                      box_w - Cm(0.2), task_h_each,
+                      fill=INPUT_BG, border_color=GOLD, border_width=Pt(0.3),
+                      border_dash=7)
 
-    # ── HR 행 ──
-    hr_top = top + row_height * 4
-    _add_rect(slide, left, hr_top, Cm(1.3), row_height,
+            # Task 간 화살표
+            if j > 0:
+                arr_x = box_left + box_w / 2
+                _add_arrow_line(slide, arr_x, t_top - task_gap_each,
+                                arr_x, t_top,
+                                color=GOLD_ARROW, width=Pt(0.4))
+
+    # ══════════════════════════════════════════════════════════════════
+    # 4. HR 행
+    # ══════════════════════════════════════════════════════════════════
+    _add_rect(slide, left, hr_top_y, label_w, hr_h,
               fill=WHITE, border_color=LIGHT_GRAY,
               text="HR\n담당자", font_size=Pt(5), font_color=BLACK)
 
     for i in range(agent_count):
-        box_left = agent_left_start + i * agent_width + Cm(0.1)
-        box_w = agent_width - Cm(0.2)
-        _add_rect(slide, box_left, hr_top + Cm(0.1), box_w, row_height - Cm(0.2),
-                  fill=GRAY_BG, border_color=LIGHT_GRAY, border_width=Pt(0.3))
+        box_left = content_left + i * agent_col_w + Cm(0.08)
+        box_w = agent_col_w - Cm(0.16)
+        _add_rect(slide, box_left, hr_top_y + Cm(0.08), box_w, hr_h - Cm(0.16),
+                  fill=GRAY_BG, border_color=GRAY_ARROW, border_width=Pt(0.5))
 
-    # ── 연결선 (Senior ↔ Junior) ──
-    for i in range(agent_count):
-        center_x = agent_left_start + i * agent_width + agent_width / 2
-        # Senior → Junior (하향, 파란)
-        _add_arrow_line(slide, center_x - Cm(0.1), senior_top + row_height,
-                        center_x - Cm(0.1), junior_top, color=BLUE_ARROW, width=Pt(0.7))
-        # Junior → Senior (상향, 회색)
-        _add_arrow_line(slide, center_x + Cm(0.1), junior_top,
-                        center_x + Cm(0.1), senior_top + row_height, color=GRAY_ARROW, width=Pt(0.7))
+    # ══════════════════════════════════════════════════════════════════
+    # 5. 연결 화살표
+    # ══════════════════════════════════════════════════════════════════
 
-    # ── 연결선 (Junior → HR) ──
-    hr_top = top + row_height * 4
     for i in range(agent_count):
-        center_x = agent_left_start + i * agent_width + agent_width / 2
-        _add_arrow_line(slide, center_x, junior_top + row_height * 2,
-                        center_x, hr_top, color=GOLD_ARROW, width=Pt(0.7))
+        center_x = content_left + i * agent_col_w + agent_col_w / 2
+        color = _get_agent_color(i)
+
+        # (A) Input → Senior: Agent 색상 화살표
+        _add_arrow_line(slide, center_x, input_top + input_h,
+                        center_x, senior_top,
+                        color=color, width=Pt(0.5))
+
+        # (B) Senior → Junior: Agent 색상 (지시)
+        _add_arrow_line(slide, center_x - Cm(0.08), senior_top + senior_h,
+                        center_x - Cm(0.08), junior_top,
+                        color=color, width=Pt(0.5))
+
+        # (C) Junior → Senior: 회색 (보고)
+        _add_arrow_line(slide, center_x + Cm(0.08), junior_top,
+                        center_x + Cm(0.08), senior_top + senior_h,
+                        color=GRAY_ARROW, width=Pt(0.5))
+
+        # (D) Junior → HR: 금색
+        _add_arrow_line(slide, center_x, junior_top + junior_h,
+                        center_x, hr_top_y,
+                        color=GOLD_ARROW, width=Pt(0.5))
+
+    # (E) Senior → HR 직결 감독 라인 (짙은 빨강, 오른쪽)
+    right_x = content_left + content_w + Cm(0.05)
+    _add_line(slide, right_x, senior_top + senior_h / 2,
+              right_x, senior_top + senior_h,
+              color=RED_ARROW, width=Pt(0.8))
+    _add_arrow_line(slide, right_x, senior_top + senior_h,
+                    right_x, hr_top_y + Cm(0.08),
+                    color=RED_ARROW, width=Pt(0.8))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
