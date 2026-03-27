@@ -8,6 +8,23 @@ from __future__ import annotations
 from typing import Any
 
 
+# Agent별 구분 파란 계열 팔레트 (최대 7개 Agent)
+_AGENT_PALETTE = [
+    "#2E75B6",   # 진한 파랑
+    "#00A6A0",   # 청록(틸)
+    "#5B9BD5",   # 하늘색
+    "#7B68C4",   # 보라-파랑
+    "#00827F",   # 짙은 청록
+    "#4172C4",   # 코발트
+    "#2D8BBA",   # 세룰리안
+]
+
+
+def _agent_color(idx: int) -> str:
+    """Agent 인덱스에 대응하는 파란 계열 색상 hex를 반환."""
+    return _AGENT_PALETTE[idx % len(_AGENT_PALETTE)]
+
+
 _CSS = """
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Malgun Gothic', sans-serif;
@@ -15,10 +32,10 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Malgun Gothic', sans-ser
 .slide { background: #fff; width: 100%; max-width: 1400px; padding: 22px 24px 24px; border-radius: 10px;
          box-shadow: 0 2px 16px rgba(0,0,0,0.08); }
 .title-row { display: flex; justify-content: flex-end; margin-bottom: 16px; }
-.legend { display: flex; gap: 8px; }
+.legend { display: flex; gap: 8px; flex-wrap: wrap; }
 .leg-btn { font-size: 11px; font-weight: 600; padding: 4px 12px; border-radius: 5px; }
-.leg-senior { border: 1.5px solid #CC0000; color: #CC0000; background: #fff; }
-.leg-junior { border: 1.5px solid #1A5CB0; color: #1A5CB0; background: #fff; }
+.leg-senior { border: 1.5px solid #8B1A1A; color: #8B1A1A; background: #fff; }
+.leg-junior { border: 1.5px solid #AA8E2A; color: #AA8E2A; background: #fff; }
 .leg-human  { border: 1.5px solid #B4B2A9; color: #5F5E5A; background: #fff; }
 .flow-outer { border: 0.5px solid #D3D1C7; border-radius: 10px; overflow: hidden; }
 .row { display: grid; grid-template-columns: 56px 1fr; border-bottom: 0.5px solid #D3D1C7; }
@@ -27,44 +44,47 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Malgun Gothic', sans-ser
              gap: 3px; padding: 8px 4px; border-right: 0.5px solid #D3D1C7; background: #fff; }
 .row-icon { font-size: 18px; }
 .row-name { font-size: 9px; font-weight: 700; text-align: center; line-height: 1.3; }
-.name-input { color: #5F5E5A; } .name-senior { color: #CC0000; }
-.name-junior { color: #1A5CB0; } .name-human  { color: #2C2C2A; }
+.name-input { color: #5F5E5A; } .name-senior { color: #8B1A1A; }
+.name-junior { color: #AA8E2A; } .name-human  { color: #2C2C2A; }
 .row-content { padding: 10px 12px; }
-.bg-input  .row-content { background: #FAFAF8; }
+.bg-input  .row-content { background: #F8FAFF; }
 .bg-senior .row-content { background: #FDF4F4; }
 .bg-junior .row-content { background: #FEFAF0; }
 .bg-human  .row-content { background: #FAFAF8; }
 .input-boxes { display: flex; gap: 8px; flex-wrap: wrap; }
-.ibox { flex: 1; min-width: 100px; border-radius: 7px; padding: 8px 6px 6px; border: 0.5px solid #D3D1C7; background: #F5F4F1; text-align: center; }
+.ibox { flex: 1; min-width: 100px; border-radius: 7px; padding: 8px 6px 6px;
+        border: 1.5px solid #5B9BD5; background: #fff; text-align: center; position: relative; }
 .ibox-t { font-size: 9.5px; font-weight: 600; color: #2C2C2A; margin-bottom: 3px; }
 .ibox-s { font-size: 8px; color: #888780; }
-.senior-box { border: 1.5px solid #CC0000; border-radius: 8px; background: #FFF5F5; padding: 10px 16px; text-align: center; }
-.s-title { font-size: 13px; font-weight: 700; color: #CC0000; margin-bottom: 4px; }
+.ibox-lbl { font-size: 7px; font-style: italic; margin-top: 3px; }
+.senior-box { border: 1.5px solid #8B1A1A; border-radius: 8px; background: #F8E0E0; padding: 10px 16px; text-align: center; }
+.s-title { font-size: 13px; font-weight: 700; color: #8B1A1A; margin-bottom: 4px; }
 .s-sub   { font-size: 9px; color: #888780; }
 .agents-grid { display: grid; gap: 10px; }
 .agent-col { display: flex; flex-direction: column; }
 .conn { display: flex; justify-content: space-between; align-items: flex-end; padding: 2px 8px 0; }
 .cs { display: flex; flex-direction: column; align-items: center; gap: 2px; }
-.lbl-r { font-size: 7px; color: #CC0000; font-weight: 600; text-align: center; line-height: 1.3; }
-.lbl-b { font-size: 7px; color: #1A5CB0; font-weight: 600; text-align: center; line-height: 1.3; }
+.lbl-down { font-size: 7px; font-weight: 600; text-align: center; line-height: 1.3; }
+.lbl-up   { font-size: 7px; color: #9E9E9E; font-weight: 600; text-align: center; line-height: 1.3; }
 .ard { display: flex; flex-direction: column; align-items: center; }
-.ard .ln { width: 1.5px; height: 18px; background: #CC0000; }
-.ard .hd { width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 6px solid #CC0000; }
+.ard .ln { width: 1.5px; height: 18px; }
+.ard .hd { width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; }
 .aru { display: flex; flex-direction: column-reverse; align-items: center; }
-.aru .ln { width: 1.5px; height: 18px; background: #1A5CB0; }
-.aru .hd { width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-bottom: 6px solid #1A5CB0; }
+.aru .ln { width: 1.5px; height: 18px; background: #9E9E9E; }
+.aru .hd { width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-bottom: 6px solid #9E9E9E; }
 .bot-arr { display: flex; flex-direction: column; align-items: center; padding-top: 5px; gap: 2px; }
 .ardb { display: flex; flex-direction: column; align-items: center; }
-.ardb .ln { width: 1.5px; height: 16px; background: #1A5CB0; }
-.ardb .hd { width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 6px solid #1A5CB0; }
-.agent-box { border-radius: 8px; padding: 10px; background: #fff; border: 1.5px dashed #1A5CB0; flex: 1; }
+.ardb .ln { width: 1.5px; height: 16px; background: #AA8E2A; }
+.ardb .hd { width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 6px solid #AA8E2A; }
+.bot-lbl { font-size: 7.5px; font-weight: 600; color: #AA8E2A; font-style: italic; }
+.agent-box { border-radius: 8px; padding: 10px; background: #FEFAF0; flex: 1; }
 .ah { display: flex; align-items: center; gap: 7px; margin-bottom: 9px; }
-.an { width: 20px; height: 20px; border-radius: 50%; background: #1A5CB0; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; color: #fff; flex-shrink: 0; }
+.an { width: 20px; height: 20px; border-radius: 50%; background: #AA8E2A; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; color: #fff; flex-shrink: 0; }
 .aname { font-size: 11px; font-weight: 700; color: #2C2C2A; }
 .ah-sub { font-size: 8px; color: #888780; margin-left: 2px; }
 .bl { display: flex; flex-direction: column; gap: 6px; }
-.b { border-radius: 6px; padding: 6px 8px 5px; border: 0.5px solid #D3D1C7; background: #F5F4F1; text-align: center; }
-.b.hf { background: #FAEEDA; border: 0.5px dashed #BA7517; }
+.b { border-radius: 6px; padding: 6px 8px 5px; border: 0.7px dashed #AA8E2A; background: #F5F4F1; text-align: center; }
+.b.hf { background: #FAEEDA; border: 0.7px dashed #BA7517; }
 .bt { font-size: 9px; font-weight: 600; color: #2C2C2A; margin-bottom: 3px; }
 .bs { font-size: 8px; color: #888780; margin-bottom: 3px; }
 .bbr { display: flex; justify-content: center; gap: 4px; flex-wrap: wrap; }
@@ -75,9 +95,16 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Malgun Gothic', sans-ser
 .bra { background: #E8F4FF; color: #0C447C; border: 0.5px solid #378ADD; }
 .bh  { background: #FCEBEB; color: #A32D2D; border: 0.5px solid #F09595; }
 .bo  { background: #EEEDFE; color: #3C3489; border: 0.5px solid #7F77DD; }
-.hr-box { border-radius: 7px; padding: 9px 8px; border: 0.5px solid #D3D1C7; background: #F5F4F1; text-align: center; }
+.hr-box { border-radius: 7px; padding: 9px 8px; border: 0.5px solid #D3D1C7; background: #fff; text-align: center; }
 .hr-m { font-size: 9px; font-weight: 600; color: #2C2C2A; margin-bottom: 3px; }
 .hr-s { font-size: 8px; color: #888780; }
+.task-arrow { display: flex; flex-direction: column; align-items: center; padding: 2px 0; }
+.task-arrow .ln { width: 1px; height: 8px; background: #AA8E2A; }
+.task-arrow .hd { width: 0; height: 0; border-left: 3px solid transparent; border-right: 3px solid transparent; border-top: 4px solid #AA8E2A; }
+.task-arrow-lbl { font-size: 6.5px; color: #AA8E2A; font-style: italic; }
+.oversight-line { position: relative; }
+.oversight-bar { position: absolute; right: -8px; top: 0; bottom: 0; width: 3px; background: #8B1A1A; border-radius: 2px; }
+.oversight-lbl { position: absolute; right: -50px; top: 50%; transform: translateY(-50%) rotate(90deg); font-size: 7px; color: #8B1A1A; font-weight: 600; white-space: nowrap; }
 """
 
 BADGE_MAP = {
@@ -109,15 +136,17 @@ def export_workflow_html(workflow: dict) -> str:
     agents = workflow.get("agents", [])
     summary = workflow.get("blueprint_summary", "")
 
-    # Input 수집 (모든 에이전트의 input_data에서)
+    # Input 수집 + Input→Agent 매핑 (첫 사용 Agent 기준 색상 결정)
     all_inputs: list[str] = []
     seen_inputs: set[str] = set()
-    for agent in agents:
+    input_to_agent_idx: dict[str, int] = {}
+    for ai, agent in enumerate(agents):
         for task in agent.get("assigned_tasks", []):
             for inp in task.get("input_data", []):
                 if inp and inp not in seen_inputs:
                     seen_inputs.add(inp)
                     all_inputs.append(inp)
+                    input_to_agent_idx[inp] = ai
 
     # Human Task 수집
     human_tasks: list[dict] = []
@@ -135,12 +164,20 @@ def export_workflow_html(workflow: dict) -> str:
 
     # ── HTML 조립 ──
 
-    # Input 행
+    # Input 행 — Agent별 색상으로 테두리 구분 + 데이터 흐름 라벨
     input_boxes = ""
     for inp in all_inputs[:6]:
-        input_boxes += f'<div class="ibox"><div class="ibox-t">{inp}</div></div>\n'
+        owner_idx = input_to_agent_idx.get(inp, 0)
+        color = _agent_color(owner_idx)
+        owner_name = agents[owner_idx].get("agent_name", f"Agent {owner_idx+1}") if owner_idx < len(agents) else ""
+        input_boxes += (
+            f'<div class="ibox" style="border-color:{color};">'
+            f'<div class="ibox-t">{inp}</div>'
+            f'<div class="ibox-lbl" style="color:{color};">→ {owner_name}</div>'
+            f'</div>\n'
+        )
 
-    # Senior AI 행 — 레퍼런스처럼 구체적 오케스트레이션 설명
+    # Senior AI 행
     agent_names = [a.get("agent_name", f"Agent {i+1}") for i, a in enumerate(agents)]
     steps = []
     for i, name in enumerate(agent_names):
@@ -155,15 +192,14 @@ def export_workflow_html(workflow: dict) -> str:
     else:
         orchestrator_desc = f"({steps[0]} 기동 → 결과 수령 → HR 담당자 전달)"
 
-    # Junior AI 행 — 레퍼런스 형태: 커넥터 grid + 에이전트 grid 분리
+    # Junior AI 행
     circled = "①②③④⑤⑥⑦⑧⑨⑩"
 
-    # 커넥터 행
+    # 커넥터 행 — Agent별 색상 화살표
     connectors_html = ""
     for i, agent in enumerate(agents):
         num = circled[i] if i < len(circled) else str(i + 1)
-        desc = agent.get("description", "") or f"{agent.get('agent_name', '')} 수행"
-        short_desc = desc[:20] if len(desc) > 20 else desc
+        color = _agent_color(i)
 
         parallel = " (병렬)" if i > 0 and i < len(agents) - 1 else ""
         sequential = " (순차)" if i == len(agents) - 1 and len(agents) > 1 else ""
@@ -171,21 +207,24 @@ def export_workflow_html(workflow: dict) -> str:
         connectors_html += f"""
           <div class="conn">
             <div class="cs">
-              <span class="lbl-r">{num} {agent.get('agent_name', '')}<br>지시{parallel}{sequential}</span>
-              <div class="ard"><div class="ln"></div><div class="hd"></div></div>
+              <span class="lbl-down" style="color:{color};">{num} {agent.get('agent_name', '')}<br>지시{parallel}{sequential}</span>
+              <div class="ard"><div class="ln" style="background:{color};"></div><div class="hd" style="border-top-color:{color};"></div></div>
             </div>
             <div class="cs">
               <div class="aru"><div class="ln"></div><div class="hd"></div></div>
-              <span class="lbl-b">{agent.get('agent_name', '')}<br>결과 반환</span>
+              <span class="lbl-up">{agent.get('agent_name', '')}<br>결과 반환</span>
             </div>
           </div>"""
 
-    # 에이전트 박스 행
+    # 에이전트 박스 행 — 금색 테두리 + Task간 화살표에 데이터 라벨
     agents_html = ""
     for i, agent in enumerate(agents):
+        color = _agent_color(i)
+        tasks_list = agent.get("assigned_tasks", [])
         tasks_html = ""
         has_human_task = False
-        for task in agent.get("assigned_tasks", []):
+
+        for j, task in enumerate(tasks_list):
             is_human = _has_human(task)
             if is_human:
                 has_human_task = True
@@ -198,6 +237,16 @@ def export_workflow_html(workflow: dict) -> str:
 
             task_name = task.get("task_name", "")
             ai_role = task.get("ai_role", "")
+
+            # Task간 화살표 + output 데이터 라벨
+            if j > 0:
+                prev_outputs = tasks_list[j-1].get("output_data", [])
+                lbl = prev_outputs[0][:15] if prev_outputs else ""
+                tasks_html += f"""
+                <div class="task-arrow">
+                  <div class="ln"></div><div class="hd"></div>
+                  {f'<div class="task-arrow-lbl">{lbl}</div>' if lbl else ''}
+                </div>"""
 
             tasks_html += f"""
                 <div class="b{hf_cls}">
@@ -213,17 +262,20 @@ def export_workflow_html(workflow: dict) -> str:
         if l4_val:
             l4_sub = f'<div class="ah-sub">L4: {l4_val}</div>'
 
+        # Junior→HR 화살표 + output 데이터 라벨
         arrow_html = ""
         if has_human_task:
+            last_outputs = tasks_list[-1].get("output_data", ["결과물"]) if tasks_list else ["결과물"]
+            out_label = last_outputs[0][:15] if last_outputs else "결과물"
             arrow_html = f"""
             <div class="bot-arr">
-              <span style="font-size:7.5px;color:#1A5CB0;font-weight:600;">{agent.get('agent_name', '')} 결과 HR 담당자 전달</span>
+              <span class="bot-lbl">{out_label}</span>
               <div class="ardb"><div class="ln"></div><div class="hd"></div></div>
             </div>"""
 
         agents_html += f"""
           <div class="agent-col">
-            <div class="agent-box">
+            <div class="agent-box" style="border: 1.5px solid #AA8E2A;">
               <div class="ah">
                 <div class="an">{i+1}</div>
                 <div>
@@ -251,6 +303,13 @@ def export_workflow_html(workflow: dict) -> str:
         else:
             hr_html += "<div></div>"
 
+    # 범례에 Agent별 색상 표시
+    legend_agents = ""
+    for i, a in enumerate(agents):
+        color = _agent_color(i)
+        name = a.get("agent_name", f"Agent {i+1}")
+        legend_agents += f'<div class="leg-btn" style="border-color:{color};color:{color};">{name}</div>'
+
     return f"""<!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -265,6 +324,7 @@ def export_workflow_html(workflow: dict) -> str:
       <div class="leg-btn leg-senior">Senior AI</div>
       <div class="leg-btn leg-junior">Junior AI</div>
       <div class="leg-btn leg-human">사람</div>
+      {legend_agents}
     </div>
   </div>
   <div class="flow-outer">
@@ -290,7 +350,7 @@ def export_workflow_html(workflow: dict) -> str:
 
     <!-- JUNIOR AI -->
     <div class="row bg-junior">
-      <div class="row-label"><div class="row-icon">🤖</div><div class="row-name name-junior">Junior<br>AI</div></div>
+      <div class="row-label"><div class="row-icon">🔧</div><div class="row-name name-junior">Junior<br>AI</div></div>
       <div class="row-content">
         <div class="agents-grid" style="grid-template-columns: {grid_cols};">
           {connectors_html}

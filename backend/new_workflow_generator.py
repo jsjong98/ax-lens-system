@@ -533,6 +533,17 @@ _LEVEL_COLOR: dict[str, str] = {
     "Human-Supervised": "#eb5757",   # 빨강
 }
 
+# Agent별 구분 파란 계열 팔레트 (최대 7개)
+_AGENT_PALETTE: list[str] = [
+    "#2E75B6",   # 진한 파랑
+    "#00A6A0",   # 청록(틸)
+    "#5B9BD5",   # 하늘색
+    "#7B68C4",   # 보라-파랑
+    "#00827F",   # 짙은 청록
+    "#4172C4",   # 코발트
+    "#2D8BBA",   # 세룰리안
+]
+
 # 레인(swimlane) 높이 및 노드 크기 (px)
 _LANE_H   = 220
 _NODE_H   = 80
@@ -636,44 +647,55 @@ def result_to_hr_workflow_json(result: NewWorkflowResult) -> dict[str, Any]:
                 },
             })
 
+    # ── Agent별 색상 매핑 ────────────────────────────────────────────────
+    agent_color: dict[str, str] = {}
+    for idx, a in enumerate(result.agents):
+        agent_color[a.agent_id] = _AGENT_PALETTE[idx % len(_AGENT_PALETTE)]
+
     # ── 엣지 생성 ─────────────────────────────────────────────────────────
     edges: list[dict] = []
     edge_id = 0
 
-    # 실행 플로우 순서대로 스텝 간 엣지 연결
+    # 실행 플로우 순서대로 스텝 간 엣지 연결 (Agent 색상 적용)
     sorted_steps = sorted(result.execution_flow, key=lambda s: s.step)
     for i in range(len(sorted_steps) - 1):
         curr_step = sorted_steps[i]
         next_step = sorted_steps[i + 1]
 
-        # 현재 스텝의 마지막 task → 다음 스텝의 첫 번째 task 연결
         for src_tid in curr_step.task_ids:
             for tgt_tid in next_step.task_ids:
                 src_nid = node_id_map.get(src_tid)
                 tgt_nid = node_id_map.get(tgt_tid)
                 if src_nid and tgt_nid:
+                    src_aid = task_to_agent.get(src_tid, "")
+                    color = agent_color.get(src_aid, "#9e9e9e")
+                    # 데이터 흐름 라벨 (source task의 output)
+                    src_task = task_map.get(src_tid)
+                    label = ""
+                    if src_task and src_task.output_data:
+                        label = src_task.output_data[0][:20]
                     edges.append({
                         "id": f"e-{edge_id}",
                         "source": src_nid,
                         "target": tgt_nid,
                         "type": "ortho",
                         "animated": False,
-                        "style": {"stroke": "#9e9e9e", "strokeWidth": 2},
+                        "label": label,
+                        "style": {"stroke": color, "strokeWidth": 2},
                         "markerEnd": {
                             "type": "ArrowClosed",
                             "width": 18,
                             "height": 18,
-                            "color": "#9e9e9e",
+                            "color": color,
                         },
                     })
                     edge_id += 1
-                    break  # 한 연결만 (fan-out 방지)
+                    break
             else:
                 continue
             break
 
-    # 같은 에이전트 내 순차 task 연결 (execution_flow 순서 기반)
-    # task_id 리스트를 실행 스텝 순으로 정렬
+    # 같은 에이전트 내 순차 task 연결 (Agent 고유 색상)
     all_ordered: list[str] = []
     seen: set[str] = set()
     for step in sorted_steps:
@@ -689,22 +711,28 @@ def result_to_hr_workflow_json(result: NewWorkflowResult) -> dict[str, Any]:
             agent_task_order[aid].append(tid)
 
     for aid, tids in agent_task_order.items():
+        color = agent_color.get(aid, "#AA8E2A")
         for j in range(len(tids) - 1):
             src_nid = node_id_map.get(tids[j])
             tgt_nid = node_id_map.get(tids[j + 1])
             if src_nid and tgt_nid:
+                src_task = task_map.get(tids[j])
+                label = ""
+                if src_task and src_task.output_data:
+                    label = src_task.output_data[0][:20]
                 edges.append({
                     "id": f"e-{edge_id}",
                     "source": src_nid,
                     "target": tgt_nid,
                     "type": "ortho",
                     "animated": False,
-                    "style": {"stroke": "#555", "strokeWidth": 2},
+                    "label": label,
+                    "style": {"stroke": color, "strokeWidth": 2},
                     "markerEnd": {
                         "type": "ArrowClosed",
                         "width": 18,
                         "height": 18,
-                        "color": "#555",
+                        "color": color,
                     },
                 })
                 edge_id += 1
@@ -720,6 +748,7 @@ def result_to_hr_workflow_json(result: NewWorkflowResult) -> dict[str, Any]:
                 "lanes": lanes,
                 "nodes": nodes,
                 "edges": edges,
+                "agentColors": {a.agent_id: agent_color[a.agent_id] for a in result.agents},
             }
         ],
     }
