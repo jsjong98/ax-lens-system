@@ -173,6 +173,38 @@ def _add_multiline_textbox(slide, left, top, width, height, lines: list[str],
     return txBox
 
 
+def _add_grouped_textbox(slide, left, top, width, height, items: list[str],
+                          font_size=Pt(7), color=DARK, line_spacing=1.0):
+    """방법론용 텍스트 박스 — 각 항목 내 줄바꿈(\n)을 지원하며 들여쓰기 적용."""
+    txBox = slide.shapes.add_textbox(left, top, width, height)
+    tf = txBox.text_frame
+    tf.word_wrap = True
+    first_para = True
+
+    for item in items:
+        sub_lines = item.split("\n")
+        for k, sub in enumerate(sub_lines):
+            if first_para:
+                para = tf.paragraphs[0]
+                first_para = False
+            else:
+                para = tf.add_paragraph()
+
+            run = para.add_run()
+            run.text = sub
+            # 들여쓰기된 줄은 더 작은 폰트 + 회색
+            if k > 0:
+                run.font.size = Pt(max(font_size.pt - 1, 5))
+                run.font.color.rgb = RGBColor(0x88, 0x87, 0x80)
+                para.line_spacing = 0.95
+            else:
+                run.font.size = font_size
+                run.font.color.rgb = color
+                para.line_spacing = line_spacing
+
+    return txBox
+
+
 def _duplicate_slide(prs: Presentation, slide_index: int) -> Any:
     """슬라이드를 복제합니다 (XML 기반)."""
     template_slide = prs.slides[slide_index]
@@ -433,56 +465,117 @@ def _fill_agent_slide(slide, agent: dict, design: dict, definition: dict | None 
     processing_steps = agent.get("processing_steps", [])
     output_data = agent.get("output_data", [])
 
-    # 항목 수 제한 + 텍스트 길이 제한
-    MAX_ITEMS = 10
-    MAX_LEN = 25
+    # ── 유사 항목 그룹핑 ──
+    # "XXX 데이터 (세부1, 세부2)" → 괄호 앞 키워드를 기준으로 묶기
+    # 괄호 없는 항목도 공통 접미사(데이터, 결과, 리포트 등)로 그룹핑
+    import re as _re
 
-    def _truncate(items: list, max_items=MAX_ITEMS, max_len=MAX_LEN) -> list:
-        result = []
-        for item in items[:max_items]:
+    def _group_items(items: list[str], max_groups: int = 5) -> list[str]:
+        """유사 항목을 큰 chunk로 묶어 '대분류 (세부1, 세부2)' 형태로 반환."""
+        if len(items) <= max_groups:
+            # 항목이 적으면 괄호 안 세부만 짧게 줄여서 반환
+            return [_shorten(s, 35) for s in items]
+
+        # 1단계: 괄호가 있는 항목은 괄호 앞을 카테고리로 추출
+        groups: dict[str, list[str]] = {}
+        ungrouped: list[str] = []
+
+        for item in items:
             s = str(item)
-            result.append(s[:max_len] if len(s) > max_len else s)
-        if len(items) > max_items:
-            result.append(f"... 외 {len(items) - max_items}건")
-        return result
+            # "AAA (BBB, CCC)" → category="AAA", detail="BBB, CCC"
+            m = _re.match(r'^(.+?)\s*\((.+)\)\s*$', s)
+            if m:
+                cat = m.group(1).strip()
+                detail = m.group(2).strip()
+                groups.setdefault(cat, []).append(detail)
+            else:
+                # 공통 키워드로 그룹핑 시도 (데이터, 결과, 리포트, 목록 등)
+                matched = False
+                for keyword in ["데이터", "결과", "리포트", "보고서", "목록", "현황",
+                                "분석", "전략", "지시", "브리핑", "요약"]:
+                    if keyword in s:
+                        groups.setdefault(keyword, []).append(s)
+                        matched = True
+                        break
+                if not matched:
+                    ungrouped.append(s)
 
-    # 항목 수에 따른 폰트 크기
-    def _auto_font(count: int) -> Pt:
-        if count > 12: return Pt(5)
-        if count > 8: return Pt(6)
-        if count > 5: return Pt(7)
-        return Pt(8)
+        # 2단계: 그룹을 "카테고리 (세부1, 세부2)" 형태로 조합
+        result: list[str] = []
+        for cat, details in groups.items():
+            if len(details) == 1:
+                # 그룹에 1개면 괄호 안에 원래 있던 세부만
+                combined = f"{cat} ({details[0][:25]})"
+            else:
+                # 여러 개 → 짧은 세부만 나열
+                short_details = [_shorten(d, 12) for d in details[:4]]
+                suffix = f" 외 {len(details)-4}건" if len(details) > 4 else ""
+                combined = f"{cat} ({', '.join(short_details)}{suffix})"
+            result.append(_shorten(combined, 45))
 
-    # Input
+        # 미분류 항목 추가
+        for u in ungrouped[:max(1, max_groups - len(result))]:
+            result.append(_shorten(u, 35))
+        if len(ungrouped) > max(1, max_groups - len(groups)):
+            remaining = len(ungrouped) - max(1, max_groups - len(groups))
+            result.append(f"... 외 {remaining}건")
+
+        return result[:max_groups]
+
+    def _shorten(s: str, max_len: int = 35) -> str:
+        """문자열을 최대 길이로 자르고 생략 표시."""
+        s = str(s).strip()
+        return s[:max_len-1] + "…" if len(s) > max_len else s
+
+    # 항목 수에 따른 폰트 크기 (더 공격적으로 축소)
+    def _auto_font(count: int, base: int = 8) -> Pt:
+        if count > 8: return Pt(5)
+        if count > 6: return Pt(5.5)
+        if count > 4: return Pt(6)
+        if count > 3: return Pt(7)
+        return Pt(base)
+
+    # Input — 그룹핑 적용
     if input_data:
-        items = _truncate(input_data)
+        items = _group_items(input_data, max_groups=5)
         _add_multiline_textbox(
             slide, left=Emu(700000), top=Emu(4700000),
             width=Emu(2700000), height=Emu(1500000),
             lines=items, font_size=_auto_font(len(items)), bullet="•",
+            line_spacing=1.05,
         )
 
-    # 방법론
+    # 방법론 — step_name과 method를 간결하게 "번호. 이름 → 기법" 형태
     if processing_steps:
         method_lines = []
-        for ps in processing_steps[:6]:
-            name = str(ps.get("step_name", ""))[:30]
-            method = str(ps.get("method", ""))[:30]
-            method_lines.append(f"{name}: {method}")
+        for idx, ps in enumerate(processing_steps[:5], 1):
+            name = _shorten(str(ps.get("step_name", "")), 20)
+            method = _shorten(str(ps.get("method", "")), 18)
+            result_text = _shorten(str(ps.get("result", "")), 15)
+            line = f"{idx}. {name}"
+            if method:
+                line += f"\n   [{method}]"
+            if result_text:
+                line += f" → {result_text}"
+            method_lines.append(line)
+        if len(processing_steps) > 5:
+            method_lines.append(f"... 외 {len(processing_steps)-5}단계")
 
-        _add_multiline_textbox(
+        _add_grouped_textbox(
             slide, left=Emu(4050000), top=Emu(4700000),
             width=Emu(3500000), height=Emu(1500000),
-            lines=method_lines, font_size=_auto_font(len(method_lines)), bullet="",
+            items=method_lines,
+            font_size=_auto_font(len(method_lines), base=7),
         )
 
-    # Output
+    # Output — 그룹핑 적용
     if output_data:
-        items = _truncate(output_data)
+        items = _group_items(output_data, max_groups=5)
         _add_multiline_textbox(
             slide, left=Emu(8100000), top=Emu(4700000),
             width=Emu(3500000), height=Emu(1500000),
             lines=items, font_size=_auto_font(len(items)), bullet="•",
+            line_spacing=1.05,
         )
 
 

@@ -289,36 +289,34 @@ Step D. Agent 정의서 (별첨) — Agent별 1장씩 상세 작성
         "벤치마킹 전략 방향성 도출 및 Junior AI 실행 오케스트레이션"
       ],
       "input_data": [
-        "자사 교육 체계 현황 데이터 (과정 목록, 역량 모델, 교육 체계도)",
-        "Junior AI 트렌드 분류 결과 (주제별 라벨링)",
-        "기존 벤치마킹 이력",
-        "경영진 방침 / 교육 방향성"
+        "자사 교육 체계 현황 (과정 목록, 역량 모델, 체계도)",
+        "Junior AI 분류 결과 (주제별 라벨링)",
+        "벤치마킹 이력 및 경영진 방침"
       ],
       "processing_steps": [
         {
           "step_number": 1,
-          "step_name": "모니터링 전략 수립 (키워드·소스·주기 설정)",
-          "method": "LLM 기반 전략 추론",
-          "result": "Junior AI 실행 지시"
+          "step_name": "모니터링 전략 수립",
+          "method": "LLM 전략 추론",
+          "result": "Junior AI 지시"
         },
         {
           "step_number": 2,
           "step_name": "트렌드·자사 Gap 분석",
-          "method": "Embedding 유사도 비교",
-          "result": "Gap 영역 식별 및 우선순위화"
+          "method": "Embedding 유사도",
+          "result": "Gap 우선순위"
         },
         {
           "step_number": 3,
-          "step_name": "벤치마킹 전략 방향성 도출",
+          "step_name": "벤치마킹 방향성 도출",
           "method": "LLM 종합 분석",
-          "result": "중점 영역·벤치마킹 대상 기준 설정"
+          "result": "중점 영역 기준"
         }
       ],
       "output_data": [
-        "Junior AI 실행 지시",
-        "모니터링 전략서 (키워드, 소스, 주기 설정)",
-        "Gap 분석 리포트 (Gap 영역, 유사도 점수)",
-        "벤치마킹 전략 방향성 (우선순위, 중점 영역)"
+        "모니터링 전략서 (키워드, 소스, 주기)",
+        "Gap 분석 리포트 (영역, 유사도, 순위)",
+        "벤치마킹 방향성 (중점 영역, 대상)"
       ],
       "flow_step_orders": [1, 4]
     },
@@ -331,27 +329,26 @@ Step D. Agent 정의서 (별첨) — Agent별 1장씩 상세 작성
         "수집된 데이터의 주제별 분류 및 요약 생성"
       ],
       "input_data": [
-        "Senior AI의 모니터링 전략 (키워드, 소스 목록, 수집 주기)",
+        "Senior AI 전략 (키워드, 소스, 주기)",
         "외부 HRD 매체 URL 목록"
       ],
       "processing_steps": [
         {
           "step_number": 1,
-          "step_name": "외부 소스 자동 크롤링·수집",
-          "method": "Web Crawling/Scraping",
-          "result": "원문 데이터 수집 완료"
+          "step_name": "외부 소스 크롤링·수집",
+          "method": "Web Crawling",
+          "result": "원문 데이터"
         },
         {
           "step_number": 2,
-          "step_name": "트렌드 요약 브리핑 생성",
-          "method": "LLM 요약 + Topic Modeling",
-          "result": "주간/월간 트렌드 브리핑"
+          "step_name": "트렌드 요약 생성",
+          "method": "LLM + Topic Model",
+          "result": "트렌드 브리핑"
         }
       ],
       "output_data": [
-        "수집된 원문 데이터 (출처 포함)",
-        "트렌드 분류 결과 (주제별 라벨링)",
-        "트렌드 요약 브리핑"
+        "원문 데이터 (출처 포함)",
+        "트렌드 분류·요약 브리핑"
       ],
       "flow_step_orders": [2, 3]
     }
@@ -367,9 +364,14 @@ Step D. Agent 정의서 (별첨) — Agent별 1장씩 상세 작성
 - tech_names에는 구체적 기술·프레임워크 이름을 넣으세요.
 - input_output의 내부/외부를 명확히 구분하세요.
 - agent_definitions에는 Senior AI, Junior AI 모두 포함하세요.
-- agent_definitions의 roles는 이 Agent가 하는 역할을 구체적 bullet 리스트로 작성하세요.
-- agent_definitions의 input_data는 괄호로 부연 설명을 추가하세요 (예: "자사 교육 체계 현황 데이터 (과정 목록, 역량 모델)").
-- agent_definitions의 processing_steps는 방법론(method)과 산출물(result)을 화살표(→)로 연결하는 형식입니다.
+- agent_definitions의 roles는 이 Agent가 하는 역할을 구체적 bullet 리스트로 작성하세요. (최대 3~4개)
+- agent_definitions의 input_data는 **최대 3~4개 항목**으로 유사한 것끼리 묶어서 작성하세요.
+  예: "자사 교육 체계 현황 (과정 목록, 역량 모델, 교육 체계도)" ← 이렇게 괄호 안에 세부사항을 나열.
+  절대 10개 이상 나열하지 마세요. 유사한 항목은 반드시 하나로 통합하세요.
+- agent_definitions의 output_data도 **최대 3~4개 항목**으로 묶어서 작성하세요.
+  예: "Gap 분석 리포트 (Gap 영역, 유사도 점수, 우선순위)" ← 세부 산출물은 괄호 안에.
+- agent_definitions의 processing_steps는 **최대 3~4단계**로 작성하세요.
+  step_name은 20자 이내, method는 15자 이내, result는 15자 이내로 간결하게.
 - agent_definitions의 flow_step_orders는 이 Agent가 ai_service_flow.steps에서 담당하는 step_order 번호 배열입니다.
 """
 
