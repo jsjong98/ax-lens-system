@@ -385,11 +385,23 @@ def _fill_design_slide(slide, design: dict, definition: dict | None = None):
     if date_shape:
         _set_text(date_shape, f"작성일: {created_date}   |   작성자: {author}")
 
-    # 8. AI 기술 유형 — 기술 이름
+    # 8. AI 기술 유형 — 기술 이름 (공통 기술 통합)
     tech_names_shape = _find_shape(slide, "직사각형 37")
     if tech_names_shape:
-        tech_names = design.get("ai_tech_info", {}).get("tech_names", [])
-        _set_multiline_text(tech_names_shape, tech_names, font_size=Pt(9), bullet_char="•", color=DARK)
+        tech_names_raw = design.get("ai_tech_info", {}).get("tech_names", [])
+        # 공통 기술 키워드 추출 후 중복 통합
+        seen_base = set()
+        tech_names_merged: list[str] = []
+        for tn in tech_names_raw:
+            # "LLM + RAG", "LLM + Rule Engine" → 기본 기술(LLM)은 이미 있으면 조합만 추가
+            base = tn.split("+")[0].split("·")[0].strip() if "+" in tn or "·" in tn else tn.strip()
+            if base not in seen_base:
+                seen_base.add(base)
+            tech_names_merged.append(tn)
+        # 최대 6개로 제한
+        if len(tech_names_merged) > 6:
+            tech_names_merged = tech_names_merged[:5] + [f"... 외 {len(tech_names_merged)-5}개"]
+        _set_multiline_text(tech_names_shape, tech_names_merged, font_size=Pt(8), bullet_char="•", color=DARK)
 
     # 9. Input / Output
     io_data = design.get("input_output", {})
@@ -535,45 +547,51 @@ def _fill_agent_slide(slide, agent: dict, design: dict, definition: dict | None 
         if count > 3: return Pt(7)
         return Pt(base)
 
+    # 처리 로직 영역 좌표 (템플릿 Slide 3 기준)
+    # Input 그룹(id=48):  L=1.8cm → 내용 L=3.5cm, T=12.3cm, W=5.8cm, H=5.0cm
+    # 방법론 그룹(id=46): L=11.0cm → 내용 L=13.0cm, T=12.3cm, W=7.5cm, H=5.0cm
+    # Output 그룹(id=47): L=22.3cm → 내용 L=24.2cm, T=12.3cm, W=7.5cm, H=5.0cm
+
     # Input — 그룹핑 적용
     if input_data:
         items = _group_items(input_data, max_groups=5)
         _add_multiline_textbox(
-            slide, left=Emu(700000), top=Emu(4700000),
-            width=Emu(2700000), height=Emu(1500000),
+            slide, left=Cm(3.5), top=Cm(12.3),
+            width=Cm(5.8), height=Cm(5.0),
             lines=items, font_size=_auto_font(len(items)), bullet="•",
             line_spacing=1.05,
         )
 
-    # 방법론 — step_name과 method를 간결하게 "번호. 이름 → 기법" 형태
+    # 방법론 — "번호. 이름 [기법] → 산출물" 한 줄 형태
     if processing_steps:
         method_lines = []
         for idx, ps in enumerate(processing_steps[:5], 1):
-            name = _shorten(str(ps.get("step_name", "")), 20)
-            method = _shorten(str(ps.get("method", "")), 18)
+            name = _shorten(str(ps.get("step_name", "")), 22)
+            method = _shorten(str(ps.get("method", "")), 15)
             result_text = _shorten(str(ps.get("result", "")), 15)
             line = f"{idx}. {name}"
             if method:
-                line += f"\n   [{method}]"
+                line += f" [{method}]"
             if result_text:
                 line += f" → {result_text}"
             method_lines.append(line)
         if len(processing_steps) > 5:
             method_lines.append(f"... 외 {len(processing_steps)-5}단계")
 
-        _add_grouped_textbox(
-            slide, left=Emu(4050000), top=Emu(4700000),
-            width=Emu(3500000), height=Emu(1500000),
-            items=method_lines,
-            font_size=_auto_font(len(method_lines), base=7),
+        _add_multiline_textbox(
+            slide, left=Cm(13.0), top=Cm(12.3),
+            width=Cm(7.5), height=Cm(5.0),
+            lines=method_lines,
+            font_size=_auto_font(len(method_lines), base=7), bullet="",
+            line_spacing=1.1,
         )
 
     # Output — 그룹핑 적용
     if output_data:
         items = _group_items(output_data, max_groups=5)
         _add_multiline_textbox(
-            slide, left=Emu(8100000), top=Emu(4700000),
-            width=Emu(3500000), height=Emu(1500000),
+            slide, left=Cm(24.2), top=Cm(12.3),
+            width=Cm(7.5), height=Cm(5.0),
             lines=items, font_size=_auto_font(len(items)), bullet="•",
             line_spacing=1.05,
         )
