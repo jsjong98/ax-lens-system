@@ -28,22 +28,23 @@ YELLOW_BG = RGBColor(0xFE, 0xFA, 0xF0)
 GRAY_BG = RGBColor(0xF5, 0xF5, 0xF3)
 INPUT_BG = RGBColor(0xF5, 0xF4, 0xF1)
 
-_AGENT_BLUE_PALETTE = [
-    RGBColor(0x2E, 0x75, 0xB6),   # 1  파란
-    RGBColor(0x00, 0xA6, 0xA0),   # 2  청록
-    RGBColor(0x7B, 0x68, 0xC4),   # 3  보라
-    RGBColor(0x5B, 0x9B, 0xD5),   # 4  하늘
-    RGBColor(0x00, 0x82, 0x7F),   # 5  틸
-    RGBColor(0x41, 0x72, 0xC4),   # 6  남색
-    RGBColor(0x2D, 0x8B, 0xBA),   # 7  바다
-    RGBColor(0x8B, 0x5C, 0xF6),   # 8  연보라
-    RGBColor(0x0E, 0x6E, 0x5C),   # 9  짙은 초록
-    RGBColor(0x3A, 0x86, 0xFF),   # 10 밝은 파란
+# Agent별 구분 색상 — 파란 계열 유지, 명도·채도 차이로 구분
+_AGENT_PALETTE = [
+    RGBColor(0x1A, 0x3C, 0x6E),   # 1  진남색 (가장 어두움)
+    RGBColor(0x2E, 0x75, 0xB6),   # 2  중간 파란
+    RGBColor(0x00, 0x82, 0x7F),   # 3  틸 (초록 기운)
+    RGBColor(0x5B, 0x9B, 0xD5),   # 4  밝은 하늘
+    RGBColor(0x4B, 0x00, 0x82),   # 5  인디고 (보라 기운)
+    RGBColor(0x00, 0xA6, 0xA0),   # 6  밝은 청록
+    RGBColor(0x41, 0x72, 0xC4),   # 7  코발트
+    RGBColor(0x7B, 0x68, 0xC4),   # 8  퍼플블루
+    RGBColor(0x00, 0x6E, 0x90),   # 9  페트롤
+    RGBColor(0x87, 0xCE, 0xEB),   # 10 스카이 (가장 밝음)
 ]
 
 
 def _agent_color(idx: int) -> RGBColor:
-    return _AGENT_BLUE_PALETTE[idx % len(_AGENT_BLUE_PALETTE)]
+    return _AGENT_PALETTE[idx % len(_AGENT_PALETTE)]
 
 
 # ── 기본 도형 헬퍼 ─────────────────────────────────────────────────────────────
@@ -426,12 +427,12 @@ def draw_service_flow(slide, workflow: dict,
         cx = agent_cxs[i]
         c = _agent_color(i)
 
-        # (A) Input → Junior AI 직접 연결 (Agent 색상, 모든 input에서)
+        # (A) Input → Junior AI 직접 연결 (Agent 색상, Input→Junior 컬럼 중앙)
         inps = agent_inputs[i]
         for inp in inps:
             sx = inp_cx.get(inp)
             if sx is not None:
-                _arrow_v(slide, sx, r[0] + input_h, r[2], c)
+                _make_cxnSp(slide, sx, r[0] + input_h, cx, r[2], color=c)
 
         # (B) Senior AI → Junior AI (빨간 = Senior 색상)
         _arrow_v(slide, cx - Cm(0.12), r[1] + senior_h, r[2], CONN_RED)

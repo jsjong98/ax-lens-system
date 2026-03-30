@@ -110,14 +110,24 @@ def _set_multiline_text(shape, lines: list[str], font_size=Pt(11), bold=False,
     elif len(lines) > 2:
         font_size = Pt(9)
 
+    import re
+    from pptx.oxml.ns import qn
+    from lxml import etree
+
     for i, line in enumerate(lines):
         if i == 0:
             para = tf.paragraphs[0]
         else:
             para = tf.add_paragraph()
 
+        # 템플릿 XML의 불릿 설정 제거 (더블 불릿 방지)
+        pPr = para._p.get_or_add_pPr()
+        for bu_tag in ['a:buChar', 'a:buAutoNum', 'a:buFont', 'a:buSzPct', 'a:buSzPts']:
+            for child in pPr.findall(qn(bu_tag)):
+                pPr.remove(child)
+        etree.SubElement(pPr, qn('a:buNone'))
+
         # 기존 bullet/기호 제거 후 bullet_char 추가 (중복 방지)
-        import re
         clean = re.sub(r'^[\s•·‧∙●○◦◉►▶▸▪▫■□◆◇\-–—»›※★☆✓✔·]+', '', line).strip()
         if bullet_char and clean:
             full_text = f"{bullet_char}{clean}"
@@ -159,11 +169,21 @@ def _add_multiline_textbox(slide, left, top, width, height, lines: list[str],
     tf.word_wrap = True
 
     import re
+    from pptx.oxml.ns import qn
+    from lxml import etree
+
     for i, line in enumerate(lines):
         if i == 0:
             para = tf.paragraphs[0]
         else:
             para = tf.add_paragraph()
+
+        # XML 불릿 설정 제거 (더블 불릿 방지)
+        pPr = para._p.get_or_add_pPr()
+        for bu_tag in ['a:buChar', 'a:buAutoNum', 'a:buFont', 'a:buSzPct', 'a:buSzPts']:
+            for child in pPr.findall(qn(bu_tag)):
+                pPr.remove(child)
+        etree.SubElement(pPr, qn('a:buNone'))
 
         # 기존 bullet 제거 후 새로 추가 (중복 방지)
         clean = re.sub(r'^[\s•·‧∙●○◦◉►▶▸▪▫■□◆◇\-–—»›※★☆✓✔·]+', '', line).strip()

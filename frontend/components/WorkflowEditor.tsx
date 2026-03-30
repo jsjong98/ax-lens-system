@@ -69,8 +69,8 @@ const BADGE_STYLE: Record<string, { bg: string; color: string; border: string }>
 
 /* ── PPT 동일 색상 상수 ─────────────────────────────────────────────────── */
 const AGENT_PALETTE = [
-  "#2E75B6", "#00A6A0", "#7B68C4", "#5B9BD5", "#00827F",
-  "#4172C4", "#2D8BBA", "#8B5CF6", "#0E6E5C", "#3A86FF",
+  "#1A3C6E", "#2E75B6", "#00827F", "#5B9BD5", "#4B0082",
+  "#00A6A0", "#4172C4", "#7B68C4", "#006E90", "#87CEEB",
 ];
 const agentColor = (idx: number) => AGENT_PALETTE[idx % AGENT_PALETTE.length];
 const C_RED    = "#8B1A1A";   // Senior AI
