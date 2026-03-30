@@ -17,6 +17,7 @@ import {
   type BenchmarkInsight,
   getProjectList,
   loadProject,
+  deleteProject,
   getNewWorkflowResult,
   type ProjectInfo,
 } from "@/lib/api";
@@ -24,7 +25,7 @@ import WorkflowEditor from "@/components/WorkflowEditor";
 import {
   Sparkles, Loader2,
   Zap, Download, Upload, FileSpreadsheet, ArrowRight,
-  FolderKanban, FolderOpen, Clock, CheckCircle2,
+  FolderKanban, FolderOpen, Clock, CheckCircle2, Trash2,
 } from "lucide-react";
 
 /* ── 색상 ────────────────────────────────────────────────────────────────── */
@@ -112,6 +113,17 @@ export default function NewWorkflowPage() {
     } finally {
       setLoadingProject(null);
       setShowHistory(false);
+    }
+  };
+
+  // 프로젝트 삭제
+  const handleDeleteProject = async (dirname: string) => {
+    if (!confirm("이 워크플로우를 삭제하시겠습니까?")) return;
+    try {
+      await deleteProject(dirname);
+      setProjects((prev) => prev.filter((p) => p.dirname !== dirname));
+    } catch {
+      alert("삭제에 실패했습니다.");
     }
   };
 
@@ -325,12 +337,19 @@ export default function NewWorkflowPage() {
                         </div>
                       </div>
                     </div>
-                    <button onClick={() => handleLoadProject(p.filename || p.dirname)}
-                      disabled={loadingProject === (p.filename || p.dirname)}
-                      className="flex-shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
-                      style={{ backgroundColor: "#A62121" }}>
-                      {loadingProject === (p.filename || p.dirname) ? "로딩..." : "불러오기"}
-                    </button>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <button onClick={() => handleLoadProject(p.filename || p.dirname)}
+                        disabled={loadingProject === (p.filename || p.dirname)}
+                        className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                        style={{ backgroundColor: "#A62121" }}>
+                        {loadingProject === (p.filename || p.dirname) ? "로딩..." : "불러오기"}
+                      </button>
+                      <button onClick={() => handleDeleteProject(p.dirname)}
+                        className="rounded-lg p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                        title="삭제">
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>

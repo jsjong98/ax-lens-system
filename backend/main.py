@@ -80,6 +80,7 @@ from auth_store import (
 from data_store import (
     save_data, load_data, clear_data, get_saved_status,
     set_current_project, get_current_project, list_projects, save_meta,
+    delete_project,
 )
 
 # ── 앱 초기화 ────────────────────────────────────────────────────────────────
@@ -315,6 +316,17 @@ async def load_project(request: Request):
         "loaded": loaded,
         "saved": get_saved_status(filename),
     }
+
+
+@app.delete("/api/projects/{dirname}", tags=["Data"])
+async def remove_project(dirname: str):
+    """프로젝트를 삭제합니다."""
+    if not dirname:
+        raise HTTPException(400, "디렉토리명이 필요합니다.")
+    ok = delete_project(dirname)
+    if not ok:
+        raise HTTPException(404, "프로젝트를 찾을 수 없습니다.")
+    return {"ok": True, "deleted": dirname}
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -277,6 +277,12 @@ export async function loadProject(filename: string): Promise<{
   });
 }
 
+export async function deleteProject(dirname: string): Promise<{ ok: boolean }> {
+  return apiFetch(`/projects/${encodeURIComponent(dirname)}`, {
+    method: "DELETE",
+  });
+}
+
 // ── Task API ─────────────────────────────────────────────────────────────────
 
 export interface TaskListParams {

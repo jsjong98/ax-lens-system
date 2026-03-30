@@ -193,3 +193,16 @@ def save_meta(filename: str, **kwargs: Any) -> None:
             pass
     meta.update(kwargs)
     meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), "utf-8")
+
+
+def delete_project(filename: str) -> bool:
+    """프로젝트 폴더 전체를 삭제합니다."""
+    import shutil
+    d = _BASE_DIR / _safe_dirname(filename)
+    if d.exists() and d.is_dir():
+        shutil.rmtree(d)
+        # 현재 프로젝트가 삭제 대상이면 current_project.json도 정리
+        if get_current_project() == filename and _CURRENT_FILE.exists():
+            _CURRENT_FILE.unlink()
+        return True
+    return False
