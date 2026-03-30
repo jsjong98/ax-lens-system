@@ -72,17 +72,20 @@ def _add_rect(slide, left, top, width, height, fill=None, border_color=None,
     return shape
 
 
-def _make_cxnSp(slide, x1, y1, x2, y2, color=LIGHT_GRAY, width=Pt(1),
-                 head_end=False, tail_end=True):
-    """OOXML 스펙에 맞는 커넥터 XML을 직접 생성합니다.
+# ── 레인 간 연결 색상 (참조 템플릿 기준) ──────────────────────────────────────
+CONN_BLUE = RGBColor(0x4D, 0xAC, 0xF1)    # Input→Senior, Senior→Junior
+CONN_GOLD = RGBColor(0xB4, 0x8E, 0x04)    # Junior→HR
+CONN_RED = RGBColor(0x8B, 0x1A, 0x1A)     # Senior→HR (감독)
+CONN_GRAY = RGBColor(0x99, 0x99, 0x99)    # Junior→Senior (피드백)
+CONN_WIDTH = 12700                          # 1pt in EMU
 
-    python-pptx의 add_connector는 XML이 불완전하여 PPT 복구 오류를 유발합니다.
-    직접 올바른 cxnSp XML을 생성하면 오류 없이 커넥터를 사용할 수 있습니다.
-    """
+
+def _make_cxnSp(slide, x1, y1, x2, y2, color=CONN_BLUE, width=CONN_WIDTH,
+                 head_end=False, tail_end=True):
+    """참조 템플릿과 동일한 OOXML cxnSp 커넥터를 생성합니다."""
     from lxml import etree
     from pptx.oxml.ns import qn
 
-    # 방향 처리: xfrm은 항상 양수 extent + flip으로 표현
     flip_h = x2 < x1
     flip_v = y2 < y1
     off_x = min(x1, x2)
@@ -90,7 +93,6 @@ def _make_cxnSp(slide, x1, y1, x2, y2, color=LIGHT_GRAY, width=Pt(1),
     cx = abs(x2 - x1)
     cy = abs(y2 - y1)
 
-    # shape ID
     sp_tree = slide.shapes._spTree
     max_id = max(
         (int(el.get('id', '0'))
@@ -99,11 +101,8 @@ def _make_cxnSp(slide, x1, y1, x2, y2, color=LIGHT_GRAY, width=Pt(1),
         default=0,
     )
     new_id = max_id + 1
+    color_hex = str(color)
 
-    # 색상 hex
-    color_hex = str(color)  # RGBColor.__str__ → "8B1A1A"
-
-    # ── XML 빌드 ──
     cxn = etree.SubElement(sp_tree, qn('p:cxnSp'))
 
     # nvCxnSpPr
@@ -111,7 +110,8 @@ def _make_cxnSp(slide, x1, y1, x2, y2, color=LIGHT_GRAY, width=Pt(1),
     cNvPr = etree.SubElement(nv, qn('p:cNvPr'))
     cNvPr.set('id', str(new_id))
     cNvPr.set('name', f'Connector {new_id}')
-    etree.SubElement(nv, qn('p:cNvCxnSpPr'))
+    cNvCxnSpPr = etree.SubElement(nv, qn('p:cNvCxnSpPr'))
+    etree.SubElement(cNvCxnSpPr, qn('a:cxnSpLocks'))
     etree.SubElement(nv, qn('p:nvPr'))
 
     # spPr
@@ -136,6 +136,7 @@ def _make_cxnSp(slide, x1, y1, x2, y2, color=LIGHT_GRAY, width=Pt(1),
 
     ln = etree.SubElement(spPr, qn('a:ln'))
     ln.set('w', str(int(width)))
+    ln.set('cap', 'sq')
 
     solidFill = etree.SubElement(ln, qn('a:solidFill'))
     srgbClr = etree.SubElement(solidFill, qn('a:srgbClr'))
@@ -144,22 +145,34 @@ def _make_cxnSp(slide, x1, y1, x2, y2, color=LIGHT_GRAY, width=Pt(1),
     if tail_end:
         te = etree.SubElement(ln, qn('a:tailEnd'))
         te.set('type', 'triangle')
-        te.set('w', 'med')
-        te.set('len', 'med')
     if head_end:
         he = etree.SubElement(ln, qn('a:headEnd'))
         he.set('type', 'triangle')
-        he.set('w', 'med')
-        he.set('len', 'med')
+
+    # p:style (참조 템플릿 동일)
+    style = etree.SubElement(cxn, qn('p:style'))
+    for ref_tag, ref_idx, clr_val in [
+        ('a:lnRef', '1', 'accent1'),
+        ('a:fillRef', '0', 'accent1'),
+        ('a:effectRef', '0', 'dk1'),
+    ]:
+        ref = etree.SubElement(style, qn(ref_tag))
+        ref.set('idx', ref_idx)
+        sc = etree.SubElement(ref, qn('a:schemeClr'))
+        sc.set('val', clr_val)
+    fontRef = etree.SubElement(style, qn('a:fontRef'))
+    fontRef.set('idx', 'minor')
+    sc = etree.SubElement(fontRef, qn('a:schemeClr'))
+    sc.set('val', 'lt1')
 
 
-def _arrow_v(slide, x, y1, y2, color=LIGHT_GRAY, width=Pt(1)):
-    """세로 화살표 (y1→y2 방향). 올바른 OOXML 커넥터 사용."""
+def _arrow_v(slide, x, y1, y2, color=CONN_BLUE, width=CONN_WIDTH):
+    """세로 화살표 (y1→y2 방향)."""
     _make_cxnSp(slide, x, y1, x, y2, color=color, width=width, tail_end=True)
 
 
-def _draw_vline(slide, x, y1, y2, color=LIGHT_GRAY, width=Pt(1)):
-    """세로선 (화살표 머리 없음). 올바른 OOXML 커넥터 사용."""
+def _draw_vline(slide, x, y1, y2, color=CONN_BLUE, width=CONN_WIDTH):
+    """세로선 (화살표 머리 없음)."""
     _make_cxnSp(slide, x, y1, x, y2, color=color, width=width, tail_end=False)
 
 
@@ -256,19 +269,18 @@ def draw_minimap(slide, workflow: dict, highlight_agent_id: str = "",
     # ── 연결선 ──
     for i in range(agent_count):
         cx = content_left + i * agent_col_w + agent_col_w / 2
-        c = _agent_color(i)
-        # Input → Senior
-        _arrow_v(slide, cx, input_top + input_h, senior_top, c, Pt(0.5))
-        # Senior → Junior
-        _arrow_v(slide, cx - Cm(0.06), senior_top + senior_h, junior_top, c, Pt(0.5))
-        # Junior → Senior
-        _arrow_v(slide, cx + Cm(0.06), junior_top, senior_top + senior_h, GRAY_ARROW, Pt(0.5))
-        # Junior → HR
-        _arrow_v(slide, cx, junior_top + junior_h, hr_top, GOLD, Pt(0.5))
+        # Input → Senior (파란)
+        _arrow_v(slide, cx, input_top + input_h, senior_top, CONN_BLUE)
+        # Senior → Junior (파란)
+        _arrow_v(slide, cx - Cm(0.06), senior_top + senior_h, junior_top, CONN_BLUE)
+        # Junior → Senior 피드백 (회색)
+        _arrow_v(slide, cx + Cm(0.06), junior_top, senior_top + senior_h, CONN_GRAY)
+        # Junior → HR (금색)
+        _arrow_v(slide, cx, junior_top + junior_h, hr_top, CONN_GOLD)
 
-    # Senior → HR 감독 (오른쪽)
+    # Senior → HR 감독선 (빨간, 오른쪽)
     rx = content_left + content_w - Cm(0.05)
-    _arrow_v(slide, rx, senior_top + senior_h, hr_top, RED, Pt(0.7))
+    _arrow_v(slide, rx, senior_top + senior_h, hr_top, CONN_RED)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -384,7 +396,7 @@ def draw_service_flow(slide, workflow: dict,
                       border_dash=7,
                       text=t.get("task_name", "")[:18], font_size=Pt(4.5), font_color=BLACK)
             if j > 0:
-                _arrow_v(slide, bx + bw / 2, ty - task_gap, ty, GOLD, Pt(0.5))
+                _arrow_v(slide, bx + bw / 2, ty - task_gap, ty, CONN_GOLD, Emu(9525))
 
     # ══ 4. HR 행 ══
     _add_rect(slide, left, r[3], label_w, hr_h,
@@ -401,26 +413,25 @@ def draw_service_flow(slide, workflow: dict,
                       text=human_tasks[0].get("human_role", "검토")[:18],
                       font_size=Pt(4.5), font_color=BLACK)
 
-    # ══ 5. 연결 화살표 ══
+    # ══ 5. 연결 화살표 (레인 간 일관된 색상) ══
     for i in range(agent_count):
         cx = agent_cxs[i]
-        c = _agent_color(i)
 
-        # (A) Input → Senior: 첫 Input만 직선
+        # (A) Input → Senior (파란)
         inps = agent_inputs[i]
         if inps:
             sx = inp_cx.get(inps[0], cx)
-            # 직선 연결 (간결)
-            _arrow_v(slide, sx, r[0] + input_h, r[1], c, Pt(0.7))
+            _arrow_v(slide, sx, r[0] + input_h, r[1], CONN_BLUE)
 
-        # (B) Senior ↔ Junior
-        _arrow_v(slide, cx - Cm(0.12), r[1] + senior_h, r[2], c, Pt(0.7))
-        _arrow_v(slide, cx + Cm(0.12), r[2], r[1] + senior_h, GRAY_ARROW, Pt(0.7))
+        # (B) Senior → Junior (파란)
+        _arrow_v(slide, cx - Cm(0.12), r[1] + senior_h, r[2], CONN_BLUE)
+        # (B') Junior → Senior 피드백 (회색)
+        _arrow_v(slide, cx + Cm(0.12), r[2], r[1] + senior_h, CONN_GRAY)
 
-        # (C) Junior → HR
-        _arrow_v(slide, cx, r[2] + junior_h, r[3], GOLD, Pt(0.7))
+        # (C) Junior → HR (금색)
+        _arrow_v(slide, cx, r[2] + junior_h, r[3], CONN_GOLD)
 
-    # (D) Senior → HR 감독선 (오른쪽 끝)
+    # (D) Senior → HR 감독선 (빨간, 오른쪽 끝)
     if agent_count > 0:
         rx = content_left + content_w - Cm(0.08)
-        _arrow_v(slide, rx, r[1] + senior_h, r[3], RED, Pt(1))
+        _arrow_v(slide, rx, r[1] + senior_h, r[3], CONN_RED)
