@@ -562,13 +562,39 @@ def _dict_to_project_design(data: dict, project_title: str = "") -> ProjectDesig
         agent_defs.append(AgentDefinition(
             agent_id=a.get("agent_id", ""),
             agent_name=a.get("agent_name", ""),
-            agent_type=a.get("agent_type", ""),
+            agent_type=a.get("agent_type", "Junior AI"),
             roles=a.get("roles", []),
             input_data=a.get("input_data", []),
             processing_steps=p_steps,
             output_data=a.get("output_data", []),
             flow_step_orders=a.get("flow_step_orders", []),
         ))
+
+    # LLM이 Senior AI를 빠뜨렸으면 자동 추가
+    has_senior = any(ad.agent_type == "Senior AI" for ad in agent_defs)
+    if not has_senior and agent_defs:
+        junior_names = [ad.agent_name for ad in agent_defs][:3]
+        senior_def = AgentDefinition(
+            agent_id="senior-auto",
+            agent_name="Senior AI 오케스트레이터",
+            agent_type="Senior AI",
+            roles=[
+                "Junior AI Agent 실행 오케스트레이션",
+                "전체 워크플로우 조율 및 결과 품질 관리",
+            ],
+            input_data=[
+                f"Junior AI 실행 결과 ({', '.join(junior_names)})" if junior_names else "Junior AI 실행 결과",
+                "업무 요청 데이터",
+            ],
+            processing_steps=[
+                ProcessingStep(1, "워크플로우 분석", "LLM", "실행 계획"),
+                ProcessingStep(2, "Junior AI 지시·조율", "오케스트레이션", "실행 결과"),
+                ProcessingStep(3, "결과 품질 검증", "LLM", "검증 보고"),
+            ],
+            output_data=["Junior AI 실행 지시", "최종 결과 품질 검증 보고"],
+            flow_step_orders=[1],
+        )
+        agent_defs = [senior_def] + agent_defs
 
     return ProjectDesign(
         project_title=project_title,
