@@ -96,6 +96,7 @@ _default_origins = [
     "http://127.0.0.1:3000",
     "https://pwc-ax-lens.com",
     "https://www.pwc-ax-lens.com",
+    "https://pwc-ax-lens.up.railway.app",
 ]
 _extra_origins = [
     o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()
