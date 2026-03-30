@@ -2,7 +2,7 @@
 ppt_flow_drawer.py — PPT에 AI Service Flow를 도형으로 직접 그리기
 
 python-pptx 도형(사각형)만 사용하여 수정 가능한 스윔레인을 그립니다.
-※ add_connector는 PPT 복구 오류를 유발하므로 사용하지 않습니다.
+※ python-pptx add_connector 대신 OOXML cxnSp XML을 직접 생성하여 PPT 복구 오류를 방지합니다.
 - draw_service_flow: 전체 AI Service Flow (과제 설계서용)
 - draw_minimap: 축소 미니맵 (Agent 정의서용, 특정 Agent 강조)
 """
@@ -43,7 +43,7 @@ def _agent_color(idx: int) -> RGBColor:
     return _AGENT_BLUE_PALETTE[idx % len(_AGENT_BLUE_PALETTE)]
 
 
-# ── 기본 도형 헬퍼 (커넥터 사용 안 함) ────────────────────────────────────────
+# ── 기본 도형 헬퍼 ─────────────────────────────────────────────────────────────
 
 def _add_rect(slide, left, top, width, height, fill=None, border_color=None,
               border_width=Pt(1), border_dash=None, text="", font_size=Pt(8),
@@ -72,49 +72,95 @@ def _add_rect(slide, left, top, width, height, fill=None, border_color=None,
     return shape
 
 
+def _make_cxnSp(slide, x1, y1, x2, y2, color=LIGHT_GRAY, width=Pt(1),
+                 head_end=False, tail_end=True):
+    """OOXML 스펙에 맞는 커넥터 XML을 직접 생성합니다.
+
+    python-pptx의 add_connector는 XML이 불완전하여 PPT 복구 오류를 유발합니다.
+    직접 올바른 cxnSp XML을 생성하면 오류 없이 커넥터를 사용할 수 있습니다.
+    """
+    from lxml import etree
+    from pptx.oxml.ns import qn
+
+    # 방향 처리: xfrm은 항상 양수 extent + flip으로 표현
+    flip_h = x2 < x1
+    flip_v = y2 < y1
+    off_x = min(x1, x2)
+    off_y = min(y1, y2)
+    cx = abs(x2 - x1)
+    cy = abs(y2 - y1)
+
+    # shape ID
+    sp_tree = slide.shapes._spTree
+    max_id = max(
+        (int(el.get('id', '0'))
+         for el in sp_tree.iter()
+         if el.get('id', '').isdigit()),
+        default=0,
+    )
+    new_id = max_id + 1
+
+    # 색상 hex
+    color_hex = str(color)  # RGBColor.__str__ → "8B1A1A"
+
+    # ── XML 빌드 ──
+    cxn = etree.SubElement(sp_tree, qn('p:cxnSp'))
+
+    # nvCxnSpPr
+    nv = etree.SubElement(cxn, qn('p:nvCxnSpPr'))
+    cNvPr = etree.SubElement(nv, qn('p:cNvPr'))
+    cNvPr.set('id', str(new_id))
+    cNvPr.set('name', f'Connector {new_id}')
+    etree.SubElement(nv, qn('p:cNvCxnSpPr'))
+    etree.SubElement(nv, qn('p:nvPr'))
+
+    # spPr
+    spPr = etree.SubElement(cxn, qn('p:spPr'))
+
+    xfrm = etree.SubElement(spPr, qn('a:xfrm'))
+    if flip_h:
+        xfrm.set('flipH', '1')
+    if flip_v:
+        xfrm.set('flipV', '1')
+
+    off = etree.SubElement(xfrm, qn('a:off'))
+    off.set('x', str(int(off_x)))
+    off.set('y', str(int(off_y)))
+    ext = etree.SubElement(xfrm, qn('a:ext'))
+    ext.set('cx', str(int(cx)))
+    ext.set('cy', str(int(cy)))
+
+    prstGeom = etree.SubElement(spPr, qn('a:prstGeom'))
+    prstGeom.set('prst', 'line')
+    etree.SubElement(prstGeom, qn('a:avLst'))
+
+    ln = etree.SubElement(spPr, qn('a:ln'))
+    ln.set('w', str(int(width)))
+
+    solidFill = etree.SubElement(ln, qn('a:solidFill'))
+    srgbClr = etree.SubElement(solidFill, qn('a:srgbClr'))
+    srgbClr.set('val', color_hex)
+
+    if tail_end:
+        te = etree.SubElement(ln, qn('a:tailEnd'))
+        te.set('type', 'triangle')
+        te.set('w', 'med')
+        te.set('len', 'med')
+    if head_end:
+        he = etree.SubElement(ln, qn('a:headEnd'))
+        he.set('type', 'triangle')
+        he.set('w', 'med')
+        he.set('len', 'med')
+
+
 def _arrow_v(slide, x, y1, y2, color=LIGHT_GRAY, width=Pt(1)):
-    """세로 화살표 (직사각형 선 + 삼각형 머리). add_connector 미사용 — PPT 복구 오류 방지."""
-    line_w = max(int(width), Emu(12700))  # 최소 1pt
-    length = abs(y2 - y1)
-    top_y = min(y1, y2)
-    arrow_size = Cm(0.12)
-
-    # 삼각형 화살표 머리 (끝점 방향)
-    if y2 > y1:
-        # 아래 방향
-        body_len = length - arrow_size
-        if body_len > 0:
-            shape = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, x - line_w // 2, y1, line_w, body_len)
-            shape.fill.solid()
-            shape.fill.fore_color.rgb = color
-            shape.line.fill.background()
-        tri = slide.shapes.add_shape(MSO_SHAPE.ISOSCELES_TRIANGLE, x - Cm(0.08), y2 - arrow_size, Cm(0.16), arrow_size)
-    else:
-        # 위 방향
-        body_len = length - arrow_size
-        if body_len > 0:
-            shape = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, x - line_w // 2, y2 + arrow_size, line_w, body_len)
-            shape.fill.solid()
-            shape.fill.fore_color.rgb = color
-            shape.line.fill.background()
-        tri = slide.shapes.add_shape(MSO_SHAPE.ISOSCELES_TRIANGLE, x - Cm(0.08), y2, Cm(0.16), arrow_size)
-        tri.rotation = 180.0
-
-    tri.fill.solid()
-    tri.fill.fore_color.rgb = color
-    tri.line.fill.background()
+    """세로 화살표 (y1→y2 방향). 올바른 OOXML 커넥터 사용."""
+    _make_cxnSp(slide, x, y1, x, y2, color=color, width=width, tail_end=True)
 
 
 def _draw_vline(slide, x, y1, y2, color=LIGHT_GRAY, width=Pt(1)):
-    """세로선 (화살표 없음). add_connector 미사용 — PPT 복구 오류 방지."""
-    line_w = max(int(width), Emu(12700))
-    top_y = min(y1, y2)
-    length = abs(y2 - y1)
-    shape = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, x - line_w // 2, top_y, line_w, length)
-    shape.fill.solid()
-    shape.fill.fore_color.rgb = color
-    shape.line.fill.background()
-    return shape
+    """세로선 (화살표 머리 없음). 올바른 OOXML 커넥터 사용."""
+    _make_cxnSp(slide, x, y1, x, y2, color=color, width=width, tail_end=False)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
