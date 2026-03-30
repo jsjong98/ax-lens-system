@@ -676,6 +676,31 @@ def generate_project_design_fallback(
             flow_step_orders=[idx + 2],
         ))
 
+    # Senior AI가 없으면 오케스트레이터 Agent 자동 생성
+    has_senior = any(ad.agent_type == "Senior AI" for ad in agent_defs)
+    if not has_senior and agent_defs:
+        junior_names = [ad.agent_name for ad in agent_defs]
+        senior_input = [f"Junior AI 실행 결과 ({', '.join(junior_names[:3])})", "업무 요청 데이터"]
+        senior_output = ["Junior AI 실행 지시", "최종 결과 품질 검증 보고"]
+        senior_def = AgentDefinition(
+            agent_id="senior-auto",
+            agent_name=f"{process_name} 오케스트레이터",
+            agent_type="Senior AI",
+            roles=[
+                "Junior AI Agent 실행 오케스트레이션",
+                "전체 워크플로우 조율 및 결과 품질 관리",
+            ],
+            input_data=senior_input,
+            processing_steps=[
+                ProcessingStep(1, "워크플로우 분석", "LLM", "실행 계획"),
+                ProcessingStep(2, "Junior AI 지시·조율", "오케스트레이션", "실행 결과"),
+                ProcessingStep(3, "결과 품질 검증", "LLM", "검증 보고"),
+            ],
+            output_data=senior_output,
+            flow_step_orders=[1],
+        )
+        agent_defs = [senior_def] + agent_defs
+
     # Flow steps 기본 생성
     steps = [
         AIServiceFlowStep(1, "전략 수립 및 오케스트레이션", "Senior AI", "전체 워크플로우 조율"),
