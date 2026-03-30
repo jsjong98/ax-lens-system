@@ -8,15 +8,18 @@ from __future__ import annotations
 from typing import Any
 
 
-# Agent별 구분 파란 계열 팔레트 (최대 7개 Agent)
+# Agent별 구분 파란 계열 팔레트 (최대 10개 Agent — PPT와 동일)
 _AGENT_PALETTE = [
-    "#2E75B6",   # 진한 파랑
-    "#00A6A0",   # 청록(틸)
-    "#5B9BD5",   # 하늘색
-    "#7B68C4",   # 보라-파랑
-    "#00827F",   # 짙은 청록
-    "#4172C4",   # 코발트
-    "#2D8BBA",   # 세룰리안
+    "#2E75B6",   # 1  파란
+    "#00A6A0",   # 2  청록
+    "#7B68C4",   # 3  보라
+    "#5B9BD5",   # 4  하늘
+    "#00827F",   # 5  틸
+    "#4172C4",   # 6  남색
+    "#2D8BBA",   # 7  바다
+    "#8B5CF6",   # 8  연보라
+    "#0E6E5C",   # 9  짙은 초록
+    "#3A86FF",   # 10 밝은 파란
 ]
 
 
@@ -74,9 +77,9 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Malgun Gothic', sans-ser
 .aru .hd { width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-bottom: 6px solid #9E9E9E; }
 .bot-arr { display: flex; flex-direction: column; align-items: center; padding-top: 5px; gap: 2px; }
 .ardb { display: flex; flex-direction: column; align-items: center; }
-.ardb .ln { width: 1.5px; height: 16px; background: #AA8E2A; }
-.ardb .hd { width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 6px solid #AA8E2A; }
-.bot-lbl { font-size: 7.5px; font-weight: 600; color: #AA8E2A; font-style: italic; }
+.ardb .ln { width: 1.5px; height: 16px; background: #B48E04; }
+.ardb .hd { width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 6px solid #B48E04; }
+.bot-lbl { font-size: 7.5px; font-weight: 600; color: #B48E04; font-style: italic; }
 .agent-box { border-radius: 8px; padding: 10px; background: #FEFAF0; flex: 1; }
 .ah { display: flex; align-items: center; gap: 7px; margin-bottom: 9px; }
 .an { width: 20px; height: 20px; border-radius: 50%; background: #AA8E2A; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; color: #fff; flex-shrink: 0; }
@@ -195,11 +198,10 @@ def export_workflow_html(workflow: dict) -> str:
     # Junior AI 행
     circled = "①②③④⑤⑥⑦⑧⑨⑩"
 
-    # 커넥터 행 — Agent별 색상 화살표
+    # 커넥터 행 — Senior→Junior: RED (#8B1A1A), Junior→Senior: GRAY (#9E9E9E)
     connectors_html = ""
     for i, agent in enumerate(agents):
         num = circled[i] if i < len(circled) else str(i + 1)
-        color = _agent_color(i)
 
         parallel = " (병렬)" if i > 0 and i < len(agents) - 1 else ""
         sequential = " (순차)" if i == len(agents) - 1 and len(agents) > 1 else ""
@@ -207,8 +209,8 @@ def export_workflow_html(workflow: dict) -> str:
         connectors_html += f"""
           <div class="conn">
             <div class="cs">
-              <span class="lbl-down" style="color:{color};">{num} {agent.get('agent_name', '')}<br>지시{parallel}{sequential}</span>
-              <div class="ard"><div class="ln" style="background:{color};"></div><div class="hd" style="border-top-color:{color};"></div></div>
+              <span class="lbl-down" style="color:#8B1A1A;">{num} {agent.get('agent_name', '')}<br>지시{parallel}{sequential}</span>
+              <div class="ard"><div class="ln" style="background:#8B1A1A;"></div><div class="hd" style="border-top-color:#8B1A1A;"></div></div>
             </div>
             <div class="cs">
               <div class="aru"><div class="ln"></div><div class="hd"></div></div>
@@ -361,12 +363,14 @@ def export_workflow_html(workflow: dict) -> str:
       </div>
     </div>
 
-    <!-- HR 담당자 -->
+    <!-- HR 담당자 (Senior AI → HR 감독: RED) -->
     <div class="row bg-human">
       <div class="row-label"><div class="row-icon">👤</div><div class="row-name name-human">HR<br>담당자</div></div>
       <div class="row-content">
-        <div class="agents-grid" style="grid-template-columns: {grid_cols};">
-          {hr_html}
+        <div class="oversight-line">
+          <div class="agents-grid" style="grid-template-columns: {grid_cols};">
+            {hr_html}
+          </div>{'<div class="oversight-bar"></div><div class="oversight-lbl">Senior AI 감독</div>' if human_tasks else ''}
         </div>
       </div>
     </div>

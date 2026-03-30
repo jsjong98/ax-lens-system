@@ -1090,6 +1090,26 @@ def _build_execution_steps(senior: SeniorAgent) -> list[dict]:
     return steps
 
 
+# ── Agent 색상 팔레트 (PPT와 동일 10색) ───────────────────────────────────────
+_AGENT_BLUE_PALETTE = [
+    "#2E75B6",   # 1  파란
+    "#00A6A0",   # 2  청록
+    "#7B68C4",   # 3  보라
+    "#5B9BD5",   # 4  하늘
+    "#00827F",   # 5  틸
+    "#4172C4",   # 6  남색
+    "#2D8BBA",   # 7  바다
+    "#8B5CF6",   # 8  연보라
+    "#0E6E5C",   # 9  짙은 초록
+    "#3A86FF",   # 10 밝은 파란
+]
+
+
+def _agent_color(idx: int) -> str:
+    """Agent 인덱스에 대응하는 파란 계열 색상 hex를 반환."""
+    return _AGENT_BLUE_PALETTE[idx % len(_AGENT_BLUE_PALETTE)]
+
+
 # ── React Flow 생성 ───────────────────────────────────────────────────────────
 
 def _generate_react_flow(
@@ -1131,6 +1151,11 @@ def _generate_react_flow(
         },
     })
 
+    # Junior Agent 인덱스 매핑 (색상용)
+    junior_idx_map: dict[str, int] = {
+        j.id: i for i, j in enumerate(senior.junior_agents)
+    }
+
     prev_step_node_ids: list[str] = [senior_node_id]
 
     for step_idx, flow_step in enumerate(senior.orchestration_flow):
@@ -1142,6 +1167,7 @@ def _generate_react_flow(
             junior = next((j for j in senior.junior_agents if j.id == agent_id), None)
             if junior:
                 jnode_id = f"tobe-{junior.id}"
+                j_color = _agent_color(junior_idx_map.get(junior.id, 0))
 
                 # Input Source 노드 (Junior Agent 위에 배치)
                 for si, src in enumerate(junior.input_sources):
@@ -1162,15 +1188,15 @@ def _generate_react_flow(
                             "sourceType": src.source_type,
                         },
                     })
-                    # Input → Junior Agent 엣지
+                    # Input → Junior Agent 엣지 (Agent별 고유 색상)
                     edges.append({
                         "id": f"e-{inp_node_id}-{jnode_id}",
                         "source": inp_node_id,
                         "target": jnode_id,
                         "type": "smoothstep",
                         "animated": False,
-                        "style": {"stroke": "#60A5FA", "strokeWidth": 1.5},
-                        "markerEnd": {"type": "arrowclosed", "color": "#60A5FA"},
+                        "style": {"stroke": j_color, "strokeWidth": 1.5},
+                        "markerEnd": {"type": "arrowclosed", "color": j_color},
                         "label": src.source_type,
                     })
 
@@ -1286,6 +1312,57 @@ def _generate_react_flow(
 
         prev_step_node_ids = step_node_ids
         current_x = branch_x + NODE_GAP_X // 2
+
+    # ── Junior → Senior 피드백 엣지 (GRAY #999999) ──
+    for junior in senior.junior_agents:
+        jnode_id = f"tobe-{junior.id}"
+        edges.append({
+            "id": f"e-feedback-{jnode_id}-{senior_node_id}",
+            "source": jnode_id,
+            "target": senior_node_id,
+            "type": "smoothstep",
+            "animated": False,
+            "style": {"stroke": "#999999", "strokeWidth": 1.5, "strokeDasharray": "4 2"},
+            "markerEnd": {"type": "arrowclosed", "color": "#999999"},
+            "label": "결과 반환",
+        })
+
+    # ── Junior → HR 엣지 (GOLD #B48E04) — human_role이 있는 태스크의 Agent만 ──
+    for junior in senior.junior_agents:
+        has_human = any(
+            t.classification == "AI + Human" for t in junior.tasks
+        )
+        if has_human:
+            jnode_id = f"tobe-{junior.id}"
+            # 해당 Agent와 매칭되는 Human 노드 찾기
+            for hs in senior.human_steps:
+                hnode_id = f"tobe-{hs.id}"
+                if any(t.task_id == hs.task_id for t in junior.tasks):
+                    edges.append({
+                        "id": f"e-jr-hr-{jnode_id}-{hnode_id}",
+                        "source": jnode_id,
+                        "target": hnode_id,
+                        "type": "smoothstep",
+                        "animated": False,
+                        "style": {"stroke": "#B48E04", "strokeWidth": 2},
+                        "markerEnd": {"type": "arrowclosed", "color": "#B48E04"},
+                        "label": "검토 요청",
+                    })
+
+    # ── Senior → HR 감독 엣지 (RED #8B1A1A) ──
+    if senior.human_steps:
+        for hs in senior.human_steps:
+            hnode_id = f"tobe-{hs.id}"
+            edges.append({
+                "id": f"e-supervision-{senior_node_id}-{hnode_id}",
+                "source": senior_node_id,
+                "target": hnode_id,
+                "type": "smoothstep",
+                "animated": False,
+                "style": {"stroke": "#8B1A1A", "strokeWidth": 1.5, "strokeDasharray": "6 3"},
+                "markerEnd": {"type": "arrowclosed", "color": "#8B1A1A"},
+                "label": "감독",
+            })
 
     return {
         "version": "1.0",

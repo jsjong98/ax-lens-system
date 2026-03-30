@@ -456,9 +456,7 @@ def _fill_design_slide(slide, design: dict, definition: dict | None = None):
     io_data = design.get("input_output", {})
 
     def _limit3(items: list[str]) -> list[str]:
-        """최대 3줄. 3줄 안에 다 넣되, 초과분은 마지막 줄에 합침."""
-        if len(items) <= 3:
-            return items
+        """최대 3개 항목만 표시."""
         return items[:3]
 
     io_88 = _find_shape(slide, "직사각형 88")

@@ -210,10 +210,11 @@ Step B. AI 기술 유형 분석
     5) 자동화: RPA
   — 구체적인 기술 이름도 나열합니다 (예: Web Crawling, RAG, LLM, Topic Modeling 등).
 
-Step C. Input/Output 정의
-  — 내부 Input: 사내 시스템·데이터·문서 등
-  — 외부 Input: 외부 매체·DB·API 등
-  — Output: 최종 산출물
+Step C. Input/Output 정의 (각 항목 정확히 3개씩, MECE하게)
+  — 내부 Input: 사내 시스템·데이터·문서 등. 유사 항목은 괄호로 묶어서 **정확히 3개**로 작성.
+  — 외부 Input: 외부 매체·DB·API 등. 없으면 1개만. 있으면 **최대 3개**.
+  — Output: 최종 산출물. 유사 산출물은 묶어서 **정확히 3개**로 작성.
+  — 예: "직원 정보 (프로파일, 근태, 이력)" ← 이렇게 유사 항목을 괄호 안에 묶어 3개로 정리.
 
 Step D. Agent 정의서 (별첨) — Agent별 1장씩 상세 작성
   — 각 Agent에 대해:
@@ -362,7 +363,7 @@ Step D. Agent 정의서 (별첨) — Agent별 1장씩 상세 작성
 - tech_types의 category는 5개 고정 카테고리만 사용하세요.
 - checked에는 해당 카테고리의 sub_types 중 실제 사용되는 것만 넣으세요.
 - tech_names에는 구체적 기술·프레임워크 이름을 넣으세요.
-- input_output의 내부/외부를 명확히 구분하세요.
+- input_output의 내부/외부를 명확히 구분하세요. **각 항목은 정확히 3개씩** MECE하게 작성하세요. 유사 항목은 괄호로 묶어 통합.
 - agent_definitions에는 Senior AI, Junior AI 모두 포함하세요.
 - agent_definitions의 roles는 이 Agent가 하는 역할을 구체적 bullet 리스트로 작성하세요. (최대 3~4개)
 - agent_definitions의 input_data는 **최대 3~4개 항목**으로 유사한 것끼리 묶어서 작성하세요.
@@ -775,9 +776,9 @@ def generate_project_design_fallback(
             tech_names=list(all_techniques) or ["LLM"],
         ),
         input_output=InputOutput(
-            input_internal=list(all_input)[:5] if all_input else ["사내 시스템 데이터"],
+            input_internal=list(all_input)[:3] if all_input else ["사내 시스템 데이터"],
             input_external=["외부 데이터 소스"],
-            output=list(all_output)[:5] if all_output else ["AI 분석 결과 보고서"],
+            output=list(all_output)[:3] if all_output else ["AI 분석 결과 보고서"],
         ),
         agent_definitions=agent_defs,
     )
