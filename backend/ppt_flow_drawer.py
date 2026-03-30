@@ -73,28 +73,48 @@ def _add_rect(slide, left, top, width, height, fill=None, border_color=None,
 
 
 def _arrow_v(slide, x, y1, y2, color=LIGHT_GRAY, width=Pt(1)):
-    """세로 화살표 (커넥터 + 화살표 머리). y1→y2 방향으로 화살표 표시."""
-    from lxml import etree
-    cx = slide.shapes.add_connector(1, x, y1, x, y2)
-    cx.line.color.rgb = color
-    cx.line.width = width
-    ns = '{http://schemas.openxmlformats.org/drawingml/2006/main}'
-    ln = cx._element.find(f'.//{ns}ln')
-    if ln is not None:
-        # 끝점(y2 방향)에 화살표
-        tail = etree.SubElement(ln, f'{ns}tailEnd')
-        tail.set('type', 'triangle')
-        tail.set('w', 'med')
-        tail.set('len', 'med')
-    return cx
+    """세로 화살표 (직사각형 선 + 삼각형 머리). add_connector 미사용 — PPT 복구 오류 방지."""
+    line_w = max(int(width), Emu(12700))  # 최소 1pt
+    length = abs(y2 - y1)
+    top_y = min(y1, y2)
+    arrow_size = Cm(0.12)
+
+    # 삼각형 화살표 머리 (끝점 방향)
+    if y2 > y1:
+        # 아래 방향
+        body_len = length - arrow_size
+        if body_len > 0:
+            shape = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, x - line_w // 2, y1, line_w, body_len)
+            shape.fill.solid()
+            shape.fill.fore_color.rgb = color
+            shape.line.fill.background()
+        tri = slide.shapes.add_shape(MSO_SHAPE.ISOSCELES_TRIANGLE, x - Cm(0.08), y2 - arrow_size, Cm(0.16), arrow_size)
+    else:
+        # 위 방향
+        body_len = length - arrow_size
+        if body_len > 0:
+            shape = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, x - line_w // 2, y2 + arrow_size, line_w, body_len)
+            shape.fill.solid()
+            shape.fill.fore_color.rgb = color
+            shape.line.fill.background()
+        tri = slide.shapes.add_shape(MSO_SHAPE.ISOSCELES_TRIANGLE, x - Cm(0.08), y2, Cm(0.16), arrow_size)
+        tri.rotation = 180.0
+
+    tri.fill.solid()
+    tri.fill.fore_color.rgb = color
+    tri.line.fill.background()
 
 
 def _draw_vline(slide, x, y1, y2, color=LIGHT_GRAY, width=Pt(1)):
-    """세로선 (화살표 없음)."""
-    cx = slide.shapes.add_connector(1, x, y1, x, y2)
-    cx.line.color.rgb = color
-    cx.line.width = width
-    return cx
+    """세로선 (화살표 없음). add_connector 미사용 — PPT 복구 오류 방지."""
+    line_w = max(int(width), Emu(12700))
+    top_y = min(y1, y2)
+    length = abs(y2 - y1)
+    shape = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, x - line_w // 2, top_y, line_w, length)
+    shape.fill.solid()
+    shape.fill.fore_color.rgb = color
+    shape.line.fill.background()
+    return shape
 
 
 # ══════════════════════════════════════════════════════════════════════════════
