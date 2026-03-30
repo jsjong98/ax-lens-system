@@ -116,11 +116,12 @@ def _set_multiline_text(shape, lines: list[str], font_size=Pt(11), bold=False,
         else:
             para = tf.add_paragraph()
 
-        # bullet_char 중복 방지: 이미 •로 시작하면 추가하지 않음
-        if bullet_char and not line.startswith(bullet_char):
-            full_text = f"{bullet_char}{line}"
+        # 기존 bullet/기호 제거 후 bullet_char 추가 (중복 방지)
+        clean = line.strip().lstrip("•·-–— ").strip()
+        if bullet_char and clean:
+            full_text = f"{bullet_char}{clean}"
         else:
-            full_text = line
+            full_text = clean
         run = para.add_run()
         run.text = full_text
         run.font.size = font_size
@@ -393,7 +394,44 @@ def _fill_design_slide(slide, design: dict, definition: dict | None = None):
     if date_shape:
         _set_text(date_shape, f"작성일: {created_date}   |   작성자: {author}")
 
-    # 8. AI 기술 유형 — 기술 이름 (공통 중복 제거, bullet 없이 쉼표 나열)
+    # 8. AI 기술 유형 — 체크박스 ✓ 표시
+    _CHECKBOX_MAP = {
+        # label text → checkbox shape name
+        "정보 추출": "직사각형 34",
+        "텍스트 생성": "직사각형 35",
+        "대화형 인터페이스": "직사각형 36",
+        "멀티모달 처리": "직사각형 57",
+        "예측": "직사각형 134",
+        "군집 · 분류": "직사각형 132",
+        "최적화": "직사각형 147",
+        "추천": "직사각형 145",
+        "RPA": "직사각형 160",
+        "OCR": "직사각형 158",
+    }
+    tech_types = design.get("ai_tech_info", {}).get("tech_types", [])
+    checked_labels: set[str] = set()
+    for tt in tech_types:
+        for item in tt.get("checked", []):
+            checked_labels.add(item)
+
+    for label, cb_shape_name in _CHECKBOX_MAP.items():
+        if label in checked_labels:
+            cb_shape = _find_shape(slide, cb_shape_name)
+            if cb_shape:
+                cb_shape.fill.solid()
+                cb_shape.fill.fore_color.rgb = PWC_RED
+                # ✓ 텍스트 추가
+                if cb_shape.has_text_frame:
+                    tf = cb_shape.text_frame
+                    tf.clear()
+                    p = tf.paragraphs[0]
+                    run = p.add_run()
+                    run.text = "✓"
+                    run.font.size = Pt(8)
+                    run.font.color.rgb = WHITE
+                    run.font.bold = True
+
+    # 8. AI 기술 유형 — 기술 이름 (공통 중복 제거, bullet 없이 쉼표 나열, 최대 8개)
     tech_names_shape = _find_shape(slide, "직사각형 37")
     if tech_names_shape:
         tech_names_raw = design.get("ai_tech_info", {}).get("tech_names", [])
@@ -404,7 +442,10 @@ def _fill_design_slide(slide, design: dict, definition: dict | None = None):
             if tn not in seen:
                 seen.add(tn)
                 tech_deduped.append(tn)
-        tech_text = ", ".join(tech_deduped)
+        if len(tech_deduped) > 8:
+            tech_text = ", ".join(tech_deduped[:7]) + f" 외 {len(tech_deduped)-7}개"
+        else:
+            tech_text = ", ".join(tech_deduped)
         _set_text(tech_names_shape, tech_text, font_size=Pt(8), color=DARK)
 
     # 9. Input / Output (각각 최대 3줄)
@@ -448,18 +489,32 @@ def _fill_agent_slide(slide, agent: dict, design: dict, definition: dict | None 
     if name_shape:
         _set_text(name_shape, agent.get("agent_name", ""))
 
-    # Agent 유형 — Senior AI / Junior AI 표시 (직사각형 11 안에 두 줄로 존재)
+    # Agent 유형 — Senior AI / Junior AI 표시
+    # 타원 8 = Senior AI 옆 원, 타원 10 = Junior AI 옆 원
+    # 선택된 쪽은 채움(●), 미선택은 비움(○)
     agent_type = agent.get("agent_type", "Junior AI")
-    type_shapes = _find_shapes_containing(slide, "Senior AI")
-    for s in type_shapes:
-        if s.has_text_frame:
-            for para in s.text_frame.paragraphs:
-                for run in para.runs:
-                    txt = run.text.strip()
-                    if "Senior" in txt:
-                        run.text = "● Senior AI" if agent_type == "Senior AI" else "○ Senior AI"
-                    elif "Junior" in txt:
-                        run.text = "● Junior AI" if agent_type != "Senior AI" else "○ Junior AI"
+    is_senior = agent_type == "Senior AI"
+
+    senior_oval = _find_shape(slide, "타원 8")
+    junior_oval = _find_shape(slide, "타원 10")
+
+    if senior_oval:
+        if is_senior:
+            senior_oval.fill.solid()
+            senior_oval.fill.fore_color.rgb = BLACK
+        else:
+            senior_oval.fill.background()
+            senior_oval.line.color.rgb = GRAY
+            senior_oval.line.width = Pt(1)
+
+    if junior_oval:
+        if not is_senior:
+            junior_oval.fill.solid()
+            junior_oval.fill.fore_color.rgb = BLACK
+        else:
+            junior_oval.fill.background()
+            junior_oval.line.color.rgb = GRAY
+            junior_oval.line.width = Pt(1)
 
     # Agent 역할
     roles = agent.get("roles", [])
