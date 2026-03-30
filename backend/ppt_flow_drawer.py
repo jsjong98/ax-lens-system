@@ -266,17 +266,18 @@ def draw_minimap(slide, workflow: dict, highlight_agent_id: str = "",
         _add_rect(slide, bx, hr_top + Cm(0.05), bw, hr_h - Cm(0.1),
                   fill=GRAY_BG, border_color=GRAY_ARROW, border_width=Pt(0.3))
 
-    # ── 연결선 ──
+    # ── 연결선 (Agent별 고유 색상으로 체인 전체 연결) ──
     for i in range(agent_count):
         cx = content_left + i * agent_col_w + agent_col_w / 2
-        # Input → Senior (파란)
-        _arrow_v(slide, cx, input_top + input_h, senior_top, CONN_BLUE)
-        # Senior → Junior (파란)
-        _arrow_v(slide, cx - Cm(0.06), senior_top + senior_h, junior_top, CONN_BLUE)
+        c = _agent_color(i)
+        # Input → Senior (Agent 색상)
+        _arrow_v(slide, cx, input_top + input_h, senior_top, c)
+        # Senior → Junior (Agent 색상)
+        _arrow_v(slide, cx - Cm(0.06), senior_top + senior_h, junior_top, c)
         # Junior → Senior 피드백 (회색)
         _arrow_v(slide, cx + Cm(0.06), junior_top, senior_top + senior_h, CONN_GRAY)
-        # Junior → HR (금색)
-        _arrow_v(slide, cx, junior_top + junior_h, hr_top, CONN_GOLD)
+        # Junior → HR (Agent 색상)
+        _arrow_v(slide, cx, junior_top + junior_h, hr_top, c)
 
     # Senior → HR 감독선 (빨간, 오른쪽)
     rx = content_left + content_w - Cm(0.05)
@@ -413,23 +414,24 @@ def draw_service_flow(slide, workflow: dict,
                       text=human_tasks[0].get("human_role", "검토")[:18],
                       font_size=Pt(4.5), font_color=BLACK)
 
-    # ══ 5. 연결 화살표 (레인 간 일관된 색상) ══
+    # ══ 5. 연결 화살표 (Agent별 고유 색상으로 체인 전체 연결) ══
     for i in range(agent_count):
         cx = agent_cxs[i]
+        c = _agent_color(i)
 
-        # (A) Input → Senior (파란)
+        # (A) Input → Senior (Agent 색상)
         inps = agent_inputs[i]
         if inps:
             sx = inp_cx.get(inps[0], cx)
-            _arrow_v(slide, sx, r[0] + input_h, r[1], CONN_BLUE)
+            _arrow_v(slide, sx, r[0] + input_h, r[1], c)
 
-        # (B) Senior → Junior (파란)
-        _arrow_v(slide, cx - Cm(0.12), r[1] + senior_h, r[2], CONN_BLUE)
+        # (B) Senior → Junior (Agent 색상)
+        _arrow_v(slide, cx - Cm(0.12), r[1] + senior_h, r[2], c)
         # (B') Junior → Senior 피드백 (회색)
         _arrow_v(slide, cx + Cm(0.12), r[2], r[1] + senior_h, CONN_GRAY)
 
-        # (C) Junior → HR (금색)
-        _arrow_v(slide, cx, r[2] + junior_h, r[3], CONN_GOLD)
+        # (C) Junior → HR (Agent 색상)
+        _arrow_v(slide, cx, r[2] + junior_h, r[3], c)
 
     # (D) Senior → HR 감독선 (빨간, 오른쪽 끝)
     if agent_count > 0:
