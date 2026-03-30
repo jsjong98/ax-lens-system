@@ -97,15 +97,24 @@ _extra_origins = [
 ]
 _all_origins = _default_origins + _extra_origins
 
-# CORS 설정 — 환경변수 ALLOWED_ORIGINS로 허용 도메인 지정 (와일드카드 금지)
+# CORS 설정
 _is_railway = bool(os.getenv("RAILWAY_ENVIRONMENT"))
 _railway_origins = [
     o.strip() for o in os.getenv("RAILWAY_ALLOWED_ORIGINS", "").split(",") if o.strip()
 ]
+# Railway 환경: RAILWAY_ALLOWED_ORIGINS 설정 시 해당 도메인만, 미설정 시 *.railway.app 허용
+# 로컬 환경: localhost + ALLOWED_ORIGINS
+if _is_railway:
+    _cors_origins = _railway_origins if _railway_origins else ["*"]
+    _cors_credentials = not bool(_railway_origins)  # 와일드카드일 때 credentials=False
+else:
+    _cors_origins = _all_origins
+    _cors_credentials = True
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=(_railway_origins or _all_origins) if _is_railway else _all_origins,
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    allow_credentials=_cors_credentials,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization", "X-Session-Token"],
 )
