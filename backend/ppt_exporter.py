@@ -158,16 +158,19 @@ def _add_multiline_textbox(slide, left, top, width, height, lines: list[str],
     tf = txBox.text_frame
     tf.word_wrap = True
 
+    import re
     for i, line in enumerate(lines):
         if i == 0:
             para = tf.paragraphs[0]
         else:
             para = tf.add_paragraph()
 
-        if bullet and not line.startswith(bullet):
-            full_text = f"{bullet}{line}"
+        # 기존 bullet 제거 후 새로 추가 (중복 방지)
+        clean = re.sub(r'^[\s•·‧∙●○◦◉►▶▸▪▫■□◆◇\-–—»›※★☆✓✔·]+', '', line).strip()
+        if bullet and clean:
+            full_text = f"{bullet}{clean}"
         else:
-            full_text = line
+            full_text = clean
         run = para.add_run()
         run.text = full_text
         run.font.size = font_size
@@ -453,9 +456,10 @@ def _fill_design_slide(slide, design: dict, definition: dict | None = None):
     io_data = design.get("input_output", {})
 
     def _limit3(items: list[str]) -> list[str]:
+        """최대 3줄. 3줄 안에 다 넣되, 초과분은 마지막 줄에 합침."""
         if len(items) <= 3:
             return items
-        return items[:2] + [f"외 {len(items)-2}개"]
+        return items[:3]
 
     io_88 = _find_shape(slide, "직사각형 88")
     if io_88:

@@ -227,7 +227,7 @@ def draw_minimap(slide, workflow: dict, highlight_agent_id: str = "",
               text="Senior\nAI", font_size=Pt(4), font_color=RED)
     _add_rect(slide, content_left, senior_top + Cm(0.04),
               content_w, senior_h - Cm(0.08),
-              fill=RED_BG, border_color=RED, border_width=Pt(0.7))
+              fill=RED_BG, border_color=RED, border_width=Pt(1.5))
 
     # ── Junior AI 행 ──
     _add_rect(slide, left, junior_top, label_w, junior_h,
@@ -345,7 +345,7 @@ def draw_service_flow(slide, workflow: dict,
                     input_owner[inp] = ai
         agent_inputs.append(inps)
 
-    all_inps = list(dict.fromkeys(i for ai in agent_inputs for i in ai))[:6]
+    all_inps = list(dict.fromkeys(i for ai in agent_inputs for i in ai))[:10]
     inp_w = content_w / max(len(all_inps), 1)
     inp_cx: dict[str, int] = {}
 
