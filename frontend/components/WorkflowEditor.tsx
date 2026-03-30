@@ -10,6 +10,7 @@ interface InputBox {
   id: string;
   title: string;
   subtitle: string;
+  ownerAgent: number; // agent index (for color)
 }
 
 interface TaskBox {
@@ -66,6 +67,17 @@ const BADGE_STYLE: Record<string, { bg: string; color: string; border: string }>
   bo:  { bg: "#EEEDFE", color: "#3C3489", border: "#7F77DD" },
 };
 
+/* ── PPT 동일 색상 상수 ─────────────────────────────────────────────────── */
+const AGENT_PALETTE = [
+  "#2E75B6", "#00A6A0", "#7B68C4", "#5B9BD5", "#00827F",
+  "#4172C4", "#2D8BBA", "#8B5CF6", "#0E6E5C", "#3A86FF",
+];
+const agentColor = (idx: number) => AGENT_PALETTE[idx % AGENT_PALETTE.length];
+const C_RED    = "#8B1A1A";   // Senior AI
+const C_GOLD   = "#AA8E2A";   // Junior AI
+const C_GRAY   = "#999999";   // 피드백
+const C_HR_GOLD = "#B48E04";  // Junior→HR
+
 function Badge({ value }: { value: string }) {
   const opt = BADGE_OPTIONS.find((b) => b.value === value);
   const cls = opt?.cls || "br";
@@ -80,17 +92,20 @@ function Badge({ value }: { value: string }) {
 
 /* ── Workflow → Swimlane 변환 ─────────────────────────────────────────────── */
 function workflowToSwimlane(result: NewWorkflowResult): SwimlaneData {
-  // Input: 첫 번째 에이전트의 input_data에서 추출
-  const allInputs = new Set<string>();
-  for (const agent of result.agents) {
-    for (const task of agent.assigned_tasks) {
-      task.input_data?.forEach((d) => allInputs.add(d));
+  // Input: agent별 input_data 수집 + owner 매핑
+  const inputOwner: Record<string, number> = {};
+  for (let ai = 0; ai < result.agents.length; ai++) {
+    for (const task of result.agents[ai].assigned_tasks) {
+      task.input_data?.forEach((d) => {
+        if (!(d in inputOwner)) inputOwner[d] = ai;
+      });
     }
   }
-  const inputs: InputBox[] = [...allInputs].slice(0, 6).map((d, i) => ({
+  const inputs: InputBox[] = Object.keys(inputOwner).slice(0, 10).map((d, i) => ({
     id: `input-${i}`,
     title: d,
     subtitle: "",
+    ownerAgent: inputOwner[d],
   }));
 
   // Senior AI: 오케스트레이터 (첫 번째 에이전트 또는 요약)
@@ -188,7 +203,7 @@ export default function WorkflowEditor({ result, onSave }: WorkflowEditorProps) 
   const addInput = () => {
     update((d) => ({
       ...d,
-      inputs: [...d.inputs, { id: `input-${Date.now()}`, title: "새 Input", subtitle: "" }],
+      inputs: [...d.inputs, { id: `input-${Date.now()}`, title: "새 Input", subtitle: "", ownerAgent: 0 }],
     }));
   };
   const deleteInput = (idx: number) => {
@@ -278,8 +293,8 @@ export default function WorkflowEditor({ result, onSave }: WorkflowEditorProps) 
             className="rounded border px-2 py-1 text-xs text-gray-500 hover:bg-gray-50">맞춤</button>
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-[11px] font-semibold px-3 py-1 rounded border-[1.5px] border-[#CC0000] text-[#CC0000]">Senior AI</span>
-          <span className="text-[11px] font-semibold px-3 py-1 rounded border-[1.5px] border-[#1A5CB0] text-[#1A5CB0]">Junior AI</span>
+          <span className="text-[11px] font-semibold px-3 py-1 rounded border-[1.5px]" style={{ borderColor: C_RED, color: C_RED }}>Senior AI</span>
+          <span className="text-[11px] font-semibold px-3 py-1 rounded border-[1.5px]" style={{ borderColor: C_GOLD, color: C_GOLD }}>Junior AI</span>
           <span className="text-[11px] font-semibold px-3 py-1 rounded border-[1.5px] border-[#B4B2A9] text-[#5F5E5A]">사람</span>
           <button onClick={() => onSave(data)}
             className="flex items-center gap-2 rounded-lg px-4 py-1.5 text-xs font-semibold text-white"
@@ -303,8 +318,8 @@ export default function WorkflowEditor({ result, onSave }: WorkflowEditorProps) 
             <div className="flex gap-2 flex-wrap">
               {data.inputs.map((inp, i) => (
                 <div key={inp.id}
-                  className="flex-1 min-w-[120px] rounded-lg p-2 border text-center cursor-pointer hover:ring-2 hover:ring-[#A62121] transition-shadow"
-                  style={{ backgroundColor: "#F5F4F1", borderColor: "#D3D1C7" }}
+                  className="flex-1 min-w-[120px] rounded-lg p-2 border-2 text-center cursor-pointer hover:ring-2 hover:ring-[#A62121] transition-shadow"
+                  style={{ backgroundColor: "#F5F4F1", borderColor: agentColor(inp.ownerAgent) }}
                   onClick={() => setEditingInput(i)}>
                   <div className="text-[9.5px] font-semibold text-[#2C2C2A]">{inp.title}</div>
                   {inp.subtitle && <div className="text-[8px] text-[#888780]">{inp.subtitle}</div>}
@@ -319,7 +334,7 @@ export default function WorkflowEditor({ result, onSave }: WorkflowEditorProps) 
           </div>
         </div>
 
-        {/* ── Input → Senior AI 연결선 ──────────────────────────────── */}
+        {/* ── Input → Junior AI 직접 연결선 (Agent 색상) ──────────────── */}
         <div className="grid" style={{ gridTemplateColumns: "56px 1fr" }}>
           <div className="border-r bg-white" style={{ borderColor: "#D3D1C7" }} />
           <div className="py-1 px-3" style={{ backgroundColor: "#FAFAF8" }}>
@@ -327,7 +342,7 @@ export default function WorkflowEditor({ result, onSave }: WorkflowEditorProps) 
               {data.inputs.map((inp, i) => (
                 <div key={`conn-${i}`} className="flex-1 flex justify-center">
                   <div className="flex flex-col items-center">
-                    <div className="w-[1.5px] h-3" style={{ backgroundColor: "#5B9BD5" }} />
+                    <div className="w-[2px] h-3" style={{ backgroundColor: agentColor(inp.ownerAgent) }} />
                   </div>
                 </div>
               ))}
@@ -339,13 +354,13 @@ export default function WorkflowEditor({ result, onSave }: WorkflowEditorProps) 
         <div className="grid" style={{ gridTemplateColumns: "56px 1fr", borderBottom: "0.5px solid #D3D1C7" }}>
           <div className="flex flex-col items-center justify-center gap-1 p-2 border-r bg-white" style={{ borderColor: "#D3D1C7" }}>
             <span className="text-lg">🤖</span>
-            <span className="text-[9px] font-bold text-[#CC0000]">Senior<br/>AI</span>
+            <span className="text-[9px] font-bold text-[#8B1A1A]">Senior<br/>AI</span>
           </div>
           <div className="p-3" style={{ backgroundColor: "#FDF4F4" }}>
-            <div className="rounded-lg p-3 text-center cursor-pointer hover:ring-2 hover:ring-[#CC0000] transition-shadow"
-              style={{ border: "1.5px solid #CC0000", backgroundColor: "#FFF5F5" }}
+            <div className="rounded-lg p-3 text-center cursor-pointer hover:ring-2 hover:ring-[#8B1A1A] transition-shadow"
+              style={{ border: "1.5px solid #8B1A1A", backgroundColor: "#FFF5F5" }}
               onClick={() => setEditingSenior(true)}>
-              <div className="text-sm font-bold text-[#CC0000]">{data.seniorAI.title}</div>
+              <div className="text-sm font-bold text-[#8B1A1A]">{data.seniorAI.title}</div>
               <div className="text-[9px] text-[#888780] mt-1">{data.seniorAI.description.slice(0, 120)}...</div>
             </div>
           </div>
@@ -360,17 +375,17 @@ export default function WorkflowEditor({ result, onSave }: WorkflowEditorProps) 
                 <div key={`conn-${agent.id}`} className="flex justify-between px-3">
                   {/* Senior → Junior (빨간 하향) */}
                   <div className="flex flex-col items-center gap-0.5">
-                    <span className="text-[6px] font-semibold text-[#CC0000] text-center leading-tight">
+                    <span className="text-[6px] font-semibold text-[#8B1A1A] text-center leading-tight">
                       {"①②③④⑤⑥⑦⑧⑨⑩"[ai]}{agent.name}<br/>지시
                     </span>
-                    <div className="w-[1.5px] h-4 bg-[#CC0000]" />
-                    <div className="w-0 h-0 border-l-[4px] border-r-[4px] border-t-[5px] border-l-transparent border-r-transparent border-t-[#CC0000]" />
+                    <div className="w-[1.5px] h-4 bg-[#8B1A1A]" />
+                    <div className="w-0 h-0 border-l-[4px] border-r-[4px] border-t-[5px] border-l-transparent border-r-transparent border-t-[#8B1A1A]" />
                   </div>
                   {/* Junior → Senior (파란 상향) */}
                   <div className="flex flex-col items-center gap-0.5">
-                    <div className="w-0 h-0 border-l-[4px] border-r-[4px] border-b-[5px] border-l-transparent border-r-transparent border-b-[#1A5CB0]" />
-                    <div className="w-[1.5px] h-4 bg-[#1A5CB0]" />
-                    <span className="text-[6px] font-semibold text-[#1A5CB0] text-center leading-tight">
+                    <div className="w-0 h-0 border-l-[4px] border-r-[4px] border-b-[5px] border-l-transparent border-r-transparent" style={{ borderBottomColor: C_GRAY }} />
+                    <div className="w-[1.5px] h-4" style={{ backgroundColor: C_GRAY }} />
+                    <span className="text-[6px] font-semibold text-center leading-tight" style={{ color: C_GRAY }}>
                       결과 반환
                     </span>
                   </div>
@@ -384,7 +399,7 @@ export default function WorkflowEditor({ result, onSave }: WorkflowEditorProps) 
         <div className="grid" style={{ gridTemplateColumns: "56px 1fr", borderBottom: "0.5px solid #D3D1C7" }}>
           <div className="flex flex-col items-center justify-center gap-1 p-2 border-r bg-white" style={{ borderColor: "#D3D1C7" }}>
             <span className="text-lg">🤖</span>
-            <span className="text-[9px] font-bold text-[#1A5CB0]">Junior<br/>AI</span>
+            <span className="text-[9px] font-bold text-[#AA8E2A]">Junior<br/>AI</span>
           </div>
           <div className="p-3" style={{ backgroundColor: "#FEFAF0" }}>
             <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${Math.max(data.agents.length, 1)}, 1fr)` }}>
@@ -392,12 +407,12 @@ export default function WorkflowEditor({ result, onSave }: WorkflowEditorProps) 
                 <div key={agent.id} className="flex flex-col">
 
                   {/* 에이전트 박스 */}
-                  <div className="rounded-lg p-3 flex-1" style={{ border: "1.5px dashed #1A5CB0", backgroundColor: "#fff" }}>
+                  <div className="rounded-lg p-3 flex-1" style={{ border: "1.5px dashed #AA8E2A", backgroundColor: "#fff" }}>
                     <div className="flex items-center gap-2 mb-3">
-                      <div className="w-5 h-5 rounded-full bg-[#1A5CB0] flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0">
+                      <div className="w-5 h-5 rounded-full bg-[#AA8E2A] flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0">
                         {agent.number}
                       </div>
-                      <input className="text-[11px] font-bold text-[#2C2C2A] bg-transparent border-b border-transparent hover:border-gray-300 focus:border-[#1A5CB0] outline-none flex-1"
+                      <input className="text-[11px] font-bold text-[#2C2C2A] bg-transparent border-b border-transparent hover:border-gray-300 focus:border-[#AA8E2A] outline-none flex-1"
                         value={agent.name}
                         onChange={(e) => update((d) => {
                           d.agents = [...d.agents];
@@ -413,7 +428,7 @@ export default function WorkflowEditor({ result, onSave }: WorkflowEditorProps) 
                     <div className="flex flex-col gap-2">
                       {agent.tasks.map((task, ti) => (
                         <div key={task.id}
-                          className={`rounded-md p-2 text-center cursor-pointer hover:ring-2 hover:ring-[#1A5CB0] transition-shadow ${
+                          className={`rounded-md p-2 text-center cursor-pointer hover:ring-2 hover:ring-[#AA8E2A] transition-shadow ${
                             task.needsHumanConfirm ? "" : ""
                           }`}
                           style={{
@@ -429,7 +444,7 @@ export default function WorkflowEditor({ result, onSave }: WorkflowEditorProps) 
                         </div>
                       ))}
                       <button onClick={() => addTask(ai)}
-                        className="rounded-md border-2 border-dashed p-2 text-[9px] text-gray-400 hover:text-[#1A5CB0] hover:border-[#1A5CB0] transition-colors"
+                        className="rounded-md border-2 border-dashed p-2 text-[9px] text-gray-400 hover:text-[#AA8E2A] hover:border-[#AA8E2A] transition-colors"
                         style={{ borderColor: "#D3D1C7" }}>
                         <Plus className="h-3 w-3 mx-auto" /> Task 추가
                       </button>
@@ -439,8 +454,8 @@ export default function WorkflowEditor({ result, onSave }: WorkflowEditorProps) 
                   {/* Junior → HR 전달 화살표 */}
                   {agent.arrowToHuman && (
                     <div className="flex flex-col items-center pt-2">
-                      <div className="w-[2px] h-5 bg-[#1A5CB0]" />
-                      <div className="w-0 h-0 border-l-[5px] border-r-[5px] border-t-[7px] border-l-transparent border-r-transparent border-t-[#1A5CB0]" />
+                      <div className="w-[2px] h-5" style={{ backgroundColor: C_HR_GOLD }} />
+                      <div className="w-0 h-0 border-l-[5px] border-r-[5px] border-t-[7px] border-l-transparent border-r-transparent" style={{ borderTopColor: C_HR_GOLD }} />
                     </div>
                   )}
                 </div>
@@ -448,7 +463,7 @@ export default function WorkflowEditor({ result, onSave }: WorkflowEditorProps) 
 
               {/* 에이전트 추가 */}
               <button onClick={addAgent}
-                className="rounded-lg border-2 border-dashed p-4 flex flex-col items-center justify-center gap-1 text-gray-400 hover:text-[#1A5CB0] hover:border-[#1A5CB0] transition-colors min-h-[120px]"
+                className="rounded-lg border-2 border-dashed p-4 flex flex-col items-center justify-center gap-1 text-gray-400 hover:text-[#AA8E2A] hover:border-[#AA8E2A] transition-colors min-h-[120px]"
                 style={{ borderColor: "#D3D1C7" }}>
                 <Plus className="h-5 w-5" />
                 <span className="text-[10px] font-medium">에이전트 추가</span>
@@ -469,7 +484,7 @@ export default function WorkflowEditor({ result, onSave }: WorkflowEditorProps) 
                 const tasks = data.humanTasks.filter((h) => h.column === ai);
                 return (
                   <div key={ai} className="space-y-2">
-                    {tasks.map((ht, hi) => {
+                    {tasks.map((ht) => {
                       const realIdx = data.humanTasks.indexOf(ht);
                       return (
                         <div key={ht.id}
