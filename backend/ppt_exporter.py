@@ -67,11 +67,10 @@ def _set_text(shape, text: str, font_size: Pt | None = None, bold: bool | None =
     if not shape or not shape.has_text_frame:
         return
     tf = shape.text_frame
-    # 첫 번째 paragraph의 포맷을 보존하면서 텍스트 교체
     if tf.paragraphs:
         para = tf.paragraphs[0]
-        # 기존 run 포맷 보존
         if para.runs:
+            # 첫 run에 텍스트 설정
             run = para.runs[0]
             run.text = text
             if font_size is not None:
@@ -80,9 +79,12 @@ def _set_text(shape, text: str, font_size: Pt | None = None, bold: bool | None =
                 run.font.bold = bold
             if color is not None:
                 run.font.color.rgb = color
+            # 나머지 run 제거 (중복 텍스트 방지)
+            for extra_run in list(para.runs)[1:]:
+                extra_run._r.getparent().remove(extra_run._r)
         else:
             para.text = text
-        # 나머지 paragraph 제거 (XML 직접)
+        # 나머지 paragraph 제거
         for extra_para in list(tf.paragraphs)[1:]:
             extra_para._p.getparent().remove(extra_para._p)
         if alignment is not None:
@@ -391,43 +393,41 @@ def _fill_design_slide(slide, design: dict, definition: dict | None = None):
     if date_shape:
         _set_text(date_shape, f"작성일: {created_date}   |   작성자: {author}")
 
-    # 8. AI 기술 유형 — 기술 이름 (공통 기술 통합)
+    # 8. AI 기술 유형 — 기술 이름 (공통 중복 제거, bullet 없이 쉼표 나열)
     tech_names_shape = _find_shape(slide, "직사각형 37")
     if tech_names_shape:
         tech_names_raw = design.get("ai_tech_info", {}).get("tech_names", [])
-        # 공통 기술 키워드 추출 후 중복 통합
-        seen_base = set()
-        tech_names_merged: list[str] = []
+        # 중복 제거
+        seen = set()
+        tech_deduped: list[str] = []
         for tn in tech_names_raw:
-            # "LLM + RAG", "LLM + Rule Engine" → 기본 기술(LLM)은 이미 있으면 조합만 추가
-            base = tn.split("+")[0].split("·")[0].strip() if "+" in tn or "·" in tn else tn.strip()
-            if base not in seen_base:
-                seen_base.add(base)
-            tech_names_merged.append(tn)
-        # 최대 6개로 제한
-        if len(tech_names_merged) > 6:
-            tech_names_merged = tech_names_merged[:5] + [f"... 외 {len(tech_names_merged)-5}개"]
-        _set_multiline_text(tech_names_shape, tech_names_merged, font_size=Pt(8), bullet_char="•", color=DARK)
+            if tn not in seen:
+                seen.add(tn)
+                tech_deduped.append(tn)
+        tech_text = ", ".join(tech_deduped)
+        _set_text(tech_names_shape, tech_text, font_size=Pt(8), color=DARK)
 
-    # 9. Input / Output
+    # 9. Input / Output (각각 최대 3줄)
     io_data = design.get("input_output", {})
 
-    # 내부 Input
-    int_shapes = _find_shapes_containing(slide, "ㅇㅇ")
-    # 그룹 1 내부의 ㅇㅇ shape들 — 직사각형 88, 89, 90
+    def _limit3(items: list[str]) -> list[str]:
+        if len(items) <= 3:
+            return items
+        return items[:2] + [f"외 {len(items)-2}개"]
+
     io_88 = _find_shape(slide, "직사각형 88")
     if io_88:
-        internals = io_data.get("input_internal", [])
+        internals = _limit3(io_data.get("input_internal", []))
         _set_multiline_text(io_88, internals, font_size=Pt(8), bullet_char="•", color=DARK)
 
     io_89 = _find_shape(slide, "직사각형 89")
     if io_89:
-        externals = io_data.get("input_external", [])
+        externals = _limit3(io_data.get("input_external", []))
         _set_multiline_text(io_89, externals, font_size=Pt(8), bullet_char="•", color=DARK)
 
     io_90 = _find_shape(slide, "직사각형 90")
     if io_90:
-        outputs = io_data.get("output", [])
+        outputs = _limit3(io_data.get("output", []))
         _set_multiline_text(io_90, outputs, font_size=Pt(8), bullet_char="•", color=DARK)
 
 
@@ -547,9 +547,12 @@ def _fill_agent_slide(slide, agent: dict, design: dict, definition: dict | None 
     # 방법론 그룹(id=46): L=11.0cm → 내용 L=13.0cm, T=12.3cm, W=7.5cm, H=5.0cm
     # Output 그룹(id=47): L=22.3cm → 내용 L=24.2cm, T=12.3cm, W=7.5cm, H=5.0cm
 
-    # Input — 그룹핑 적용
+    # 최대 줄수 제한 (칸 넘침 방지)
+    MAX_LINES = 5
+
+    # Input — 그룹핑 + 최대 줄수
     if input_data:
-        items = _group_items(input_data, max_groups=5)
+        items = _group_items(input_data, max_groups=MAX_LINES)
         _add_multiline_textbox(
             slide, left=Cm(3.5), top=Cm(12.3),
             width=Cm(5.8), height=Cm(5.0),
@@ -557,10 +560,10 @@ def _fill_agent_slide(slide, agent: dict, design: dict, definition: dict | None 
             line_spacing=1.05,
         )
 
-    # 방법론 — "번호. 이름 [기법] → 산출물" 한 줄 형태
+    # 방법론 — "번호. 이름 [기법] → 산출물" 최대 4줄
     if processing_steps:
         method_lines = []
-        for idx, ps in enumerate(processing_steps[:5], 1):
+        for idx, ps in enumerate(processing_steps[:4], 1):
             name = _shorten(str(ps.get("step_name", "")), 22)
             method = _shorten(str(ps.get("method", "")), 15)
             result_text = _shorten(str(ps.get("result", "")), 15)
@@ -570,8 +573,8 @@ def _fill_agent_slide(slide, agent: dict, design: dict, definition: dict | None 
             if result_text:
                 line += f" → {result_text}"
             method_lines.append(line)
-        if len(processing_steps) > 5:
-            method_lines.append(f"... 외 {len(processing_steps)-5}단계")
+        if len(processing_steps) > 4:
+            method_lines.append(f"... 외 {len(processing_steps)-4}단계")
 
         _add_multiline_textbox(
             slide, left=Cm(13.0), top=Cm(12.3),
@@ -581,9 +584,9 @@ def _fill_agent_slide(slide, agent: dict, design: dict, definition: dict | None 
             line_spacing=1.1,
         )
 
-    # Output — 그룹핑 적용
+    # Output — 그룹핑 + 최대 줄수
     if output_data:
-        items = _group_items(output_data, max_groups=5)
+        items = _group_items(output_data, max_groups=MAX_LINES)
         _add_multiline_textbox(
             slide, left=Cm(24.2), top=Cm(12.3),
             width=Cm(7.5), height=Cm(5.0),
@@ -646,6 +649,21 @@ def export_ppt(
 
     # Slide 3+: Agent 정의서
     agents = design.get("agent_definitions", []) if design else []
+
+    # Senior AI가 없으면 워크플로우 정보로 자동 생성하여 맨 앞에 추가
+    has_senior = any(a.get("agent_type") == "Senior AI" for a in agents)
+    if not has_senior and agents:
+        process_name = workflow.get("process_name", "") if workflow else ""
+        senior_def = {
+            "agent_id": "senior-auto",
+            "agent_name": f"{process_name} 오케스트레이터" if process_name else "Senior AI 오케스트레이터",
+            "agent_type": "Senior AI",
+            "roles": ["Junior AI Agent 실행 오케스트레이션", "전체 워크플로우 조율 및 결과 품질 관리"],
+            "input_data": ["Junior AI 실행 결과", "업무 요청 데이터"],
+            "processing_steps": [{"step_name": "오케스트레이션", "method": "LLM", "result": "Junior AI 지시"}],
+            "output_data": ["Junior AI 실행 지시", "최종 결과 보고"],
+        }
+        agents = [senior_def] + agents
 
     if agents:
         # 1) 먼저 필요한 슬라이드 수만큼 복제 (빈 상태에서 복제)
