@@ -372,14 +372,19 @@ def _fill_design_slide(slide, design: dict, definition: dict | None = None):
         created_date = definition.get("created_date", "")
         author = definition.get("author", "")
 
-    # 헤더
+    # 헤더 — 제목은 헤더 바에만 표시, 그룹 안 입력필드는 비움
     header_shape = _find_shape(slide, "직사각형 164")
     if header_shape:
         _set_text(header_shape, f"■ 과제번호/이름     {project_number}. {project_title}")
 
-    title_input = _find_shape(slide, "직사각형 166")
-    if title_input:
-        _set_text(title_input, f"{project_number}. {project_title}")
+    # 그룹 165 안의 "과제번호/이름을 입력해주세요" 텍스트 제거 (겹침 방지)
+    group165 = _find_shape(slide, "그룹 165")
+    if group165 and hasattr(group165, 'shapes'):
+        for sub in group165.shapes:
+            if sub.has_text_frame:
+                for para in sub.text_frame.paragraphs:
+                    for run in para.runs:
+                        run.text = ""
 
     date_shape = _find_shape(slide, "직사각형 168")
     if date_shape:

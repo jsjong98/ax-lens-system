@@ -97,20 +97,19 @@ def _draw_hline(slide, y, x1, x2, color=LIGHT_GRAY, width=Pt(1)):
 
 
 def _draw_arrow_down(slide, x, y, color=LIGHT_GRAY, size=Cm(0.15)):
-    """아래 방향 삼각형 화살표 머리."""
+    """아래 방향 화살표 머리 (▼ 다이아몬드로 대체, 회전 없이 안정적)."""
     shape = slide.shapes.add_shape(
-        MSO_SHAPE.ISOSCELES_TRIANGLE, x - size, y, size * 2, size)
+        MSO_SHAPE.DIAMOND, x - size, y - size // 2, size * 2, size)
     shape.fill.solid()
     shape.fill.fore_color.rgb = color
     shape.line.fill.background()
-    shape.rotation = 180.0
     return shape
 
 
 def _draw_arrow_up(slide, x, y, color=LIGHT_GRAY, size=Cm(0.15)):
-    """위 방향 삼각형 화살표 머리."""
+    """위 방향 화살표 머리 (▲ 다이아몬드로 대체)."""
     shape = slide.shapes.add_shape(
-        MSO_SHAPE.ISOSCELES_TRIANGLE, x - size, y - size, size * 2, size)
+        MSO_SHAPE.DIAMOND, x - size, y - size // 2, size * 2, size)
     shape.fill.solid()
     shape.fill.fore_color.rgb = color
     shape.line.fill.background()
