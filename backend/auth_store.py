@@ -9,7 +9,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import random
 import secrets
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -47,8 +46,22 @@ _load_sessions()
 
 
 def _hash_password(password: str) -> str:
-    """SHA-256으로 비밀번호 해시"""
-    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+    """PBKDF2-SHA256 기반 비밀번호 해시 (솔트 포함)."""
+    salt = secrets.token_hex(16)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode(), 100_000)
+    return f"{salt}${dk.hex()}"
+
+
+def _verify_password(password: str, stored_hash: str) -> bool:
+    """저장된 해시와 비밀번호를 비교. 레거시(SHA-256) 호환."""
+    if "$" in stored_hash:
+        salt, dk_hex = stored_hash.split("$", 1)
+        dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode(), 100_000)
+        return secrets.compare_digest(dk.hex(), dk_hex)
+    # 레거시 SHA-256 호환 (기존 사용자 마이그레이션용)
+    return secrets.compare_digest(
+        hashlib.sha256(password.encode("utf-8")).hexdigest(), stored_hash
+    )
 
 
 def _load_users() -> dict[str, dict]:
@@ -100,8 +113,12 @@ def authenticate(email: str, password: str) -> str | None:
     user = users.get(email)
     if not user:
         return None
-    if user["password_hash"] != _hash_password(password):
+    if not _verify_password(password, user["password_hash"]):
         return None
+    # 레거시 SHA-256 해시 → PBKDF2 자동 마이그레이션
+    if "$" not in user["password_hash"]:
+        user["password_hash"] = _hash_password(password)
+        _save_users(users)
     # 세션 토큰 생성 + 파일 저장
     token = secrets.token_urlsafe(32)
     _sessions[token] = {"email": email}
@@ -156,7 +173,7 @@ def generate_reset_code(email: str) -> str | None:
     users = _load_users()
     if email not in users:
         return None
-    code = f"{random.randint(0, 999999):06d}"
+    code = f"{secrets.randbelow(1_000_000):06d}"
     _reset_codes[email] = {
         "code": code,
         "expires_at": (datetime.now() + timedelta(minutes=10)).isoformat(),
@@ -194,7 +211,7 @@ async def send_reset_email(email: str, code: str) -> bool:
     """Resend API로 인증번호 이메일 발송."""
     api_key = os.getenv("RESEND_API_KEY", "")
     if not api_key:
-        print(f"[AUTH] RESEND_API_KEY 미설정. 인증번호: {code} (콘솔 출력)")
+        print(f"[AUTH] RESEND_API_KEY 미설정. 인증번호가 생성되었으나 이메일 발송 불가 (개발 모드)")
         return True  # 키 없으면 콘솔 출력만 (개발용)
 
     import urllib.request
@@ -237,14 +254,14 @@ async def send_reset_email(email: str, code: str) -> bool:
 
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
-            print(f"[AUTH] 인증번호 이메일 발송 성공: {email}")
+            print("[AUTH] 인증번호 이메일 발송 성공")
             return True
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", errors="replace")
-        print(f"[AUTH] 이메일 발송 실패 (Resend {e.code}): {body}")
-        print(f"[AUTH] → 인증번호 fallback 출력: {email} = {code}")
+        print(f"[AUTH] 이메일 발송 실패 (HTTP {e.code})")
+        # 인증번호는 로그에 출력하지 않음 (보안)
         return True  # 이메일 실패해도 인증번호는 생성됨 — 로그에서 확인 가능
     except Exception as e:
-        print(f"[AUTH] 이메일 발송 오류: {e}")
-        print(f"[AUTH] → 인증번호 fallback 출력: {email} = {code}")
+        print("[AUTH] 이메일 발송 오류")
+        # 인증번호는 로그에 출력하지 않음 (보안)
         return True

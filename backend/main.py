@@ -97,14 +97,17 @@ _extra_origins = [
 ]
 _all_origins = _default_origins + _extra_origins
 
-# Railway 배포 환경이면 모든 .up.railway.app 도메인 허용
+# CORS 설정 — 환경변수 ALLOWED_ORIGINS로 허용 도메인 지정 (와일드카드 금지)
 _is_railway = bool(os.getenv("RAILWAY_ENVIRONMENT"))
+_railway_origins = [
+    o.strip() for o in os.getenv("RAILWAY_ALLOWED_ORIGINS", "").split(",") if o.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"] if _is_railway else _all_origins,
-    allow_credentials=True if not _is_railway else False,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=(_railway_origins or _all_origins) if _is_railway else _all_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-Session-Token"],
 )
 
 # ── 기본 사용자 초기화 ─────────────────────────────────────────────────────────
@@ -432,7 +435,8 @@ async def classify_tasks(req: ClassifyRequest):
             yield f"data: {json.dumps({'type': 'done', 'total': current}, ensure_ascii=False)}\n\n"
 
         except Exception as e:
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
+            print(f"[ERROR] SSE 스트림 오류: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'message': '처리 중 오류가 발생했습니다.'}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(
         event_generator(),
@@ -603,9 +607,10 @@ async def get_settings():
 @app.post("/api/settings", response_model=ClassifierSettings, tags=["Settings"])
 async def update_settings(settings: ClassifierSettings):
     existing = load_settings()
-    if settings.api_key.startswith("sk-" + "*"):
+    # 마스킹된 키(****) → 기존 키 유지, 빈 문자열 → 삭제, 그 외 → 새 키로 교체
+    if "*" in settings.api_key:
         settings.api_key = existing.api_key
-    if settings.anthropic_api_key.startswith("sk-ant-" + "*"):
+    if "*" in settings.anthropic_api_key:
         settings.anthropic_api_key = existing.anthropic_api_key
     save_settings(settings)
     masked = settings.model_copy()
@@ -809,19 +814,23 @@ async def upload_excel(file: UploadFile = File(...)):
     if not file.filename or not file.filename.endswith(".xlsx"):
         raise HTTPException(status_code=400, detail=".xlsx 파일만 업로드 가능합니다.")
 
-    save_path = _UPLOAD_DIR / file.filename
+    # 파일명에서 경로 순회 방지 (basename만 사용)
+    safe_filename = Path(file.filename).name
+    save_path = _UPLOAD_DIR / safe_filename
     try:
         contents = await file.read()
         save_path.write_bytes(contents)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"파일 저장 실패: {e}")
+        print(f"[ERROR] 파일 저장 실패: {e}")
+        raise HTTPException(status_code=500, detail="파일 저장에 실패했습니다.")
 
     # 시트 목록 조회
     try:
         sheets = list_sheets(save_path)
     except Exception as e:
         save_path.unlink(missing_ok=True)
-        raise HTTPException(status_code=422, detail=f"엑셀 파싱 실패: {e}")
+        print(f"[ERROR] 엑셀 파싱 실패: {e}")
+        raise HTTPException(status_code=422, detail="엑셀 파일을 읽을 수 없습니다. 올바른 형식인지 확인하세요.")
 
     _current_excel_path = save_path
 
@@ -873,7 +882,8 @@ async def select_excel_sheet(request: Request):
     try:
         new_tasks = load_tasks(_current_excel_path, sheet_name=sheet_name)
     except Exception as e:
-        raise HTTPException(status_code=422, detail=f"시트 파싱 실패: {e}")
+        print(f"[ERROR] 시트 파싱 실패: {e}")
+        raise HTTPException(status_code=422, detail="시트를 읽을 수 없습니다. 올바른 형식인지 확인하세요.")
 
     _tasks_cache = new_tasks
 
@@ -1109,7 +1119,8 @@ async def upload_ppt_workflow(file: UploadFile = File(...)):
     try:
         parsed = parse_ppt(content)
     except Exception as e:
-        raise HTTPException(400, f"PPT 파싱 실패: {e}")
+        print(f"[ERROR] PPT 파싱 실패: {e}")
+        raise HTTPException(400, "PPT 파일을 읽을 수 없습니다.")
 
     # 태스크 매칭용 데이터 준비
     task_list = [
@@ -1315,7 +1326,8 @@ async def upload_new_workflow_excel(file: UploadFile = File(...)):
     if not file.filename or not file.filename.endswith(".xlsx"):
         raise HTTPException(400, ".xlsx 파일만 업로드 가능합니다.")
 
-    save_path = _UPLOAD_DIR / f"nw_{file.filename}"
+    safe_fn = Path(file.filename).name
+    save_path = _UPLOAD_DIR / f"nw_{safe_fn}"
     try:
         contents = await file.read()
         save_path.write_bytes(contents)
@@ -1355,7 +1367,8 @@ async def upload_new_workflow_excel(file: UploadFile = File(...)):
         sheets = list_sheets(save_path)
     except Exception as e:
         save_path.unlink(missing_ok=True)
-        raise HTTPException(422, f"엑셀 파싱 실패: {e}")
+        print(f"[ERROR] 엑셀 파싱 실패: {e}")
+        raise HTTPException(422, "엑셀 파일을 읽을 수 없습니다.")
 
     recommended = next((s for s in sheets if s["recommended"]), None)
     if recommended:
@@ -1390,7 +1403,8 @@ async def select_new_workflow_sheet(request: Request):
     try:
         _nw_tasks_cache = load_tasks(_nw_excel_path, sheet_name=sheet_name)
     except Exception as e:
-        raise HTTPException(422, f"시트 파싱 실패: {e}")
+        print(f"[ERROR] 시트 파싱 실패: {e}")
+        raise HTTPException(422, "시트를 읽을 수 없습니다.")
 
     return {
         "message": f"시트 '{sheet_name}' 로드 완료",
