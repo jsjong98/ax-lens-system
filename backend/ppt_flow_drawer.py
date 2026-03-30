@@ -72,57 +72,29 @@ def _add_rect(slide, left, top, width, height, fill=None, border_color=None,
     return shape
 
 
-def _draw_vline(slide, x, y1, y2, color=LIGHT_GRAY, width=Pt(1)):
-    """세로선을 얇은 사각형으로 그립니다 (커넥터 대신)."""
-    top = min(y1, y2)
-    h = abs(y2 - y1)
-    w = max(int(width), Emu(12700))  # 최소 1pt
-    shape = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, x - w // 2, top, w, h)
-    shape.fill.solid()
-    shape.fill.fore_color.rgb = color
-    shape.line.fill.background()
-    return shape
-
-
-def _draw_hline(slide, y, x1, x2, color=LIGHT_GRAY, width=Pt(1)):
-    """가로선을 얇은 사각형으로 그립니다."""
-    left = min(x1, x2)
-    w = abs(x2 - x1)
-    h = max(int(width), Emu(12700))
-    shape = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, left, y - h // 2, w, h)
-    shape.fill.solid()
-    shape.fill.fore_color.rgb = color
-    shape.line.fill.background()
-    return shape
-
-
-def _draw_arrow_down(slide, x, y, color=LIGHT_GRAY, size=Cm(0.15)):
-    """아래 방향 화살표 머리 (▼ 다이아몬드로 대체, 회전 없이 안정적)."""
-    shape = slide.shapes.add_shape(
-        MSO_SHAPE.DIAMOND, x - size, y - size // 2, size * 2, size)
-    shape.fill.solid()
-    shape.fill.fore_color.rgb = color
-    shape.line.fill.background()
-    return shape
-
-
-def _draw_arrow_up(slide, x, y, color=LIGHT_GRAY, size=Cm(0.15)):
-    """위 방향 화살표 머리 (▲ 다이아몬드로 대체)."""
-    shape = slide.shapes.add_shape(
-        MSO_SHAPE.DIAMOND, x - size, y - size // 2, size * 2, size)
-    shape.fill.solid()
-    shape.fill.fore_color.rgb = color
-    shape.line.fill.background()
-    return shape
-
-
 def _arrow_v(slide, x, y1, y2, color=LIGHT_GRAY, width=Pt(1)):
-    """세로 화살표 (선 + 화살표 머리). y1→y2 방향."""
-    _draw_vline(slide, x, y1, y2, color, width)
-    if y2 > y1:
-        _draw_arrow_down(slide, x, y2, color, size=Cm(0.1))
-    else:
-        _draw_arrow_up(slide, x, y1, color, size=Cm(0.1))
+    """세로 화살표 (커넥터 + 화살표 머리). y1→y2 방향으로 화살표 표시."""
+    from lxml import etree
+    cx = slide.shapes.add_connector(1, x, y1, x, y2)
+    cx.line.color.rgb = color
+    cx.line.width = width
+    ns = '{http://schemas.openxmlformats.org/drawingml/2006/main}'
+    ln = cx._element.find(f'.//{ns}ln')
+    if ln is not None:
+        # 끝점(y2 방향)에 화살표
+        tail = etree.SubElement(ln, f'{ns}tailEnd')
+        tail.set('type', 'triangle')
+        tail.set('w', 'med')
+        tail.set('len', 'med')
+    return cx
+
+
+def _draw_vline(slide, x, y1, y2, color=LIGHT_GRAY, width=Pt(1)):
+    """세로선 (화살표 없음)."""
+    cx = slide.shapes.add_connector(1, x, y1, x, y2)
+    cx.line.color.rgb = color
+    cx.line.width = width
+    return cx
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -230,8 +202,7 @@ def draw_minimap(slide, workflow: dict, highlight_agent_id: str = "",
 
     # Senior → HR 감독 (오른쪽)
     rx = content_left + content_w - Cm(0.05)
-    _draw_vline(slide, rx, senior_top + senior_h, hr_top, RED, Pt(0.7))
-    _draw_arrow_down(slide, rx, hr_top, RED, Cm(0.08))
+    _arrow_v(slide, rx, senior_top + senior_h, hr_top, RED, Pt(0.7))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -386,5 +357,4 @@ def draw_service_flow(slide, workflow: dict,
     # (D) Senior → HR 감독선 (오른쪽 끝)
     if agent_count > 0:
         rx = content_left + content_w - Cm(0.08)
-        _draw_vline(slide, rx, r[1] + senior_h, r[3], RED, Pt(1))
-        _draw_arrow_down(slide, rx, r[3], RED, Cm(0.1))
+        _arrow_v(slide, rx, r[1] + senior_h, r[3], RED, Pt(1))
