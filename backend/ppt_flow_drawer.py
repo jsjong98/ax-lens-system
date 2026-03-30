@@ -214,7 +214,7 @@ def draw_minimap(slide, workflow: dict, highlight_agent_id: str = "",
     _add_rect(slide, left, input_top, label_w, input_h,
               fill=WHITE, border_color=LIGHT_GRAY,
               text="Input", font_size=Pt(4), font_color=GRAY)
-    for i in range(min(agent_count, 6)):
+    for i in range(agent_count):
         color = _agent_color(i)
         bw = agent_col_w * 0.75
         bx = content_left + i * agent_col_w + (agent_col_w - bw) / 2
@@ -263,14 +263,16 @@ def draw_minimap(slide, workflow: dict, highlight_agent_id: str = "",
     _add_rect(slide, left, hr_top, label_w, hr_h,
               fill=WHITE, border_color=LIGHT_GRAY,
               text="HR\n담당자", font_size=Pt(4), font_color=BLACK)
-    for i in range(agent_count):
-        bx = content_left + i * agent_col_w + Cm(0.05)
-        bw = agent_col_w - Cm(0.1)
-        _add_rect(slide, bx, hr_top + Cm(0.05), bw, hr_h - Cm(0.1),
-                  fill=GRAY_BG, border_color=GRAY_ARROW, border_width=Pt(0.3))
+    for i, agent in enumerate(agents):
+        has_hr = any(t.get("human_role", "") for t in agent.get("assigned_tasks", []))
+        if has_hr:
+            bx = content_left + i * agent_col_w + Cm(0.05)
+            bw = agent_col_w - Cm(0.1)
+            _add_rect(slide, bx, hr_top + Cm(0.05), bw, hr_h - Cm(0.1),
+                      fill=GRAY_BG, border_color=GRAY_ARROW, border_width=Pt(0.3))
 
     # ── 연결선 ──
-    for i in range(agent_count):
+    for i, agent in enumerate(agents):
         cx = content_left + i * agent_col_w + agent_col_w / 2
         c = _agent_color(i)
         # Input → Junior AI 직접 연결 (Agent 색상)
@@ -279,8 +281,10 @@ def draw_minimap(slide, workflow: dict, highlight_agent_id: str = "",
         _arrow_v(slide, cx - Cm(0.06), senior_top + senior_h, junior_top, CONN_RED)
         # Junior AI → Senior AI 피드백 (회색)
         _arrow_v(slide, cx + Cm(0.06), junior_top, senior_top + senior_h, CONN_GRAY)
-        # Junior AI → HR (금색)
-        _arrow_v(slide, cx, junior_top + junior_h, hr_top, CONN_GOLD)
+        # Junior AI → HR (금색) — HR task가 있는 경우만
+        has_hr = any(t.get("human_role", "") for t in agent.get("assigned_tasks", []))
+        if has_hr:
+            _arrow_v(slide, cx, junior_top + junior_h, hr_top, CONN_GOLD)
 
     # Senior AI → HR 감독선 (빨간, 오른쪽)
     rx = content_left + content_w - Cm(0.05)
@@ -418,23 +422,26 @@ def draw_service_flow(slide, workflow: dict,
                       font_size=Pt(4.5), font_color=BLACK)
 
     # ══ 5. 연결 화살표 ══
-    for i in range(agent_count):
+    for i, agent in enumerate(agents):
         cx = agent_cxs[i]
         c = _agent_color(i)
 
-        # (A) Input → Junior AI 직접 연결 (Agent 색상)
+        # (A) Input → Junior AI 직접 연결 (Agent 색상, 모든 input에서)
         inps = agent_inputs[i]
-        if inps:
-            sx = inp_cx.get(inps[0], cx)
-            _arrow_v(slide, sx, r[0] + input_h, r[2], c)
+        for inp in inps:
+            sx = inp_cx.get(inp)
+            if sx is not None:
+                _arrow_v(slide, sx, r[0] + input_h, r[2], c)
 
         # (B) Senior AI → Junior AI (빨간 = Senior 색상)
         _arrow_v(slide, cx - Cm(0.12), r[1] + senior_h, r[2], CONN_RED)
         # (B') Junior AI → Senior AI 피드백 (회색)
         _arrow_v(slide, cx + Cm(0.12), r[2], r[1] + senior_h, CONN_GRAY)
 
-        # (C) Junior AI → HR (금색)
-        _arrow_v(slide, cx, r[2] + junior_h, r[3], CONN_GOLD)
+        # (C) Junior AI → HR (금색) — HR task가 있는 경우만
+        has_hr = any(t.get("human_role", "") for t in agent.get("assigned_tasks", []))
+        if has_hr:
+            _arrow_v(slide, cx, r[2] + junior_h, r[3], CONN_GOLD)
 
     # (D) Senior → HR 감독선 (빨간, 오른쪽 끝)
     if agent_count > 0:

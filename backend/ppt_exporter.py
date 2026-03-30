@@ -117,7 +117,8 @@ def _set_multiline_text(shape, lines: list[str], font_size=Pt(11), bold=False,
             para = tf.add_paragraph()
 
         # 기존 bullet/기호 제거 후 bullet_char 추가 (중복 방지)
-        clean = line.strip().lstrip("•·-–— ").strip()
+        import re
+        clean = re.sub(r'^[\s•·‧∙●○◦◉►▶▸▪▫■□◆◇\-–—»›※★☆✓✔·]+', '', line).strip()
         if bullet_char and clean:
             full_text = f"{bullet_char}{clean}"
         else:
