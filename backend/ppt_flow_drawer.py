@@ -85,8 +85,9 @@ CONN_WIDTH = 12700                          # 1pt in EMU
 
 
 def _make_cxnSp(slide, x1, y1, x2, y2, color=CONN_BLUE, width=CONN_WIDTH,
-                 head_end=False, tail_end=True):
-    """참조 템플릿과 동일한 OOXML cxnSp 커넥터를 생성합니다."""
+                 head_end=False, tail_end=True, bent=False):
+    """참조 템플릿과 동일한 OOXML cxnSp 커넥터를 생성합니다.
+    bent=True이면 꺾인 커넥터(bentConnector3)를 사용합니다."""
     from lxml import etree
     from pptx.oxml.ns import qn
 
@@ -135,7 +136,10 @@ def _make_cxnSp(slide, x1, y1, x2, y2, color=CONN_BLUE, width=CONN_WIDTH,
     ext.set('cy', str(int(cy)))
 
     prstGeom = etree.SubElement(spPr, qn('a:prstGeom'))
-    prstGeom.set('prst', 'straightConnector1')
+    if bent:
+        prstGeom.set('prst', 'bentConnector3')
+    else:
+        prstGeom.set('prst', 'straightConnector1')
     etree.SubElement(prstGeom, qn('a:avLst'))
 
     ln = etree.SubElement(spPr, qn('a:ln'))
@@ -360,7 +364,24 @@ def draw_service_flow(slide, workflow: dict,
                   text=inp[:15], font_size=Pt(5), font_color=BLACK)
         inp_cx[inp] = bx + bw // 2
 
-    # ══ 2. Senior AI 행 ══
+    # Agent별 컬럼 중앙 X 좌표 (화살표에 필요)
+    agent_cxs: list[int] = []
+    for i in range(agent_count):
+        cl = content_left + i * agent_col_w
+        agent_cxs.append(cl + agent_col_w // 2)
+
+    # ══ 2. Input→Junior 꺾인 화살표 (먼저 그려서 Senior AI 바 뒤로) ══
+    for i, agent in enumerate(agents):
+        cx = agent_cxs[i]
+        c = _agent_color(i)
+        inps = agent_inputs[i]
+        for inp in inps:
+            sx = inp_cx.get(inp)
+            if sx is not None:
+                _make_cxnSp(slide, sx, r[0] + input_h, cx, r[2],
+                            color=c, bent=True)
+
+    # ══ 3. Senior AI 행 (화살표 위에 덮음) ══
     _add_rect(slide, left, r[1], label_w, senior_h,
               fill=WHITE, border_color=LIGHT_GRAY,
               text="Senior\nAI", font_size=Pt(6), font_color=RED)
@@ -371,18 +392,23 @@ def draw_service_flow(slide, workflow: dict,
               fill=RED_BG, border_color=RED, border_width=Pt(1.2),
               text=f"{pname} 오케스트레이터", font_size=Pt(6), font_color=RED, bold=True)
 
-    # ══ 3. Junior AI 행 ══
+    # ══ 4. Senior↔Junior 화살표 (Senior 바 아래에) ══
+    for i in range(agent_count):
+        cx = agent_cxs[i]
+        # Senior AI → Junior AI (빨간)
+        _arrow_v(slide, cx - Cm(0.12), r[1] + senior_h, r[2], CONN_RED)
+        # Junior AI → Senior AI 피드백 (회색)
+        _arrow_v(slide, cx + Cm(0.12), r[2], r[1] + senior_h, CONN_GRAY)
+
+    # ══ 5. Junior AI 행 ══
     _add_rect(slide, left, r[2], label_w, junior_h,
               fill=WHITE, border_color=LIGHT_GRAY,
               text="Junior\nAI", font_size=Pt(6), font_color=GOLD)
 
-    agent_cxs: list[int] = []
     for i, agent in enumerate(agents):
         cl = content_left + i * agent_col_w
         bx = cl + Cm(0.1)
         bw = agent_col_w - Cm(0.2)
-        cx = cl + agent_col_w // 2
-        agent_cxs.append(cx)
 
         _add_rect(slide, bx, r[2] + Cm(0.2), bw, junior_h - Cm(0.3),
                   fill=YELLOW_BG, border_color=GOLD, border_width=Pt(1))
@@ -407,7 +433,7 @@ def draw_service_flow(slide, workflow: dict,
             if j > 0:
                 _arrow_v(slide, bx + bw / 2, ty - task_gap, ty, CONN_GOLD, Emu(9525))
 
-    # ══ 4. HR 행 ══
+    # ══ 6. HR 행 ══
     _add_rect(slide, left, r[3], label_w, hr_h,
               fill=WHITE, border_color=LIGHT_GRAY,
               text="HR\n담당자", font_size=Pt(6), font_color=BLACK)
@@ -422,29 +448,14 @@ def draw_service_flow(slide, workflow: dict,
                       text=human_tasks[0].get("human_role", "검토")[:18],
                       font_size=Pt(4.5), font_color=BLACK)
 
-    # ══ 5. 연결 화살표 ══
+    # ══ 7. Junior→HR 화살표 (금색, HR 있는 경우만) ══
     for i, agent in enumerate(agents):
         cx = agent_cxs[i]
-        c = _agent_color(i)
-
-        # (A) Input → Junior AI 직접 연결 (Agent 색상, Input→Junior 컬럼 중앙)
-        inps = agent_inputs[i]
-        for inp in inps:
-            sx = inp_cx.get(inp)
-            if sx is not None:
-                _make_cxnSp(slide, sx, r[0] + input_h, cx, r[2], color=c)
-
-        # (B) Senior AI → Junior AI (빨간 = Senior 색상)
-        _arrow_v(slide, cx - Cm(0.12), r[1] + senior_h, r[2], CONN_RED)
-        # (B') Junior AI → Senior AI 피드백 (회색)
-        _arrow_v(slide, cx + Cm(0.12), r[2], r[1] + senior_h, CONN_GRAY)
-
-        # (C) Junior AI → HR (금색) — HR task가 있는 경우만
         has_hr = any(t.get("human_role", "") for t in agent.get("assigned_tasks", []))
         if has_hr:
             _arrow_v(slide, cx, r[2] + junior_h, r[3], CONN_GOLD)
 
-    # (D) Senior → HR 감독선 (빨간, 오른쪽 끝)
+    # ══ 8. Senior → HR 감독선 (빨간, 오른쪽 끝) ══
     if agent_count > 0:
         rx = content_left + content_w - Cm(0.08)
         _arrow_v(slide, rx, r[1] + senior_h, r[3], CONN_RED)

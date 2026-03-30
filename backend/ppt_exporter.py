@@ -672,6 +672,21 @@ def _fill_agent_slide(slide, agent: dict, design: dict, definition: dict | None 
             line_spacing=1.05,
         )
 
+    # Input → 방법론 → Output 사이 화살표 (►)
+    from pptx.enum.shapes import MSO_SHAPE
+    arrow_top = Cm(14.2)
+    arrow_h = Cm(1.0)
+    arrow_w = Cm(1.0)
+    arrow_color = RGBColor(0x99, 0x99, 0x99)
+
+    for arrow_x in [Cm(9.8), Cm(21.5)]:
+        tri = slide.shapes.add_shape(
+            MSO_SHAPE.ISOSCELES_TRIANGLE, arrow_x, arrow_top, arrow_w, arrow_h)
+        tri.rotation = 90.0
+        tri.fill.solid()
+        tri.fill.fore_color.rgb = arrow_color
+        tri.line.fill.background()
+
 
 # ── 메인 함수 ─────────────────────────────────────────────────────────────────
 
