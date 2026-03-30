@@ -206,28 +206,29 @@ def _add_grouped_textbox(slide, left, top, width, height, items: list[str],
 
 
 def _duplicate_slide(prs: Presentation, slide_index: int) -> Any:
-    """슬라이드를 복제합니다 (XML 기반)."""
+    """슬라이드를 복제합니다 (관계 + XML 전체 복사)."""
+    from lxml import etree
+    from pptx.opc.constants import RELATIONSHIP_TYPE as RT
+
     template_slide = prs.slides[slide_index]
     slide_layout = template_slide.slide_layout
 
     # 새 슬라이드 추가
     new_slide = prs.slides.add_slide(slide_layout)
 
-    # 기존 슬라이드의 XML을 복사
-    for shape in new_slide.shapes:
-        sp = shape._element
-        sp.getparent().remove(sp)
+    # 새 슬라이드의 기존 shape 모두 제거
+    spTree = new_slide.shapes._spTree
+    for sp in list(spTree):
+        tag = sp.tag.split('}')[-1] if '}' in sp.tag else sp.tag
+        if tag == 'sp' or tag == 'grpSp' or tag == 'pic' or tag == 'cxnSp' or tag == 'graphicFrame':
+            spTree.remove(sp)
 
-    for shape in template_slide.shapes:
-        el = copy.deepcopy(shape._element)
-        new_slide.shapes._spTree.append(el)
-
-    # 배경 복사
-    if template_slide.background._element is not None:
-        new_slide.background._element.getparent().replace(
-            new_slide.background._element,
-            copy.deepcopy(template_slide.background._element)
-        )
+    # 원본 슬라이드의 전체 spTree children을 deepcopy
+    src_spTree = template_slide.shapes._spTree
+    for child in src_spTree:
+        tag = child.tag.split('}')[-1] if '}' in child.tag else child.tag
+        if tag == 'sp' or tag == 'grpSp' or tag == 'pic' or tag == 'cxnSp' or tag == 'graphicFrame':
+            spTree.append(copy.deepcopy(child))
 
     return new_slide
 
@@ -447,29 +448,18 @@ def _fill_agent_slide(slide, agent: dict, design: dict, definition: dict | None 
     if name_shape:
         _set_text(name_shape, agent.get("agent_name", ""))
 
-    # Agent 유형 — Senior AI / Junior AI 표시
+    # Agent 유형 — Senior AI / Junior AI 표시 (직사각형 11 안에 두 줄로 존재)
     agent_type = agent.get("agent_type", "Junior AI")
-    # 그룹 18 내의 Senior AI / Junior AI 표시를 변경
-    # Senior AI 선택 시 Senior 앞에 ● 표시
-    senior_shapes = _find_shapes_containing(slide, "Senior AI")
-    for s in senior_shapes:
-        if s.has_text_frame and s.text_frame.paragraphs:
-            para = s.text_frame.paragraphs[0]
-            if para.runs:
-                if agent_type == "Senior AI":
-                    para.runs[0].text = "● Senior AI"
-                else:
-                    para.runs[0].text = "○ Senior AI"
-
-    junior_shapes = _find_shapes_containing(slide, "Junior AI")
-    for s in junior_shapes:
-        if s.has_text_frame and s.text_frame.paragraphs:
-            para = s.text_frame.paragraphs[0]
-            if para.runs:
-                if agent_type == "Junior AI":
-                    para.runs[0].text = "● Junior AI"
-                else:
-                    para.runs[0].text = "○ Junior AI"
+    type_shapes = _find_shapes_containing(slide, "Senior AI")
+    for s in type_shapes:
+        if s.has_text_frame:
+            for para in s.text_frame.paragraphs:
+                for run in para.runs:
+                    txt = run.text.strip()
+                    if "Senior" in txt:
+                        run.text = "● Senior AI" if agent_type == "Senior AI" else "○ Senior AI"
+                    elif "Junior" in txt:
+                        run.text = "● Junior AI" if agent_type != "Senior AI" else "○ Junior AI"
 
     # Agent 역할
     roles = agent.get("roles", [])
