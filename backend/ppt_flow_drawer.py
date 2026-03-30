@@ -131,7 +131,7 @@ def _make_cxnSp(slide, x1, y1, x2, y2, color=LIGHT_GRAY, width=Pt(1),
     ext.set('cy', str(int(cy)))
 
     prstGeom = etree.SubElement(spPr, qn('a:prstGeom'))
-    prstGeom.set('prst', 'line')
+    prstGeom.set('prst', 'straightConnector1')
     etree.SubElement(prstGeom, qn('a:avLst'))
 
     ln = etree.SubElement(spPr, qn('a:ln'))
