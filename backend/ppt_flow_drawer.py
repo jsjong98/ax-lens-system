@@ -196,6 +196,11 @@ def _draw_vline(slide, x, y1, y2, color=CONN_BLUE, width=CONN_WIDTH):
 
 def draw_minimap(slide, workflow: dict, highlight_agent_id: str = "",
                  left=Cm(24.4), top=Cm(3.7), total_width=Cm(7.8), total_height=Cm(5.7)):
+    """AI Service Flow와 동일한 구조의 축소 미니맵.
+    - Input 박스: 실제 Input 수만큼 표시, Agent별 색상
+    - 꺾인선: Input → Junior AI 직접 연결 (bent connector)
+    - Senior AI 바가 화살표를 덮음
+    """
     agents = workflow.get("agents", [])
     if not agents:
         return
@@ -220,22 +225,53 @@ def draw_minimap(slide, workflow: dict, highlight_agent_id: str = "",
     junior_top = senior_top + senior_h + gap2
     hr_top     = junior_top + junior_h + gap3
 
+    # ── Agent별 Input 수집 (AI Service Flow와 동일 로직) ──
+    agent_inputs: list[list[str]] = []
+    input_owner: dict[str, int] = {}
+    for ai, a in enumerate(agents):
+        inps: list[str] = []
+        for t in a.get("assigned_tasks", []):
+            for inp in t.get("input_data", []):
+                if inp not in inps:
+                    inps.append(inp)
+                if inp not in input_owner:
+                    input_owner[inp] = ai
+        agent_inputs.append(inps)
+
+    all_inps = list(dict.fromkeys(i for ai in agent_inputs for i in ai))[:10]
+    inp_w = content_w / max(len(all_inps), 1)
+    inp_cx: dict[str, int] = {}
+
     # ── Input 행 ──
     _add_rect(slide, left, input_top, label_w, input_h,
               fill=WHITE, border_color=LIGHT_GRAY,
               text="Input", font_size=Pt(4), font_color=GRAY)
-    for i in range(agent_count):
-        color = _agent_color(i)
-        bw = agent_col_w * 0.75
-        bx = content_left + i * agent_col_w + (agent_col_w - bw) / 2
+    for i, inp in enumerate(all_inps):
+        bx = content_left + i * inp_w + Cm(0.02)
+        bw = inp_w - Cm(0.04)
+        oi = input_owner.get(inp, 0)
+        c = _agent_color(oi)
         _add_rect(slide, bx, input_top + Cm(0.06), bw, input_h - Cm(0.12),
-                  fill=WHITE, border_color=color, border_width=Pt(0.5))
+                  fill=WHITE, border_color=c, border_width=Pt(0.5))
+        inp_cx[inp] = bx + bw // 2
 
-    # ── Input→Junior 화살표 (먼저 그려서 Senior 바 뒤로) ──
+    # Agent별 컬럼 중앙 X
+    agent_cxs: list[int] = []
     for i in range(agent_count):
-        cx = content_left + i * agent_col_w + agent_col_w / 2
+        cl = content_left + i * agent_col_w
+        agent_cxs.append(cl + agent_col_w // 2)
+
+    # ── Input→Junior 꺾인 화살표 (먼저 그려서 Senior 바 뒤로) ──
+    mini_w = Emu(6350)  # 0.5pt — 미니맵용 얇은 선
+    for i, agent in enumerate(agents):
+        cx = agent_cxs[i]
         c = _agent_color(i)
-        _arrow_v(slide, cx, input_top + input_h, junior_top, c)
+        inps = agent_inputs[i]
+        for inp in inps:
+            sx = inp_cx.get(inp)
+            if sx is not None:
+                _make_cxnSp(slide, sx, input_top + input_h, cx, junior_top,
+                            color=c, width=mini_w, bent=True)
 
     # ── Senior AI 행 (화살표 위에 덮음) ──
     _add_rect(slide, left, senior_top, label_w, senior_h,
@@ -247,9 +283,9 @@ def draw_minimap(slide, workflow: dict, highlight_agent_id: str = "",
 
     # ── Senior↔Junior 화살표 ──
     for i in range(agent_count):
-        cx = content_left + i * agent_col_w + agent_col_w / 2
-        _arrow_v(slide, cx - Cm(0.06), senior_top + senior_h, junior_top, CONN_RED)
-        _arrow_v(slide, cx + Cm(0.06), junior_top, senior_top + senior_h, CONN_GRAY)
+        cx = agent_cxs[i]
+        _arrow_v(slide, cx - Cm(0.06), senior_top + senior_h, junior_top, CONN_RED, mini_w)
+        _arrow_v(slide, cx + Cm(0.06), junior_top, senior_top + senior_h, CONN_GRAY, mini_w)
 
     # ── Junior AI 행 ──
     _add_rect(slide, left, junior_top, label_w, junior_h,
@@ -295,10 +331,10 @@ def draw_minimap(slide, workflow: dict, highlight_agent_id: str = "",
 
     # ── Junior→HR 화살표 (금색, HR 있는 경우만) ──
     for i, agent in enumerate(agents):
-        cx = content_left + i * agent_col_w + agent_col_w / 2
+        cx = agent_cxs[i]
         has_hr = any(t.get("human_role", "") for t in agent.get("assigned_tasks", []))
         if has_hr:
-            _arrow_v(slide, cx, junior_top + junior_h, hr_top, CONN_GOLD)
+            _arrow_v(slide, cx, junior_top + junior_h, hr_top, CONN_GOLD, mini_w)
 
 
 

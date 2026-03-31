@@ -250,10 +250,13 @@ def _duplicate_slide(prs: Presentation, slide_index: int) -> Any:
         if tag in ('sp', 'grpSp', 'pic', 'cxnSp', 'graphicFrame'):
             spTree.remove(sp)
 
-    # 원본 슬라이드의 이미지/미디어 관계를 새 슬라이드에 복사
+    # 원본 슬라이드의 이미지/미디어 관계를 동일한 rId로 복사
+    existing_rids = {r.rId for r in new_slide.part.rels.values()}
     for rel in template_slide.part.rels.values():
         if "image" in rel.reltype or "media" in str(rel.target_ref):
-            new_slide.part.rels.get_or_add(rel.reltype, rel.target_part)
+            if rel.rId not in existing_rids:
+                # python-pptx 내부 API로 동일 rId 유지
+                new_slide.part.rels._rels[rel.rId] = rel
 
     # 원본 슬라이드의 전체 spTree children을 deepcopy
     src_spTree = template_slide.shapes._spTree
