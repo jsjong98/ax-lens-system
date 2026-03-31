@@ -233,7 +233,7 @@ def _add_grouped_textbox(slide, left, top, width, height, items: list[str],
 
 
 def _duplicate_slide(prs: Presentation, slide_index: int) -> Any:
-    """슬라이드를 복제합니다 (관계 + XML 전체 복사)."""
+    """슬라이드를 복제합니다 (관계 + XML + 이미지 전체 복사)."""
     from lxml import etree
     from pptx.opc.constants import RELATIONSHIP_TYPE as RT
 
@@ -247,14 +247,19 @@ def _duplicate_slide(prs: Presentation, slide_index: int) -> Any:
     spTree = new_slide.shapes._spTree
     for sp in list(spTree):
         tag = sp.tag.split('}')[-1] if '}' in sp.tag else sp.tag
-        if tag == 'sp' or tag == 'grpSp' or tag == 'pic' or tag == 'cxnSp' or tag == 'graphicFrame':
+        if tag in ('sp', 'grpSp', 'pic', 'cxnSp', 'graphicFrame'):
             spTree.remove(sp)
+
+    # 원본 슬라이드의 이미지/미디어 관계를 새 슬라이드에 복사
+    for rel in template_slide.part.rels.values():
+        if "image" in rel.reltype or "media" in str(rel.target_ref):
+            new_slide.part.rels.get_or_add(rel.reltype, rel.target_part)
 
     # 원본 슬라이드의 전체 spTree children을 deepcopy
     src_spTree = template_slide.shapes._spTree
     for child in src_spTree:
         tag = child.tag.split('}')[-1] if '}' in child.tag else child.tag
-        if tag == 'sp' or tag == 'grpSp' or tag == 'pic' or tag == 'cxnSp' or tag == 'graphicFrame':
+        if tag in ('sp', 'grpSp', 'pic', 'cxnSp', 'graphicFrame'):
             spTree.append(copy.deepcopy(child))
 
     return new_slide
