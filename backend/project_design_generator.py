@@ -366,12 +366,13 @@ Step D. Agent 정의서 (별첨) — Agent별 1장씩 상세 작성
 - input_output의 내부/외부를 명확히 구분하세요. **각 항목은 정확히 3개씩** MECE하게 작성하세요. 유사 항목은 괄호로 묶어 통합.
 - agent_definitions에는 Senior AI, Junior AI 모두 포함하세요.
 - agent_definitions의 roles는 이 Agent가 하는 역할을 구체적 bullet 리스트로 작성하세요. (최대 3~4개)
-- agent_definitions의 input_data는 **최대 3~4개 항목**으로 유사한 것끼리 묶어서 작성하세요.
-  예: "자사 교육 체계 현황 (과정 목록, 역량 모델, 교육 체계도)" ← 이렇게 괄호 안에 세부사항을 나열.
-  절대 10개 이상 나열하지 마세요. 유사한 항목은 반드시 하나로 통합하세요.
-- agent_definitions의 output_data도 **최대 3~4개 항목**으로 묶어서 작성하세요.
-  예: "Gap 분석 리포트 (Gap 영역, 유사도 점수, 우선순위)" ← 세부 산출물은 괄호 안에.
-- agent_definitions의 processing_steps는 **최대 3~4단계**로 작성하세요.
+- agent_definitions의 input_data는 **반드시 3~4개 이하**로 작성하세요. 이것은 절대 규칙입니다.
+  5개 이상 나열하면 안 됩니다. 유사 항목은 반드시 하나로 그룹핑하세요.
+  예: "자사 교육 체계 현황 (과정 목록, 역량 모델, 교육 체계도)" ← 괄호 안에 세부사항 나열
+  예: "평가 데이터 (정량 점수, 정성 구조화 데이터, 성장 추이)" ← 유사한 것은 하나로 묶기
+- agent_definitions의 output_data도 **반드시 3~4개 이하**로 작성하세요.
+  예: "Gap 분석 리포트 (Gap 영역, 유사도 점수, 우선순위)" ← 세부 산출물은 괄호 안에
+- agent_definitions의 processing_steps는 **반드시 3~4단계 이하**로 작성하세요.
   step_name은 20자 이내, method는 15자 이내, result는 15자 이내로 간결하게.
 - agent_definitions의 flow_step_orders는 이 Agent가 ai_service_flow.steps에서 담당하는 step_order 번호 배열입니다.
 """
@@ -569,6 +570,35 @@ def _dict_to_project_design(data: dict, project_title: str = "") -> ProjectDesig
     # Input/Output
     io_data = data.get("input_output", {})
 
+    def _auto_group(items: list[str], max_items: int = 4) -> list[str]:
+        """항목이 max_items를 초과하면 유사한 것끼리 묶어서 축소."""
+        if len(items) <= max_items:
+            return items
+        import re as _re
+        # 공통 키워드로 그룹핑
+        groups: dict[str, list[str]] = {}
+        ungrouped: list[str] = []
+        keywords = ["데이터", "결과", "리포트", "보고서", "점수", "문장",
+                     "매트릭스", "정보", "코드", "목록", "현황", "이력"]
+        for item in items:
+            matched = False
+            for kw in keywords:
+                if kw in str(item):
+                    groups.setdefault(kw, []).append(str(item))
+                    matched = True
+                    break
+            if not matched:
+                ungrouped.append(str(item))
+        result: list[str] = []
+        for kw, details in groups.items():
+            if len(details) == 1:
+                result.append(details[0])
+            else:
+                short = [d.replace(kw, "").strip().strip(",. ") or d for d in details[:4]]
+                result.append(f"{kw} ({', '.join(short)})")
+        result.extend(ungrouped)
+        return result[:max_items]
+
     # Agent Definitions
     agent_defs = []
     for a in data.get("agent_definitions", []):
@@ -582,14 +612,18 @@ def _dict_to_project_design(data: dict, project_title: str = "") -> ProjectDesig
                 result=ps.get("result", ""),
             ))
 
+        # input_data/output_data가 5개 이상이면 자동 그룹핑
+        raw_inputs = a.get("input_data", [])
+        raw_outputs = a.get("output_data", [])
+
         agent_defs.append(AgentDefinition(
             agent_id=a.get("agent_id", ""),
             agent_name=a.get("agent_name", ""),
             agent_type=a.get("agent_type", "Junior AI"),
-            roles=a.get("roles", []),
-            input_data=a.get("input_data", []),
-            processing_steps=p_steps,
-            output_data=a.get("output_data", []),
+            roles=a.get("roles", [])[:4],
+            input_data=_auto_group(raw_inputs, max_items=4),
+            processing_steps=p_steps[:4],
+            output_data=_auto_group(raw_outputs, max_items=4),
             flow_step_orders=a.get("flow_step_orders", []),
         ))
 
