@@ -226,9 +226,13 @@ _BENCHMARK_SYSTEM_PROMPT = """
 - 각 개선에 대해 "어떤 기업의 어떤 사례"를 참고했는지 명시
 
 ## benchmark_insights 작성 규칙
-- source: **솔루션을 활용한 실제 기업명** (예: "Google People Analytics", "Unilever HR", "삼성전자")
-  - 솔루션 벤더명(예: "Workday", "SAP")은 source로 쓰지 마세요
-- insight: 그 기업이 **구체적으로 무엇을 했고 어떤 성과**가 있었는지 한 줄
+- source: **반드시 고유 기업명 1개**만 쓰세요. 아래 규칙을 엄격히 지키세요.
+  - ✅ 올바른 예: "Google", "Unilever", "삼성전자", "DoorDash", "JPMorgan Chase"
+  - ❌ 금지: "Fortune 500 기업", "한 병원", "의료기관", "대형 제조사", "글로벌 기업"
+  - ❌ 금지: "Epic 활용 의료기관", "레드브릭 도입 사례" (이건 벤더+설명이지 기업명이 아님)
+  - ❌ 금지: 솔루션 벤더명 (예: "Workday", "SAP", "Yellow.ai", "Epic")
+  - 검색 결과에서 구체적 기업명을 찾을 수 없으면 해당 사례는 **아예 포함하지 마세요**
+- insight: 그 기업이 **구체적으로 무엇을 했고 어떤 성과(수치 포함)**가 있었는지 한 줄
 - application: 우리 Workflow에 **어떻게 적용**할지 한 줄
 
 ## Task 작성 규칙 (반드시 지키세요)
