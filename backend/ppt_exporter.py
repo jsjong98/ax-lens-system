@@ -637,10 +637,9 @@ def _fill_agent_slide(slide, agent: dict, design: dict, definition: dict | None 
 
         return result[:max_groups]
 
-    def _shorten(s: str, max_len: int = 60) -> str:
-        """문자열을 최대 길이로 자르기 (넉넉하게)."""
-        s = str(s).strip()
-        return s[:max_len-1] + "…" if len(s) > max_len else s
+    def _shorten(s: str, max_len: int = 999) -> str:
+        """문자열 정리 (말줄임 없음 — 원본 그대로)."""
+        return str(s).strip()
 
     # 처리 로직 영역 좌표 (템플릿 Slide 3 기준)
     # Input 그룹(id=48):  L=1.8cm → 내용 L=3.5cm, T=12.3cm, W=5.8cm, H=5.0cm
