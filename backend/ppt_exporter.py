@@ -433,10 +433,30 @@ def _fill_design_slide(slide, design: dict, definition: dict | None = None):
         "OCR": "직사각형 158",
     }
     tech_types = design.get("ai_tech_info", {}).get("tech_types", [])
+    tech_names_joined = " ".join(design.get("ai_tech_info", {}).get("tech_names", [])).upper()
+
+    # tech_names에서 checked 자동 보정 (LLM이 누락한 체크 복구)
+    _AUTO_CHECK_KEYWORDS = {
+        "정보 추출": ["RAG", "검색", "추출", "RETRIEVAL"],
+        "텍스트 생성": ["LLM", "GPT", "텍스트 생성"],
+        "대화형 인터페이스": ["CHATBOT", "CONVERSATIONAL", "대화"],
+        "멀티모달 처리": ["MULTIMODAL", "멀티모달"],
+        "예측": ["예측", "PREDICTION", "FORECAST"],
+        "군집 · 분류": ["ML MODEL", "ML 모델", "분류", "CLASSIFICATION", "CLUSTERING"],
+        "최적화": ["최적화", "OPTIMIZATION"],
+        "추천": ["추천", "RECOMMENDATION"],
+        "RPA": ["RPA"],
+        "OCR": ["OCR"],
+    }
     checked_labels: set[str] = set()
     for tt in tech_types:
         for item in tt.get("checked", []):
             checked_labels.add(item)
+        # 자동 보정: tech_names에 키워드가 있으면 체크 추가
+        for sub in tt.get("sub_types", []):
+            keywords = _AUTO_CHECK_KEYWORDS.get(sub, [])
+            if any(kw.upper() in tech_names_joined for kw in keywords):
+                checked_labels.add(sub)
 
     for label, cb_shape_name in _CHECKBOX_MAP.items():
         if label in checked_labels:
@@ -672,20 +692,7 @@ def _fill_agent_slide(slide, agent: dict, design: dict, definition: dict | None 
             line_spacing=1.05,
         )
 
-    # Input → 방법론 → Output 사이 화살표 (►)
-    from pptx.enum.shapes import MSO_SHAPE
-    arrow_top = Cm(14.2)
-    arrow_h = Cm(1.0)
-    arrow_w = Cm(1.0)
-    arrow_color = RGBColor(0x99, 0x99, 0x99)
-
-    for arrow_x in [Cm(9.8), Cm(21.5)]:
-        tri = slide.shapes.add_shape(
-            MSO_SHAPE.ISOSCELES_TRIANGLE, arrow_x, arrow_top, arrow_w, arrow_h)
-        tri.rotation = 90.0
-        tri.fill.solid()
-        tri.fill.fore_color.rgb = arrow_color
-        tri.line.fill.background()
+    # Input → 방법론 → Output 사이 화살표는 템플릿에 이미 포함되어 있음
 
 
 # ── 메인 함수 ─────────────────────────────────────────────────────────────────

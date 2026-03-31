@@ -138,9 +138,14 @@ def _make_cxnSp(slide, x1, y1, x2, y2, color=CONN_BLUE, width=CONN_WIDTH,
     prstGeom = etree.SubElement(spPr, qn('a:prstGeom'))
     if bent:
         prstGeom.set('prst', 'bentConnector3')
+        avLst = etree.SubElement(prstGeom, qn('a:avLst'))
+        # 꺾임 지점: 50000 = 중간 (0~100000 범위)
+        gd = etree.SubElement(avLst, qn('a:gd'))
+        gd.set('name', 'adj1')
+        gd.set('fmla', 'val 50000')
     else:
         prstGeom.set('prst', 'straightConnector1')
-    etree.SubElement(prstGeom, qn('a:avLst'))
+        etree.SubElement(prstGeom, qn('a:avLst'))
 
     ln = etree.SubElement(spPr, qn('a:ln'))
     ln.set('w', str(int(width)))

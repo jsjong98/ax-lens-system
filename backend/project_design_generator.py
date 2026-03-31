@@ -544,6 +544,28 @@ def _dict_to_project_design(data: dict, project_title: str = "") -> ProjectDesig
                 checked=[],
             ))
 
+    # tech_names에서 checked 자동 보정 (LLM이 누락한 체크 복구)
+    tech_names_str = " ".join(tech_data.get("tech_names", [])).upper()
+    _AUTO_CHECK = {
+        "정보 추출": ["RAG", "검색", "추출", "RETRIEVAL"],
+        "텍스트 생성": ["LLM", "GPT", "텍스트 생성", "TEXT"],
+        "대화형 인터페이스": ["CHATBOT", "CONVERSATIONAL", "대화"],
+        "멀티모달 처리": ["MULTIMODAL", "멀티모달", "OCR + LLM"],
+        "예측": ["예측", "PREDICTION", "FORECAST"],
+        "군집 · 분류": ["ML MODEL", "분류", "CLASSIFICATION", "CLUSTERING", "군집"],
+        "최적화": ["최적화", "OPTIMIZATION"],
+        "추천": ["추천", "RECOMMENDATION"],
+        "RPA": ["RPA"],
+        "OCR": ["OCR"],
+    }
+    for tt in tech_types:
+        for sub in tt.sub_types:
+            if sub in tt.checked:
+                continue
+            keywords = _AUTO_CHECK.get(sub, [])
+            if any(kw.upper() in tech_names_str for kw in keywords):
+                tt.checked.append(sub)
+
     # Input/Output
     io_data = data.get("input_output", {})
 
