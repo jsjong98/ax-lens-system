@@ -141,9 +141,13 @@ def _generate_search_queries(workflow_cache: dict) -> list[str]:
             f"real world production deployment"
         )
 
-    # 한국 대기업 AI 도입 사례
+    # 글로벌·한국 대기업 AI 도입 사례 (제조·화학·소비재 등 실사용 기업)
     queries.append(
-        f"삼성 현대 SK LG '{process_name}' AI 자동화 도입 사례 성과"
+        f"Unilever Dow Chemical ExxonMobil Siemens GE "
+        f"'{process_name}' AI automation adoption results"
+    )
+    queries.append(
+        f"삼성 현대 SK LG 두산 '{process_name}' AI 자동화 도입 사례 성과"
     )
 
     # 컨설팅 펌 리서치 (벤치마크 데이터)
@@ -152,7 +156,7 @@ def _generate_search_queries(workflow_cache: dict) -> list[str]:
         f"AI transformation benchmark industry report 2024 2025"
     )
 
-    return queries[:5]
+    return queries[:6]
 
 
 # ── 통합 검색 ────────────────────────────────────────────────────────────────
