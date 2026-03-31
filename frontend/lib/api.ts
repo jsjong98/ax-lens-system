@@ -259,6 +259,17 @@ export interface ProjectInfo {
   source?: string;
   saved_data: Record<string, boolean>;
   has_any_result: boolean;
+  agent_count?: number;
+  agent_names?: string[];
+}
+
+export async function getBenchmarkResult(): Promise<{
+  ok: boolean;
+  benchmark_insights: BenchmarkInsight[];
+  improvement_summary: string;
+  search_count: number;
+}> {
+  return apiFetch("/new-workflow/benchmark-result");
 }
 
 export async function getProjectList(): Promise<{ ok: boolean; projects: ProjectInfo[] }> {
@@ -270,6 +281,7 @@ export async function loadProject(filename: string): Promise<{
   filename: string;
   loaded: Record<string, boolean>;
   saved: Record<string, boolean>;
+  benchmark?: { benchmark_insights: BenchmarkInsight[]; improvement_summary: string; search_count: number } | null;
 }> {
   return apiFetch("/projects/load", {
     method: "POST",

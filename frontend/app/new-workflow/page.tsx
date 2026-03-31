@@ -19,6 +19,7 @@ import {
   loadProject,
   deleteProject,
   getNewWorkflowResult,
+  getBenchmarkResult,
   type ProjectInfo,
 } from "@/lib/api";
 import WorkflowEditor from "@/components/WorkflowEditor";
@@ -106,9 +107,15 @@ export default function NewWorkflowPage() {
   const handleLoadProject = async (filename: string) => {
     setLoadingProject(filename);
     try {
-      await loadProject(filename);
+      const loadRes = await loadProject(filename);
       const nwResult = await getNewWorkflowResult();
       setResult(nwResult);
+      // 벤치마킹 결과 복원
+      if (loadRes.benchmark) {
+        setBenchmarkInsights(loadRes.benchmark.benchmark_insights || []);
+        setImprovementSummary(loadRes.benchmark.improvement_summary || "");
+        setIsBenchmarked(true);
+      }
     } catch {
     } finally {
       setLoadingProject(null);
@@ -332,6 +339,16 @@ export default function NewWorkflowPage() {
                           {p.saved_data?.new_workflow_result && (
                             <span className="flex items-center gap-0.5 text-[10px] text-green-600">
                               <CheckCircle2 className="h-3 w-3" /> Workflow 있음
+                            </span>
+                          )}
+                          {p.agent_count != null && p.agent_count > 0 && (
+                            <span className="text-[10px] text-blue-600 font-medium">
+                              Agent {p.agent_count}개
+                            </span>
+                          )}
+                          {p.saved_data?.benchmark_result && (
+                            <span className="text-[10px] text-amber-600 font-medium">
+                              벤치마킹 완료
                             </span>
                           )}
                         </div>

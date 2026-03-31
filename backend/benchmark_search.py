@@ -109,20 +109,26 @@ def _search_duckduckgo(query: str, max_results: int = 8) -> list[dict]:
 # ── 검색 쿼리 생성 ───────────────────────────────────────────────────────────
 
 def _generate_search_queries(workflow_cache: dict) -> list[str]:
-    """선도 기업의 AI 적용 사례를 찾기 위한 검색 쿼리 생성."""
+    """Big Tech·Industry 선도 기업의 AI 활용 사례를 찾기 위한 검색 쿼리 생성.
+    솔루션 Provider가 아닌, 솔루션을 '활용한' 기업 사례에 집중."""
     process_name = workflow_cache.get("process_name", "")
     agents = workflow_cache.get("agents", [])
 
     queries = []
 
-    # 선도 기업 AI 적용 사례 (Best Practice)
-    queries.append(f"'{process_name}' AI automation best practice company case study 2024 2025")
-    queries.append(f"leading company '{process_name}' AI implementation success story enterprise")
+    # Big Tech 기업들의 내부 AI 활용 사례 (솔루션 판매가 아닌 자사 적용)
+    queries.append(
+        f"Google Amazon Meta Microsoft internal '{process_name}' "
+        f"AI automation implementation results 2024 2025"
+    )
 
-    # 글로벌 기업 HR AI 적용 사례
-    queries.append(f"Google Amazon Microsoft '{process_name}' AI HR automation case study")
+    # Industry 선도 기업 AI 도입 사례 (제조·금융·의료 등 실사용 기업)
+    queries.append(
+        f"Fortune 500 enterprise '{process_name}' AI agent deployment "
+        f"case study ROI results"
+    )
 
-    # 에이전트 기술 기반 사례
+    # 에이전트 기술 기반 글로벌 기업 적용 사례
     techniques = set()
     for agent in agents[:3]:
         tech = agent.get("ai_technique", "")
@@ -130,10 +136,21 @@ def _generate_search_queries(workflow_cache: dict) -> list[str]:
             techniques.add(tech.split(",")[0].strip())
     if techniques:
         tech_str = " ".join(list(techniques)[:2])
-        queries.append(f"enterprise {tech_str} '{process_name}' real world deployment results")
+        queries.append(
+            f"enterprise company adopted {tech_str} '{process_name}' "
+            f"real world production deployment"
+        )
 
-    # 컨설팅 펌 리서치
-    queries.append(f"McKinsey Deloitte PwC '{process_name}' AI transformation benchmark report")
+    # 한국 대기업 AI 도입 사례
+    queries.append(
+        f"삼성 현대 SK LG '{process_name}' AI 자동화 도입 사례 성과"
+    )
+
+    # 컨설팅 펌 리서치 (벤치마크 데이터)
+    queries.append(
+        f"McKinsey Deloitte PwC Gartner '{process_name}' "
+        f"AI transformation benchmark industry report 2024 2025"
+    )
 
     return queries[:5]
 
@@ -178,12 +195,22 @@ _BENCHMARK_SYSTEM_PROMPT = """
 선도 기업(Best Practice)의 AI 적용 사례를 분석하여, 현재 Workflow를 개선하는 것입니다.
 단순히 문서에서 정보를 떼오는 것이 아니라, **실제 기업이 해당 분야에서 AI를 어떻게 적용했는지** 사례를 분석합니다.
 
+## 중요 원칙: 솔루션 활용 기업 중심
+- **솔루션 Provider(벤더)가 아닌, AI 솔루션을 '도입·활용한' 기업** 사례를 우선 인용하세요.
+  - ✅ "Unilever는 HireVue AI 면접을 도입하여 채용 스크리닝 시간 75% 단축"
+  - ✅ "삼성전자는 자체 AI 기반 HR Analytics로 인력 수요 예측 정확도 90% 달성"
+  - ❌ "Microsoft는 AI 솔루션을 판매합니다" (이것은 Provider 소개)
+- **Big Tech 기업(Google, Amazon, Meta 등)의 내부 AI 활용 사례**는 인용 가능
+  - 예: "Google은 People Analytics팀에서 AI 기반 이직 예측 모델을 운영"
+- **Industry 선도 기업(Fortune 500, 한국 대기업 등)**의 AI 도입 성과를 우선
+
 ## 분석 과정
 
-**Step 1: 선도 기업 AI 적용 사례 분석**
-- 검색 결과에서 **실제 기업명과 구체적 AI 적용 방법**을 추출
-- 예: "Google은 채용에서 AI 기반 이력서 스크리닝으로 처리 시간 75% 단축"
-- 예: "Unilever는 HireVue AI 면접으로 초기 스크리닝 자동화, 연간 100만 달러 절감"
+**Step 1: 선도 기업 AI 활용 사례 분석**
+- 검색 결과에서 **실제 기업명과 구체적 AI 적용 방법 및 성과**를 추출
+- 예: "Google People Analytics — AI 기반 이직 예측 모델로 핵심인재 이탈률 50% 감소"
+- 예: "Unilever — HireVue AI 면접 도입으로 초기 스크리닝 자동화, 연간 100만 달러 절감"
+- 예: "삼성전자 — AI 기반 HR Analytics로 채용 적합도 예측 정확도 90%"
 - 사례가 없는 일반 문서는 무시하세요
 
 **Step 2: 현재 Workflow에 적용**
@@ -195,8 +222,9 @@ _BENCHMARK_SYSTEM_PROMPT = """
 - 각 개선에 대해 "어떤 기업의 어떤 사례"를 참고했는지 명시
 
 ## benchmark_insights 작성 규칙
-- source: **실제 기업명** (예: "Google", "Unilever", "삼성SDS")
-- insight: 그 기업이 **구체적으로 무엇을 했는지** 한 줄
+- source: **솔루션을 활용한 실제 기업명** (예: "Google People Analytics", "Unilever HR", "삼성전자")
+  - 솔루션 벤더명(예: "Workday", "SAP")은 source로 쓰지 마세요
+- insight: 그 기업이 **구체적으로 무엇을 했고 어떤 성과**가 있었는지 한 줄
 - application: 우리 Workflow에 **어떻게 적용**할지 한 줄
 
 ## Task 작성 규칙 (반드시 지키세요)

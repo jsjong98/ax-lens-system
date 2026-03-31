@@ -310,12 +310,29 @@ async def load_project(request: Request):
         _project_design_cache.update(pds_data)
         loaded["project_design"] = True
 
+    # 벤치마킹 결과도 로드
+    bm_data = load_data("benchmark_result", filename)
+    if bm_data:
+        loaded["benchmark_result"] = True
+
     return {
         "ok": True,
         "filename": filename,
         "loaded": loaded,
         "saved": get_saved_status(filename),
+        "benchmark": bm_data if bm_data else None,
     }
+
+
+@app.get("/api/new-workflow/benchmark-result", tags=["NewWorkflow"])
+async def get_benchmark_result():
+    """저장된 벤치마킹 결과를 반환합니다."""
+    fn = get_current_project()
+    if fn:
+        data = load_data("benchmark_result", fn)
+        if data:
+            return {"ok": True, **data}
+    raise HTTPException(404, "저장된 벤치마킹 결과가 없습니다.")
 
 
 @app.delete("/api/projects/{dirname}", tags=["Data"])
@@ -1533,6 +1550,13 @@ async def generate_new_workflow(
     _new_workflow_cache.update(result_dict)
     _persist_cache("new_workflow", _new_workflow_cache)
 
+    # meta에 agent 수 저장
+    agents = result_dict.get("agents", [])
+    fn = get_current_project()
+    if fn:
+        save_meta(fn, agent_count=len(agents),
+                  agent_names=[a.get("agent_name", "") for a in agents])
+
     return {"ok": True, **result_dict}
 
 
@@ -1621,11 +1645,17 @@ async def benchmark_new_workflow():
     _new_workflow_cache.update(refined_dict)
     _persist_cache("new_workflow", _new_workflow_cache)
 
-    return {
-        "ok": True,
+    # 벤치마킹 결과 별도 저장 (재실행 없이 불러오기 위해)
+    benchmark_data = {
         "benchmark_insights": benchmark_insights,
         "improvement_summary": improvement_summary,
         "search_count": len(benchmark_results),
+    }
+    _persist_cache("benchmark_result", benchmark_data)
+
+    return {
+        "ok": True,
+        **benchmark_data,
         **refined_dict,
     }
 

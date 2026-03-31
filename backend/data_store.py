@@ -40,6 +40,7 @@ DATA_KEYS = [
     "new_workflow_result",
     "project_definition",
     "project_design",
+    "benchmark_result",
 ]
 
 
