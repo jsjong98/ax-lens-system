@@ -162,7 +162,8 @@ def _add_text_box(slide, left, top, width, height, text: str,
 
 
 def _add_multiline_textbox(slide, left, top, width, height, lines: list[str],
-                           font_size=Pt(10), color=DARK, bullet="•", line_spacing=1.15):
+                           font_size=Pt(10), color=DARK, bullet="•", line_spacing=1.15,
+                           font_name: str = ""):
     """여러 줄 텍스트 박스를 추가합니다."""
     txBox = slide.shapes.add_textbox(left, top, width, height)
     tf = txBox.text_frame
@@ -195,6 +196,8 @@ def _add_multiline_textbox(slide, left, top, width, height, lines: list[str],
         run.text = full_text
         run.font.size = font_size
         run.font.color.rgb = color
+        if font_name:
+            run.font.name = font_name
         para.line_spacing = line_spacing
 
     return txBox
@@ -586,8 +589,7 @@ def _fill_agent_slide(slide, agent: dict, design: dict, definition: dict | None 
     def _group_items(items: list[str], max_groups: int = 5) -> list[str]:
         """유사 항목을 큰 chunk로 묶어 '대분류 (세부1, 세부2)' 형태로 반환."""
         if len(items) <= max_groups:
-            # 항목이 적으면 괄호 안 세부만 짧게 줄여서 반환
-            return [_shorten(s, 35) for s in items]
+            return [_shorten(s, 60) for s in items]
 
         # 1단계: 괄호가 있는 항목은 괄호 앞을 카테고리로 추출
         groups: dict[str, list[str]] = {}
@@ -618,35 +620,27 @@ def _fill_agent_slide(slide, agent: dict, design: dict, definition: dict | None 
         for cat, details in groups.items():
             if len(details) == 1:
                 # 그룹에 1개면 괄호 안에 원래 있던 세부만
-                combined = f"{cat} ({details[0][:25]})"
+                combined = f"{cat} ({details[0][:40]})"
             else:
-                # 여러 개 → 짧은 세부만 나열
-                short_details = [_shorten(d, 12) for d in details[:4]]
+                # 여러 개 → 세부 나열
+                short_details = [_shorten(d, 20) for d in details[:4]]
                 suffix = f" 외 {len(details)-4}건" if len(details) > 4 else ""
                 combined = f"{cat} ({', '.join(short_details)}{suffix})"
-            result.append(_shorten(combined, 45))
+            result.append(_shorten(combined, 60))
 
         # 미분류 항목 추가
         for u in ungrouped[:max(1, max_groups - len(result))]:
-            result.append(_shorten(u, 35))
+            result.append(_shorten(u, 60))
         if len(ungrouped) > max(1, max_groups - len(groups)):
             remaining = len(ungrouped) - max(1, max_groups - len(groups))
             result.append(f"... 외 {remaining}건")
 
         return result[:max_groups]
 
-    def _shorten(s: str, max_len: int = 35) -> str:
-        """문자열을 최대 길이로 자르고 생략 표시."""
+    def _shorten(s: str, max_len: int = 60) -> str:
+        """문자열을 최대 길이로 자르기 (넉넉하게)."""
         s = str(s).strip()
         return s[:max_len-1] + "…" if len(s) > max_len else s
-
-    # 항목 수에 따른 폰트 크기 (더 공격적으로 축소)
-    def _auto_font(count: int, base: int = 8) -> Pt:
-        if count > 8: return Pt(5)
-        if count > 6: return Pt(5.5)
-        if count > 4: return Pt(6)
-        if count > 3: return Pt(7)
-        return Pt(base)
 
     # 처리 로직 영역 좌표 (템플릿 Slide 3 기준)
     # Input 그룹(id=48):  L=1.8cm → 내용 L=3.5cm, T=12.3cm, W=5.8cm, H=5.0cm
@@ -656,23 +650,26 @@ def _fill_agent_slide(slide, agent: dict, design: dict, definition: dict | None 
     # 최대 줄수 제한 (칸 넘침 방지)
     MAX_LINES = 5
 
+    _LOGIC_FONT = "Noto Sans KR"
+    _LOGIC_SIZE = Pt(10)
+
     # Input — 그룹핑 + 최대 줄수
     if input_data:
         items = _group_items(input_data, max_groups=MAX_LINES)
         _add_multiline_textbox(
             slide, left=Cm(3.5), top=Cm(12.3),
             width=Cm(5.8), height=Cm(5.0),
-            lines=items, font_size=_auto_font(len(items)), bullet="•",
-            line_spacing=1.05,
+            lines=items, font_size=_LOGIC_SIZE, bullet="•",
+            line_spacing=1.15, font_name=_LOGIC_FONT,
         )
 
     # 방법론 — "번호. 이름 [기법] → 산출물" 최대 4줄
     if processing_steps:
         method_lines = []
         for idx, ps in enumerate(processing_steps[:4], 1):
-            name = _shorten(str(ps.get("step_name", "")), 22)
-            method = _shorten(str(ps.get("method", "")), 15)
-            result_text = _shorten(str(ps.get("result", "")), 15)
+            name = _shorten(str(ps.get("step_name", "")), 30)
+            method = _shorten(str(ps.get("method", "")), 20)
+            result_text = _shorten(str(ps.get("result", "")), 20)
             line = f"{idx}. {name}"
             if method:
                 line += f" [{method}]"
@@ -686,8 +683,8 @@ def _fill_agent_slide(slide, agent: dict, design: dict, definition: dict | None 
             slide, left=Cm(13.0), top=Cm(12.3),
             width=Cm(7.5), height=Cm(5.0),
             lines=method_lines,
-            font_size=_auto_font(len(method_lines), base=7), bullet="",
-            line_spacing=1.1,
+            font_size=_LOGIC_SIZE, bullet="",
+            line_spacing=1.15, font_name=_LOGIC_FONT,
         )
 
     # Output — 그룹핑 + 최대 줄수
@@ -696,8 +693,8 @@ def _fill_agent_slide(slide, agent: dict, design: dict, definition: dict | None 
         _add_multiline_textbox(
             slide, left=Cm(24.2), top=Cm(12.3),
             width=Cm(7.5), height=Cm(5.0),
-            lines=items, font_size=_auto_font(len(items)), bullet="•",
-            line_spacing=1.05,
+            lines=items, font_size=_LOGIC_SIZE, bullet="•",
+            line_spacing=1.15, font_name=_LOGIC_FONT,
         )
 
     # Input → 방법론 → Output 사이 화살표는 템플릿에 이미 포함되어 있음
