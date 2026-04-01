@@ -14,59 +14,204 @@ import openpyxl
 
 from models import Task
 
-# ── 엑셀 열 인덱스 (1-based, openpyxl 기준) ────────────────────────────────
-_COL = {
-    # 프로세스 계층
-    "l2_id":     2,   # B
-    "l2_name":   3,   # C
-    "l3_id":     4,   # D
-    "l3_name":   5,   # E
-    "l4_id":     6,   # F
-    "l4_name":   7,   # G
-    "l4_desc":   8,   # H  (없는 경우 빈 문자열)
-    # L5 Task
-    "l5_id":     9,   # I
-    "l5_name":   10,  # J
-    "l5_desc":   11,  # K
-    "performer": 12,  # L  수행주체 (자유 텍스트)
-    # A-1. 수행주체 체크박스
-    "performer_executive": 13,  # M  임원
-    "performer_hr":        14,  # N  HR
-    "performer_manager":   15,  # O  현업 팀장
-    "performer_member":    16,  # P  현업 구성원
-    # D-1. Pain Point
-    "pain_time":         17,  # Q  시간/속도
-    "pain_accuracy":     18,  # R  정확성
-    "pain_repetition":   19,  # S  반복/수작업
-    "pain_data":         20,  # T  정보/데이터
-    "pain_system":       21,  # U  시스템/도구
-    "pain_communication":22,  # V  의사소통/협업
-    "pain_other":        23,  # W  기타
-    # E-2. Output 유형
-    "output_system":        24,  # X  시스템 반영
-    "output_document":      25,  # Y  문서/보고서
-    "output_communication": 26,  # Z  커뮤니케이션
-    "output_decision":      27,  # AA 의사결정
-    "output_other":         28,  # AB 기타
-    # F-1. 업무 판단 로직
-    "logic_rule_based":     29,  # AC Rule-based
-    "logic_human_judgment": 30,  # AD 사람 판단
-    "logic_mixed":          31,  # AE 혼합
-    # F-2~F-3
-    "remark":                  32,  # AF 비고
-    "standard_or_specialized": 33,  # AG 표준 vs 특화
-    # ── 1차 평가 (AH~AK열) ──
-    "cls_1st_label":           34,  # AH 1차 분류결과
-    "cls_1st_knockout":        35,  # AI 적용기준(Knock-out)
-    "cls_1st_reason":          36,  # AJ 1차 판단근거
-    "cls_1st_ai_prereq":       37,  # AK AI 수행 필요여건
-    # ── 두산 검토 (AL~AM열) ──
-    "cls_doosan_label":        38,  # AL 분류 결과(변경 필요 시 작성)
-    "cls_doosan_feedback":     39,  # AM Feedback
-    # ── 최종 PwC 검토 (AN~AO열) ──
-    "cls_final_label":         40,  # AN 최종 분류 결과
-    "cls_final_feedback":      41,  # AO PwC Feedback
+# ── 기본 열 인덱스 (1-based, 헤더 자동 감지 실패 시 fallback) ──────────────
+_COL_DEFAULT = {
+    "l2_id": 2, "l2_name": 3, "l3_id": 4, "l3_name": 5,
+    "l4_id": 6, "l4_name": 7, "l4_desc": 8,
+    "l5_id": 9, "l5_name": 10, "l5_desc": 11, "performer": 12,
+    "performer_executive": 13, "performer_hr": 14,
+    "performer_manager": 15, "performer_member": 16,
+    "pain_time": 17, "pain_accuracy": 18, "pain_repetition": 19,
+    "pain_data": 20, "pain_system": 21, "pain_communication": 22, "pain_other": 23,
+    "output_system": 24, "output_document": 25, "output_communication": 26,
+    "output_decision": 27, "output_other": 28,
+    "logic_rule_based": 29, "logic_human_judgment": 30, "logic_mixed": 31,
+    "remark": 32, "standard_or_specialized": 33,
+    "cls_1st_label": 34, "cls_1st_knockout": 35,
+    "cls_1st_reason": 36, "cls_1st_ai_prereq": 37,
+    "cls_doosan_label": 38, "cls_doosan_feedback": 39,
+    "cls_final_label": 40, "cls_final_feedback": 41,
 }
+
+# ── 헤더 텍스트 → 필드 매핑 (부분 일치로 검색) ──────────────────────────────
+# 행 8~9에 걸친 다단 헤더의 텍스트를 매칭합니다.
+# 각 항목: (필드명, [매칭할 키워드 목록]) — 키워드 중 하나라도 포함되면 매칭
+_HEADER_PATTERNS: list[tuple[str, list[str]]] = [
+    # 프로세스 계층 — 행 8의 "ID", "Name" 등은 여러 열에 반복되므로
+    # L2~L5는 위치 기반으로 남기고, 특수 헤더만 이름으로 매핑
+    # L5 ID는 가장 핵심 — "Task (L5)" 하위의 "ID"
+    # → L2~L5 계층은 위치가 고정적이므로 fallback 사용
+
+    # ── 분류 결과 (가장 구체적인 키워드 → 먼저 매칭해서 선점) ──
+    # 최종 PwC 검토
+    ("cls_final_label",    ["최종 분류 결과", "최종 분류"]),
+    ("cls_final_feedback", ["PwC Feedback", "PwC 피드백"]),
+    # 두산 검토 ("Feedback"은 PwC 뒤에 매칭되므로 "두산"이 필수)
+    ("cls_doosan_feedback", ["두산 Feedback", "두산 피드백"]),
+    ("cls_doosan_label",    ["변경 필요", "두산 검토"]),
+    # 1차 평가
+    ("cls_1st_label",      ["1차 분류결과", "1차 분류"]),
+    ("cls_1st_knockout",   ["적용기준", "Knock-out", "Knockout"]),
+    ("cls_1st_reason",     ["1차 판단", "판단 근거", "판단근거"]),
+    ("cls_1st_ai_prereq",  ["AI 수행 필요", "필요여건", "필요 여건"]),
+
+    # ── F-2, F-3 ──
+    ("remark",                  ["F-2", "비고"]),
+    ("standard_or_specialized", ["F-3", "표준 vs", "특화"]),
+
+    # ── 업무 판단 로직 (F-1) ──
+    ("logic_rule_based",     ["Rule-based", "규칙 기반"]),
+    ("logic_human_judgment", ["사람 판단"]),
+    ("logic_mixed",          ["혼합"]),
+
+    # ── Output (E-2) — "시스템 반영"을 먼저 잡아서 Pain의 "시스템/도구"와 구분 ──
+    ("output_system",        ["시스템 반영"]),
+    ("output_document",      ["문서/보고서"]),
+    ("output_communication", ["커뮤니케이션"]),
+    ("output_decision",      ["의사결정"]),
+
+    # ── Pain Point (D-1) — "시스템/도구"는 구체적 키워드 사용 ──
+    ("pain_time",           ["시간/속도"]),
+    ("pain_accuracy",       ["정확성"]),
+    ("pain_repetition",     ["반복/수작업"]),
+    ("pain_data",           ["정보/데이터"]),
+    ("pain_system",         ["시스템/도구"]),
+    ("pain_communication",  ["의사소통/협업"]),
+
+    # ── 수행주체 (A-1) ──
+    ("performer_executive", ["임원"]),
+    ("performer_manager",   ["현업 팀장"]),
+    ("performer_member",    ["현업 구성원"]),
+]
+
+# Pain Point / Output의 마지막 "기타" 열은 컨텍스트로 구분
+_CONTEXT_OTHERS: list[tuple[str, str, list[str]]] = [
+    # (필드명, 이 열 앞에 와야 하는 필드의 키워드, ["기타"])
+    ("pain_other",   "pain_",   ["기타"]),
+    ("output_other", "output_", ["기타"]),
+]
+
+
+def _detect_columns(ws, scan_rows: int = 15) -> dict[str, int]:
+    """
+    시트의 헤더 영역(행 1~scan_rows)을 스캔하여 열 이름 → 1-based 열 번호 매핑을 반환.
+    다단 헤더(행 7~9 등)를 모두 합쳐서 매칭합니다.
+    """
+    # 각 열의 헤더 텍스트를 행 전체에서 수집 (다단 헤더 대응)
+    col_texts: dict[int, str] = {}  # col_idx(1-based) → 합친 헤더 텍스트
+    for row in ws.iter_rows(min_row=1, max_row=scan_rows, values_only=True):
+        for col_idx, val in enumerate(row, start=1):
+            if val is not None:
+                text = str(val).strip().replace("\n", " ")
+                if col_idx in col_texts:
+                    col_texts[col_idx] += " " + text
+                else:
+                    col_texts[col_idx] = text
+
+    # 매핑 결과
+    detected: dict[str, int] = {}
+    used_cols: set[int] = set()
+
+    # 1단계: 특수 패턴 매칭 (구체적인 키워드)
+    for field, keywords in _HEADER_PATTERNS:
+        if field in detected:
+            continue
+        for col_idx, text in col_texts.items():
+            if col_idx in used_cols:
+                continue
+            for kw in keywords:
+                if kw in text:
+                    detected[field] = col_idx
+                    used_cols.add(col_idx)
+                    break
+            if field in detected:
+                break
+
+    # 2단계: "기타" 열 — 컨텍스트 기반 (앞 열이 pain_ 계열이면 pain_other)
+    for field, prefix, keywords in _CONTEXT_OTHERS:
+        if field in detected:
+            continue
+        # 해당 prefix를 가진 필드들의 최대 열 번호를 찾음
+        prefix_cols = [v for k, v in detected.items() if k.startswith(prefix) and k != field]
+        if not prefix_cols:
+            continue
+        max_col = max(prefix_cols)
+        # max_col 바로 다음 열들에서 "기타"를 찾음
+        for col_idx in range(max_col + 1, max_col + 4):
+            if col_idx in used_cols:
+                continue
+            text = col_texts.get(col_idx, "")
+            if any(kw in text for kw in keywords):
+                detected[field] = col_idx
+                used_cols.add(col_idx)
+                break
+
+    # 3단계: L2~L5 계층 — 위치 기반 (L5 ID 열을 찾고 거기서 역산)
+    # L5 ID는 _L5_ID_RE 패턴이 있는 열
+    l5_id_col = None
+    for col_idx, text in col_texts.items():
+        if "Task" in text and "L5" in text:
+            l5_id_col = col_idx
+            break
+    if not l5_id_col:
+        # ID 열 직접 스캔 (데이터 행에서 L5 ID 패턴이 있는 열)
+        for row in ws.iter_rows(min_row=scan_rows + 1, max_row=scan_rows + 10, values_only=True):
+            for col_idx, val in enumerate(row, start=1):
+                if val and _L5_ID_RE.match(str(val).strip()):
+                    l5_id_col = col_idx
+                    break
+            if l5_id_col:
+                break
+
+    if l5_id_col:
+        detected["l5_id"] = l5_id_col
+        detected["l5_name"] = l5_id_col + 1
+        detected["l5_desc"] = l5_id_col + 2
+
+        # L5 앞: 수행주체(performer) 열은 l5_desc 다음
+        detected["performer"] = l5_id_col + 3
+
+        # L4: L5 ID 바로 앞 3열
+        detected["l4_desc"] = l5_id_col - 1
+        detected["l4_name"] = l5_id_col - 2
+        detected["l4_id"]   = l5_id_col - 3
+
+        # L3: L4 앞 2열
+        detected["l3_name"] = l5_id_col - 4
+        detected["l3_id"]   = l5_id_col - 5
+
+        # L2: L3 앞 2열
+        detected["l2_name"] = l5_id_col - 6
+        detected["l2_id"]   = l5_id_col - 7
+
+    # 4단계: performer_hr — "HR"은 너무 짧아서 다른 열에도 걸림
+    # performer_executive(임원) 바로 다음 열이 HR
+    if "performer_hr" not in detected and "performer_executive" in detected:
+        hr_col = detected["performer_executive"] + 1
+        if hr_col not in used_cols:
+            detected["performer_hr"] = hr_col
+            used_cols.add(hr_col)
+    # 또는 performer_manager 바로 앞 열
+    if "performer_hr" not in detected and "performer_manager" in detected:
+        hr_col = detected["performer_manager"] - 1
+        if hr_col not in used_cols:
+            detected["performer_hr"] = hr_col
+            used_cols.add(hr_col)
+
+    # 5단계: fallback — 감지 못한 필드는 기본값 사용
+    result = dict(_COL_DEFAULT)
+    result.update(detected)
+
+    # 로그
+    auto_count = len(detected)
+    fallback_count = len(_COL_DEFAULT) - auto_count
+    print(f"[excel] 헤더 자동 감지: {auto_count}개 매핑, {fallback_count}개 기본값 사용")
+    for field, col_idx in sorted(result.items(), key=lambda x: x[1]):
+        source = "자동" if field in detected else "기본"
+        header_text = col_texts.get(col_idx, "")[:30]
+        print(f"  {field:30s} → 열 {col_idx:2d}  [{source}] {header_text}")
+
+    return result
 
 # ── 시트 자동 감지 ────────────────────────────────────────────────────────────
 
@@ -257,6 +402,9 @@ def load_tasks(
         ws = _find_data_sheet(wb)
     data_start_row = _find_data_start_row(ws)
 
+    # 헤더 자동 감지 (read_only 재오픈 전에 수행)
+    COL = _detect_columns(ws)
+
     # read_only 모드에서는 ws를 재사용할 수 없으므로 다시 열기
     wb.close()
     wb = openpyxl.load_workbook(str(excel_path), data_only=True, read_only=True)
@@ -270,7 +418,7 @@ def load_tasks(
         max_row=ws.max_row,
         values_only=True,
     ):
-        l5_id = _cell(row, _COL["l5_id"])
+        l5_id = _cell(row, COL["l5_id"])
         if not l5_id:
             continue
 
@@ -286,51 +434,51 @@ def load_tasks(
         tasks.append(
             Task(
                 id=unique_id,
-                l2_id=_cell(row, _COL["l2_id"]),
-                l2=_cell(row, _COL["l2_name"]),
-                l3_id=_cell(row, _COL["l3_id"]),
-                l3=_cell(row, _COL["l3_name"]),
-                l4_id=_cell(row, _COL["l4_id"]),
-                l4=_cell(row, _COL["l4_name"]),
-                l4_description=_cell(row, _COL["l4_desc"]),
-                name=_cell(row, _COL["l5_name"]),
-                description=_cell(row, _COL["l5_desc"]),
-                performer=_cell(row, _COL["performer"]),
+                l2_id=_cell(row, COL["l2_id"]),
+                l2=_cell(row, COL["l2_name"]),
+                l3_id=_cell(row, COL["l3_id"]),
+                l3=_cell(row, COL["l3_name"]),
+                l4_id=_cell(row, COL["l4_id"]),
+                l4=_cell(row, COL["l4_name"]),
+                l4_description=_cell(row, COL["l4_desc"]),
+                name=_cell(row, COL["l5_name"]),
+                description=_cell(row, COL["l5_desc"]),
+                performer=_cell(row, COL["performer"]),
                 # A-1. 수행주체 체크박스
-                performer_executive=_cell(row, _COL["performer_executive"]),
-                performer_hr=_cell(row, _COL["performer_hr"]),
-                performer_manager=_cell(row, _COL["performer_manager"]),
-                performer_member=_cell(row, _COL["performer_member"]),
+                performer_executive=_cell(row, COL["performer_executive"]),
+                performer_hr=_cell(row, COL["performer_hr"]),
+                performer_manager=_cell(row, COL["performer_manager"]),
+                performer_member=_cell(row, COL["performer_member"]),
                 # D-1. Pain Point
-                pain_time=_cell(row, _COL["pain_time"]),
-                pain_accuracy=_cell(row, _COL["pain_accuracy"]),
-                pain_repetition=_cell(row, _COL["pain_repetition"]),
-                pain_data=_cell(row, _COL["pain_data"]),
-                pain_system=_cell(row, _COL["pain_system"]),
-                pain_communication=_cell(row, _COL["pain_communication"]),
-                pain_other=_cell(row, _COL["pain_other"]),
+                pain_time=_cell(row, COL["pain_time"]),
+                pain_accuracy=_cell(row, COL["pain_accuracy"]),
+                pain_repetition=_cell(row, COL["pain_repetition"]),
+                pain_data=_cell(row, COL["pain_data"]),
+                pain_system=_cell(row, COL["pain_system"]),
+                pain_communication=_cell(row, COL["pain_communication"]),
+                pain_other=_cell(row, COL["pain_other"]),
                 # E-2. Output
-                output_system=_cell(row, _COL["output_system"]),
-                output_document=_cell(row, _COL["output_document"]),
-                output_communication=_cell(row, _COL["output_communication"]),
-                output_decision=_cell(row, _COL["output_decision"]),
-                output_other=_cell(row, _COL["output_other"]),
+                output_system=_cell(row, COL["output_system"]),
+                output_document=_cell(row, COL["output_document"]),
+                output_communication=_cell(row, COL["output_communication"]),
+                output_decision=_cell(row, COL["output_decision"]),
+                output_other=_cell(row, COL["output_other"]),
                 # F-1. 업무 판단 로직
-                logic_rule_based=_cell(row, _COL["logic_rule_based"]),
-                logic_human_judgment=_cell(row, _COL["logic_human_judgment"]),
-                logic_mixed=_cell(row, _COL["logic_mixed"]),
+                logic_rule_based=_cell(row, COL["logic_rule_based"]),
+                logic_human_judgment=_cell(row, COL["logic_human_judgment"]),
+                logic_mixed=_cell(row, COL["logic_mixed"]),
                 # F-2~F-3
-                remark=_cell(row, _COL["remark"]),
-                standard_or_specialized=_cell(row, _COL["standard_or_specialized"]),
+                remark=_cell(row, COL["remark"]),
+                standard_or_specialized=_cell(row, COL["standard_or_specialized"]),
                 # 분류 결과 (있으면 읽기)
-                cls_1st_label=_cell(row, _COL["cls_1st_label"]),
-                cls_1st_knockout=_cell(row, _COL["cls_1st_knockout"]),
-                cls_1st_reason=_cell(row, _COL["cls_1st_reason"]),
-                cls_1st_ai_prereq=_cell(row, _COL["cls_1st_ai_prereq"]),
-                cls_doosan_label=_cell(row, _COL["cls_doosan_label"]),
-                cls_doosan_feedback=_cell(row, _COL["cls_doosan_feedback"]),
-                cls_final_label=_cell(row, _COL["cls_final_label"]),
-                cls_final_feedback=_cell(row, _COL["cls_final_feedback"]),
+                cls_1st_label=_cell(row, COL["cls_1st_label"]),
+                cls_1st_knockout=_cell(row, COL["cls_1st_knockout"]),
+                cls_1st_reason=_cell(row, COL["cls_1st_reason"]),
+                cls_1st_ai_prereq=_cell(row, COL["cls_1st_ai_prereq"]),
+                cls_doosan_label=_cell(row, COL["cls_doosan_label"]),
+                cls_doosan_feedback=_cell(row, COL["cls_doosan_feedback"]),
+                cls_final_label=_cell(row, COL["cls_final_label"]),
+                cls_final_feedback=_cell(row, COL["cls_final_feedback"]),
             )
         )
 
