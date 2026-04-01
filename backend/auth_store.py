@@ -149,7 +149,7 @@ def change_password(email: str, old_password: str, new_password: str) -> bool:
     user = users.get(email)
     if not user:
         return False
-    if user["password_hash"] != _hash_password(old_password):
+    if not _verify_password(old_password, user["password_hash"]):
         return False
     user["password_hash"] = _hash_password(new_password)
     user["must_change_password"] = False
