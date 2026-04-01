@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
-import { getSettings, saveSettings, getUsage, resetUsage, type ClassifierSettings, type UsageStats } from "@/lib/api";
-import { Save, CheckCircle2, AlertCircle, ChevronDown, ChevronUp, RefreshCw, Trash2, Activity } from "lucide-react";
+import { useEffect, useState } from "react";
+import { getSettings, saveSettings, type ClassifierSettings } from "@/lib/api";
+import { Save, CheckCircle2, AlertCircle, ChevronDown, ChevronUp } from "lucide-react";
 
 // 내장 Knock-out 기준 (읽기 전용 표시용)
 const BUILTIN_CRITERIA = [
@@ -106,21 +106,9 @@ export default function SettingsPage() {
   const [saved, setSaved]         = useState(false);
   const [error, setError]         = useState("");
   const [showBuiltin, setShowBuiltin] = useState(true);
-  const [usage, setUsage]         = useState<UsageStats | null>(null);
-  const [usageLoading, setUsageLoading] = useState(false);
-
-  const fetchUsage = useCallback(() => {
-    setUsageLoading(true);
-    getUsage()
-      .then(setUsage)
-      .catch(() => {})
-      .finally(() => setUsageLoading(false));
-  }, []);
-
   useEffect(() => {
     getSettings().then(setForm).catch(() => {});
-    fetchUsage();
-  }, [fetchUsage]);
+  }, []);
 
   const handleSave = async () => {
     setSaving(true); setError(""); setSaved(false);
@@ -333,97 +321,6 @@ export default function SettingsPage() {
           </div>
         )}
       </div>
-
-      {/* API 사용량 */}
-      <section className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-          <div className="flex items-center gap-2">
-            <Activity className="h-4 w-4 text-gray-400" />
-            <h2 className="text-sm font-semibold text-gray-800">API 사용량</h2>
-            <span className="text-xs text-gray-400">(누적 · 앱 실행 후 집계)</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={fetchUsage}
-              disabled={usageLoading}
-              className="flex items-center gap-1 rounded px-2 py-1 text-xs text-gray-500 hover:bg-gray-100 disabled:opacity-40"
-            >
-              <RefreshCw className={`h-3 w-3 ${usageLoading ? "animate-spin" : ""}`} />
-              새로고침
-            </button>
-            <button
-              onClick={async () => {
-                if (!confirm("사용량 기록을 초기화할까요?")) return;
-                await resetUsage("all");
-                fetchUsage();
-              }}
-              className="flex items-center gap-1 rounded px-2 py-1 text-xs text-red-500 hover:bg-red-50"
-            >
-              <Trash2 className="h-3 w-3" />
-              초기화
-            </button>
-          </div>
-        </div>
-
-        {usage && (
-          <div className="divide-y divide-gray-50">
-            {(["openai", "anthropic"] as const).map((p) => {
-              const u = usage[p];
-              const providerLabel = p === "openai" ? "O 모델" : "A 모델";
-              const color = p === "openai" ? "#10a37f" : "#c96442";
-              const totalTokens = u.input_tokens + u.output_tokens;
-              const costKRW = u.estimated_cost_usd * 1380; // 환율 추정
-              const lastUsed = u.last_used
-                ? new Date(u.last_used).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
-                : "없음";
-
-              return (
-                <div key={p} className="px-6 py-4">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-2">
-                      <span className="rounded px-2 py-0.5 text-xs font-bold text-white" style={{ backgroundColor: color }}>{providerLabel}</span>
-                      <span className="text-xs text-gray-400">마지막 사용: {lastUsed}</span>
-                    </div>
-                    <span className="text-xs text-gray-400">호출 {u.total_calls.toLocaleString()}회</span>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                    <div className="rounded-lg bg-gray-50 px-3 py-2">
-                      <p className="text-xs text-gray-400 mb-0.5">입력 토큰</p>
-                      <p className="text-sm font-bold text-gray-800">{u.input_tokens.toLocaleString()}</p>
-                    </div>
-                    <div className="rounded-lg bg-gray-50 px-3 py-2">
-                      <p className="text-xs text-gray-400 mb-0.5">출력 토큰</p>
-                      <p className="text-sm font-bold text-gray-800">{u.output_tokens.toLocaleString()}</p>
-                    </div>
-                    <div className="rounded-lg bg-gray-50 px-3 py-2">
-                      <p className="text-xs text-gray-400 mb-0.5">총 토큰</p>
-                      <p className="text-sm font-bold text-gray-800">{totalTokens.toLocaleString()}</p>
-                    </div>
-                    <div className="rounded-lg px-3 py-2" style={{ backgroundColor: p === "openai" ? "#f0fdf4" : "#fff7ed" }}>
-                      <p className="text-xs text-gray-400 mb-0.5">예상 비용 (추정)</p>
-                      <p className="text-sm font-bold" style={{ color }}>
-                        ${u.estimated_cost_usd.toFixed(4)}
-                        <span className="ml-1 text-xs font-normal text-gray-400">≈ ₩{Math.round(costKRW).toLocaleString()}</span>
-                      </p>
-                    </div>
-                  </div>
-
-                  <p className="mt-2 text-xs text-gray-300">
-                    단가: 입력 ${u.price_per_1m_input}/1M · 출력 ${u.price_per_1m_output}/1M (추정치 — 실제 청구는 각 제공사 대시보드 기준)
-                  </p>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {!usage && !usageLoading && (
-          <div className="px-6 py-8 text-center text-sm text-gray-400">
-            백엔드에 연결할 수 없습니다.
-          </div>
-        )}
-      </section>
 
       <section className="rounded-xl border border-gray-100 bg-gray-50 p-5 text-xs text-gray-600 space-y-1">
         <p className="font-semibold text-gray-700">참고: backend/.env 파일 설정 예시</p>
