@@ -3076,12 +3076,13 @@ def _require_admin(request: Request) -> dict:
 
 @app.get("/api/admin/dashboard", tags=["Admin"])
 async def admin_dashboard(request: Request):
-    """Admin 대시보드: 사용자/세션/활동 요약."""
+    """Admin 대시보드: 사용자/세션/활동/토큰 사용량 요약."""
     _require_admin(request)
     users = get_all_users_info()
     sessions = get_all_sessions()
     login_history = audit_log.get_login_history(limit=30)
     data_activity = audit_log.get_data_activity(limit=30)
+    usage = get_usage()
     audit_log.log_event("admin_view", email=ADMIN_EMAIL, ip=_get_client_ip(request), detail="dashboard")
     return {
         "ok": True,
@@ -3091,6 +3092,7 @@ async def admin_dashboard(request: Request):
         "data_activity": data_activity,
         "total_sessions": len(sessions),
         "total_users": len(users),
+        "usage": usage,
     }
 
 

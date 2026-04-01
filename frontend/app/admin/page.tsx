@@ -25,6 +25,7 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [auditFilter, setAuditFilter] = useState({ email: "", event: "", ip: "" });
+  const [usage, setUsage] = useState<Record<string, { total_calls: number; input_tokens: number; output_tokens: number; estimated_cost_usd: number; last_used: string | null }>>({});
 
   const loadDashboard = useCallback(async () => {
     setLoading(true);
@@ -35,6 +36,7 @@ export default function AdminPage() {
       setSessions(data.active_sessions);
       setLoginHistory(data.login_history);
       setDataActivity(data.data_activity);
+      if ((data as Record<string, unknown>).usage) setUsage((data as Record<string, unknown>).usage as typeof usage);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -188,6 +190,46 @@ export default function AdminPage() {
               </tbody>
             </table>
           </div>
+
+          {/* 토큰 사용량 */}
+          {Object.keys(usage).length > 0 && (
+            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 text-sm font-bold text-gray-700">API 토큰 사용량</div>
+              <div className="p-4">
+                <div className="grid grid-cols-2 gap-4">
+                  {Object.entries(usage).map(([provider, u]) => (
+                    <div key={provider} className="border border-gray-200 rounded-lg p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <span className={`text-sm font-bold ${provider === "openai" ? "text-green-700" : "text-orange-700"}`}>
+                          {provider === "openai" ? "OpenAI (Model A)" : "Anthropic (Model B)"}
+                        </span>
+                        <span className="text-lg font-bold text-gray-800">${u.estimated_cost_usd.toFixed(4)}</span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-3 text-xs">
+                        <div>
+                          <div className="text-gray-500">API 호출</div>
+                          <div className="font-bold text-gray-800">{u.total_calls.toLocaleString()}회</div>
+                        </div>
+                        <div>
+                          <div className="text-gray-500">Input 토큰</div>
+                          <div className="font-bold text-gray-800">{u.input_tokens.toLocaleString()}</div>
+                        </div>
+                        <div>
+                          <div className="text-gray-500">Output 토큰</div>
+                          <div className="font-bold text-gray-800">{u.output_tokens.toLocaleString()}</div>
+                        </div>
+                      </div>
+                      {u.last_used && (
+                        <div className="text-[10px] text-gray-400 mt-2">
+                          마지막 사용: {u.last_used.replace("T", " ").slice(0, 19)}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* 최근 데이터 활동 */}
           <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
