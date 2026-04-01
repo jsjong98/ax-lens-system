@@ -166,6 +166,8 @@ export interface AuthUser {
   name: string;
   must_change_password: boolean;
   is_admin?: boolean;
+  project?: string | null;
+  projects?: string[];
 }
 
 export async function login(email: string, password: string): Promise<{ token: string; user: AuthUser }> {
@@ -1283,6 +1285,8 @@ export interface AdminUser {
   must_change_password: boolean;
   active_sessions: number;
   session_ips: string[];
+  project?: string | null;
+  projects?: string[];
 }
 
 export interface AdminSession {

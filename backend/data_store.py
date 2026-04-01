@@ -207,3 +207,68 @@ def delete_project(filename: str) -> bool:
             _CURRENT_FILE.unlink()
         return True
     return False
+
+
+# ── 팀 프로젝트 기반 데이터 격리 ─────────────────────────────────────────────
+
+def save_meta_team(filename: str, team_project: str | None = None, **kwargs) -> None:
+    """메타데이터에 팀 프로젝트 정보를 기록."""
+    meta_path = _project_dir(filename) / "meta.json"
+    meta = {}
+    if meta_path.exists():
+        try:
+            meta = json.loads(meta_path.read_text("utf-8"))
+        except Exception:
+            pass
+    meta.update(kwargs)
+    if team_project:
+        meta["team_project"] = team_project
+    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), "utf-8")
+
+
+def list_projects_for_user(allowed_projects: list[str] | None = None) -> list[dict]:
+    """
+    사용자가 접근 가능한 프로젝트만 반환.
+    allowed_projects가 None이면 전체 반환 (Admin/공통).
+    """
+    all_projects = list_projects()
+    if allowed_projects is None:
+        return all_projects
+
+    # team_project가 allowed_projects에 포함되거나, team_project가 미설정인 프로젝트도 포함
+    return [
+        p for p in all_projects
+        if p.get("team_project") in allowed_projects
+        or not p.get("team_project")  # 레거시 (팀 미배정)
+    ]
+
+
+def list_uploads_for_project(team_project: str | None = None) -> list[dict]:
+    """팀 프로젝트별 업로드 파일 목록."""
+    upload_dir = _PERSIST_ROOT / "uploads"
+    if not upload_dir.exists():
+        return []
+    files = []
+    for f in sorted(upload_dir.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
+        if not f.is_file():
+            continue
+        stat = f.stat()
+        entry = {
+            "filename": f.name,
+            "size_kb": round(stat.st_size / 1024, 1),
+            "modified": __import__("datetime").datetime.fromtimestamp(stat.st_mtime).isoformat(),
+        }
+        # 메타에서 team_project 확인
+        meta_path = _project_dir(f.stem) / "meta.json"
+        if meta_path.exists():
+            try:
+                meta = json.loads(meta_path.read_text("utf-8"))
+                entry["team_project"] = meta.get("team_project", "")
+            except Exception:
+                pass
+        files.append(entry)
+
+    if team_project:
+        files = [f for f in files if f.get("team_project") == team_project or not f.get("team_project")]
+
+    return files

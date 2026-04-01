@@ -169,6 +169,7 @@ export default function AdminPage() {
                   <th className="text-left px-4 py-2 font-medium text-gray-600">이름</th>
                   <th className="text-center px-4 py-2 font-medium text-gray-600">세션</th>
                   <th className="text-left px-4 py-2 font-medium text-gray-600">접속 IP</th>
+                  <th className="text-left px-4 py-2 font-medium text-gray-600">프로젝트</th>
                   <th className="text-center px-4 py-2 font-medium text-gray-600">상태</th>
                   <th className="text-center px-4 py-2 font-medium text-gray-600">액션</th>
                 </tr>
@@ -186,6 +187,13 @@ export default function AdminPage() {
                       </span>
                     </td>
                     <td className="px-4 py-2 text-xs text-gray-500">{u.session_ips.join(", ") || "-"}</td>
+                    <td className="px-4 py-2 text-xs">
+                      {u.project ? (
+                        <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-bold">{u.project}</span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-bold">공통</span>
+                      )}
+                    </td>
                     <td className="px-4 py-2 text-center">
                       {u.must_change_password && (
                         <span className="px-2 py-0.5 rounded-full text-[10px] bg-yellow-100 text-yellow-700">비번 변경 필요</span>

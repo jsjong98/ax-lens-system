@@ -24,6 +24,67 @@ MAX_SESSIONS_PER_USER = 2
 # Admin 이메일
 ADMIN_EMAIL = "jong-hwan.oh@pwc.com"
 
+# ── 프로젝트 배정 ────────────────────────────────────────────────────────────
+# 사용자 이름 → 프로젝트 매핑 (이름 기반, 이메일 매핑은 users.json의 name 필드 사용)
+# "공통" 멤버는 모든 프로젝트 데이터에 접근 가능
+PROJECT_ASSIGNMENTS: dict[str, list[str]] = {
+    "공통": ["오종환", "조혜수", "김지동"],
+    "SKI":  ["이선영", "이채원", "김동욱", "정창원"],
+    "두산": ["정희진", "윤솔이", "백소연"],
+}
+
+# 전체 프로젝트 목록
+ALL_PROJECTS = list(PROJECT_ASSIGNMENTS.keys())
+
+
+def get_user_project(email: str) -> str | None:
+    """사용자의 프로젝트를 반환. 공통 멤버는 None(=전체 접근)."""
+    users = _load_users()
+    user = users.get(email)
+    if not user:
+        return None
+    name = user.get("name", "")
+
+    # Admin은 전체 접근
+    if email == ADMIN_EMAIL:
+        return None
+
+    # 이름으로 프로젝트 매핑
+    for project, members in PROJECT_ASSIGNMENTS.items():
+        if name in members:
+            if project == "공통":
+                return None  # 전체 접근
+            return project
+
+    # 이메일로도 시도 (users.json에 project 필드가 있는 경우)
+    return user.get("project", None)
+
+
+def get_user_projects(email: str) -> list[str]:
+    """사용자가 접근 가능한 프로젝트 목록 반환."""
+    users = _load_users()
+    user = users.get(email)
+    if not user:
+        return []
+    name = user.get("name", "")
+
+    # Admin/공통은 전체
+    if email == ADMIN_EMAIL:
+        return ALL_PROJECTS
+    for member in PROJECT_ASSIGNMENTS.get("공통", []):
+        if member == name:
+            return ALL_PROJECTS
+
+    # 특정 프로젝트
+    for project, members in PROJECT_ASSIGNMENTS.items():
+        if project == "공통":
+            continue
+        if name in members:
+            return [project]
+
+    # 배정 안 된 사용자 → 빈 리스트 (접근 불가는 아님, 기본 프로젝트)
+    return user.get("projects", ALL_PROJECTS)
+
 # 세션 저장소 (파일 영속)
 _sessions: dict[str, dict] = {}
 
@@ -204,6 +265,8 @@ def get_session_user(token: str) -> dict | None:
         "name": user["name"],
         "must_change_password": user.get("must_change_password", False),
         "is_admin": email == ADMIN_EMAIL,
+        "project": get_user_project(email),
+        "projects": get_user_projects(email),
     }
 
 
@@ -259,6 +322,8 @@ def get_all_users_info() -> list[dict]:
             "must_change_password": user.get("must_change_password", False),
             "active_sessions": len(sessions),
             "session_ips": list({s.get("ip", "") for _, s in sessions}),
+            "project": get_user_project(email),
+            "projects": get_user_projects(email),
         })
     return result
 

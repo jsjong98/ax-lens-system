@@ -80,13 +80,16 @@ from auth_store import (
     get_all_users_info,
     force_logout_user,
     update_session_info,
+    get_user_project,
+    get_user_projects,
     ADMIN_EMAIL,
+    ALL_PROJECTS,
 )
 import audit_log
 from data_store import (
     save_data, load_data, clear_data, get_saved_status,
     set_current_project, get_current_project, list_projects, save_meta,
-    delete_project,
+    delete_project, save_meta_team, list_projects_for_user,
 )
 
 # ── 앱 초기화 ────────────────────────────────────────────────────────────────
@@ -124,6 +127,12 @@ init_default_users()
 # ── 인증 엔드포인트 ──────────────────────────────────────────────────────────
 
 from pydantic import BaseModel as _BaseModel
+
+
+def _get_user_context(request: Request) -> dict | None:
+    """요청에서 사용자 정보 + 프로젝트 정보를 추출."""
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    return get_session_user(token)
 
 
 def _get_client_ip(request: Request) -> str:
@@ -292,9 +301,17 @@ async def reset_all_data():
 
 
 @app.get("/api/projects", tags=["Data"])
-async def get_project_list():
-    """저장된 모든 프로젝트(파일) 목록을 반환합니다."""
-    return {"ok": True, "projects": list_projects()}
+async def get_project_list(request: Request):
+    """저장된 프로젝트 목록 — 사용자 프로젝트로 필터링."""
+    user_ctx = _get_user_context(request)
+    if user_ctx:
+        projects = list_projects_for_user(
+            None if user_ctx.get("is_admin") or user_ctx.get("project") is None
+            else user_ctx.get("projects")
+        )
+    else:
+        projects = list_projects()
+    return {"ok": True, "projects": projects}
 
 
 @app.post("/api/projects/load", tags=["Data"])
@@ -896,7 +913,13 @@ async def upload_excel(file: UploadFile = File(...)):
         except Exception:
             pass
 
-    audit_log.log_event("excel_upload", detail=f"{file.filename} ({len(_tasks_cache)} tasks)")
+    # 사용자 프로젝트 기록
+    user_ctx = _get_user_context(request)
+    team_project = user_ctx.get("project") if user_ctx else None
+    save_meta_team(file.filename, team_project=team_project, source="tasks_page")
+    audit_log.log_event("excel_upload", email=user_ctx.get("email", "") if user_ctx else "",
+                        ip=_get_client_ip(request),
+                        detail=f"{file.filename} ({len(_tasks_cache)} tasks) [{team_project or '공통'}]")
 
     return {
         "message": "업로드 성공",
@@ -3094,6 +3117,11 @@ async def admin_dashboard(request: Request):
         "total_sessions": len(sessions),
         "total_users": len(users),
         "usage": usage,
+        "team_projects": ALL_PROJECTS,
+        "project_data": {
+            proj: list_projects_for_user([proj])
+            for proj in ALL_PROJECTS
+        },
     }
 
 
