@@ -166,8 +166,23 @@ export interface AuthUser {
   name: string;
   must_change_password: boolean;
   is_admin?: boolean;
+  is_pm?: boolean;
+  pm_project?: string | null;
   project?: string | null;
   projects?: string[];
+}
+
+export interface TransferRequest {
+  id: string;
+  email: string;
+  name: string;
+  current_project: string | null;
+  target_project: string;
+  reason: string;
+  status: "pending" | "approved" | "rejected";
+  created_at: string;
+  resolved_at: string | null;
+  resolved_by: string | null;
 }
 
 export async function login(email: string, password: string): Promise<{ token: string; user: AuthUser }> {
@@ -212,6 +227,33 @@ export async function apiLogout(): Promise<void> {
     await apiFetch("/auth/logout", { method: "POST" });
   } catch {}
   clearAuthToken();
+}
+
+// ── 프로젝트 이동 요청 API ─────────────────────────────────────────────────
+
+export async function requestProjectTransfer(targetProject: string, reason?: string): Promise<{ ok: boolean; request: TransferRequest }> {
+  return apiFetch("/auth/transfer-request", {
+    method: "POST",
+    body: JSON.stringify({ target_project: targetProject, reason: reason || "" }),
+  });
+}
+
+export async function getPendingTransfers(): Promise<{ ok: boolean; requests: TransferRequest[] }> {
+  return apiFetch("/auth/pending-transfers");
+}
+
+export async function approveTransfer(requestId: string): Promise<{ ok: boolean; request: TransferRequest }> {
+  return apiFetch("/auth/approve-transfer", {
+    method: "POST",
+    body: JSON.stringify({ request_id: requestId }),
+  });
+}
+
+export async function rejectTransfer(requestId: string): Promise<{ ok: boolean; request: TransferRequest }> {
+  return apiFetch("/auth/reject-transfer", {
+    method: "POST",
+    body: JSON.stringify({ request_id: requestId }),
+  });
 }
 
 // ── 비밀번호 재설정 API ────────────────────────────────────────────────────

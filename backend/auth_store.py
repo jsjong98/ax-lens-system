@@ -27,14 +27,48 @@ ADMIN_EMAIL = "jong-hwan.oh@pwc.com"
 # ── 프로젝트 배정 ────────────────────────────────────────────────────────────
 # 사용자 이름 → 프로젝트 매핑 (이름 기반, 이메일 매핑은 users.json의 name 필드 사용)
 # "공통" 멤버는 모든 프로젝트 데이터에 접근 가능
-PROJECT_ASSIGNMENTS: dict[str, list[str]] = {
+PROJECT_ASSIGNMENTS: dict[str, list[str]] = json.loads(
+    os.getenv("PROJECT_ASSIGNMENTS", '{}')
+) or {
     "공통": ["오종환", "조혜수", "김지동"],
     "SKI":  ["이선영", "이채원", "김동욱", "정창원"],
     "두산": ["정희진", "윤솔이", "백소연"],
 }
 
+# 프로젝트별 PM (승인 권한)
+PROJECT_PMS: dict[str, str] = json.loads(
+    os.getenv("PROJECT_PMS", '{}')
+) or {
+    "공통": "조혜수",
+    "두산": "정희진",
+    "SKI":  "이선영",
+}
+
 # 전체 프로젝트 목록
 ALL_PROJECTS = list(PROJECT_ASSIGNMENTS.keys())
+
+# 프로젝트 이동 요청 저장소
+_TRANSFER_FILE = _PERSIST_ROOT / "transfer_requests.json"
+_transfer_requests: list[dict] = []
+
+
+def _load_transfers() -> None:
+    global _transfer_requests
+    if _TRANSFER_FILE.exists():
+        try:
+            _transfer_requests = json.loads(_TRANSFER_FILE.read_text("utf-8"))
+        except Exception:
+            _transfer_requests = []
+
+
+def _save_transfers() -> None:
+    try:
+        _TRANSFER_FILE.write_text(json.dumps(_transfer_requests, ensure_ascii=False, indent=2), "utf-8")
+    except Exception as e:
+        print(f"[auth] 이동 요청 저장 실패: {e}")
+
+
+_load_transfers()
 
 
 def get_user_project(email: str) -> str | None:
@@ -49,6 +83,13 @@ def get_user_project(email: str) -> str | None:
     if email == ADMIN_EMAIL:
         return None
 
+    # users.json에 직접 지정된 project가 있으면 우선 (이동 승인 결과)
+    if user.get("project"):
+        proj = user["project"]
+        if proj == "공통":
+            return None
+        return proj
+
     # 이름으로 프로젝트 매핑
     for project, members in PROJECT_ASSIGNMENTS.items():
         if name in members:
@@ -56,8 +97,7 @@ def get_user_project(email: str) -> str | None:
                 return None  # 전체 접근
             return project
 
-    # 이메일로도 시도 (users.json에 project 필드가 있는 경우)
-    return user.get("project", None)
+    return None
 
 
 def get_user_projects(email: str) -> list[str]:
@@ -84,6 +124,126 @@ def get_user_projects(email: str) -> list[str]:
 
     # 배정 안 된 사용자 → 빈 리스트 (접근 불가는 아님, 기본 프로젝트)
     return user.get("projects", ALL_PROJECTS)
+
+
+def is_pm(email: str) -> bool:
+    """해당 사용자가 PM인지 확인."""
+    if email == ADMIN_EMAIL:
+        return True
+    users = _load_users()
+    user = users.get(email)
+    if not user:
+        return False
+    name = user.get("name", "")
+    return name in PROJECT_PMS.values()
+
+
+def get_pm_project(email: str) -> str | None:
+    """PM이 관리하는 프로젝트를 반환."""
+    if email == ADMIN_EMAIL:
+        return None  # Admin은 전체
+    users = _load_users()
+    user = users.get(email)
+    if not user:
+        return None
+    name = user.get("name", "")
+    for proj, pm_name in PROJECT_PMS.items():
+        if pm_name == name:
+            return proj
+    return None
+
+
+def request_transfer(email: str, target_project: str, reason: str = "") -> dict:
+    """프로젝트 이동 요청 생성."""
+    users = _load_users()
+    user = users.get(email)
+    if not user:
+        return {"error": "사용자를 찾을 수 없습니다."}
+
+    # 중복 요청 확인
+    for req in _transfer_requests:
+        if req["email"] == email and req["status"] == "pending":
+            return {"error": "이미 대기 중인 이동 요청이 있습니다."}
+
+    request_id = secrets.token_hex(8)
+    entry = {
+        "id": request_id,
+        "email": email,
+        "name": user.get("name", ""),
+        "current_project": get_user_project(email),
+        "target_project": target_project,
+        "reason": reason,
+        "status": "pending",
+        "created_at": datetime.now().isoformat(),
+        "resolved_at": None,
+        "resolved_by": None,
+    }
+    _transfer_requests.append(entry)
+    _save_transfers()
+    return entry
+
+
+def get_pending_transfers(approver_email: str) -> list[dict]:
+    """
+    승인 권한이 있는 대기 중 이동 요청 목록.
+    PM은 자기 프로젝트 관련 요청만, Admin은 전체.
+    """
+    pending = [r for r in _transfer_requests if r["status"] == "pending"]
+    if approver_email == ADMIN_EMAIL:
+        return pending
+
+    pm_proj = get_pm_project(approver_email)
+    if not pm_proj:
+        return []
+
+    # PM은 자기 프로젝트에서 나가는 요청 + 자기 프로젝트로 들어오는 요청
+    return [
+        r for r in pending
+        if r.get("current_project") == pm_proj or r.get("target_project") == pm_proj
+    ]
+
+
+def approve_transfer(request_id: str, approver_email: str) -> dict:
+    """이동 요청 승인."""
+    req = next((r for r in _transfer_requests if r["id"] == request_id), None)
+    if not req:
+        return {"error": "요청을 찾을 수 없습니다."}
+    if req["status"] != "pending":
+        return {"error": "이미 처리된 요청입니다."}
+
+    # 실제 프로젝트 이동 — users.json에 project 필드 설정
+    users = _load_users()
+    user = users.get(req["email"])
+    if user:
+        user["project"] = req["target_project"]
+        _save_users(users)
+
+    req["status"] = "approved"
+    req["resolved_at"] = datetime.now().isoformat()
+    req["resolved_by"] = approver_email
+    _save_transfers()
+    return req
+
+
+def reject_transfer(request_id: str, approver_email: str) -> dict:
+    """이동 요청 거절."""
+    req = next((r for r in _transfer_requests if r["id"] == request_id), None)
+    if not req:
+        return {"error": "요청을 찾을 수 없습니다."}
+    if req["status"] != "pending":
+        return {"error": "이미 처리된 요청입니다."}
+
+    req["status"] = "rejected"
+    req["resolved_at"] = datetime.now().isoformat()
+    req["resolved_by"] = approver_email
+    _save_transfers()
+    return req
+
+
+def get_all_transfers() -> list[dict]:
+    """모든 이동 요청 (최신순)."""
+    return list(reversed(_transfer_requests))
+
 
 # 세션 저장소 (파일 영속)
 _sessions: dict[str, dict] = {}
@@ -265,6 +425,8 @@ def get_session_user(token: str) -> dict | None:
         "name": user["name"],
         "must_change_password": user.get("must_change_password", False),
         "is_admin": email == ADMIN_EMAIL,
+        "is_pm": is_pm(email),
+        "pm_project": get_pm_project(email),
         "project": get_user_project(email),
         "projects": get_user_projects(email),
     }

@@ -3,9 +3,11 @@
 import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ClipboardList, Play, BarChart3, Settings, GitBranch, Sparkles, FolderKanban, LogOut, KeyRound, Shield } from "lucide-react";
+import { ClipboardList, Play, BarChart3, Settings, GitBranch, Sparkles, FolderKanban, LogOut, KeyRound, Shield, ArrowRightLeft, Bell } from "lucide-react";
 import { useAuth } from "@/components/AuthProvider";
 import ChangePasswordModal from "@/components/ChangePasswordModal";
+import { PmApprovalModal, TransferRequestModal } from "@/components/TransferModal";
+import { getPendingTransfers } from "@/lib/api";
 
 const baseNavItems = [
   { href: "/tasks",              label: "Task 목록",     icon: ClipboardList },
@@ -23,7 +25,24 @@ export default function Navbar() {
   const { user, logout } = useAuth();
   const [showPwModal, setShowPwModal] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
+  const [showPmModal, setShowPmModal] = useState(false);
+  const [showTransferModal, setShowTransferModal] = useState(false);
+  const [pendingCount, setPendingCount] = useState(0);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // PM이면 대기 중 요청 수 조회
+  useEffect(() => {
+    if (user?.is_pm || user?.is_admin) {
+      getPendingTransfers().then((d) => setPendingCount(d.requests.length)).catch(() => {});
+    }
+  }, [user]);
+
+  // PM이면 대기 요청 있을 때 자동으로 모달 표시
+  useEffect(() => {
+    if (pendingCount > 0 && (user?.is_pm || user?.is_admin)) {
+      setShowPmModal(true);
+    }
+  }, [pendingCount, user]);
 
   // 드롭다운 외부 클릭 시 닫기
   useEffect(() => {
@@ -88,11 +107,16 @@ export default function Navbar() {
                 <div className="relative ml-3" ref={dropdownRef}>
                   <button
                     onClick={() => setShowDropdown((v) => !v)}
-                    className="flex items-center justify-center w-9 h-9 rounded-full text-sm font-bold text-white transition-transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#A62121]"
+                    className="relative flex items-center justify-center w-9 h-9 rounded-full text-sm font-bold text-white transition-transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#A62121]"
                     style={{ backgroundColor: "#A62121" }}
                     title={user.name}
                   >
                     {initial}
+                    {pendingCount > 0 && (
+                      <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center ring-2 ring-white">
+                        {pendingCount}
+                      </span>
+                    )}
                   </button>
 
                   {showDropdown && (
@@ -121,6 +145,27 @@ export default function Navbar() {
                       </div>
 
                       {/* 메뉴 항목 */}
+                      {/* PM: 승인 요청 확인 */}
+                      {(user.is_pm || user.is_admin) && (
+                        <button
+                          onClick={() => { setShowDropdown(false); setShowPmModal(true); }}
+                          className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                        >
+                          <Bell className="h-4 w-4 text-gray-400" />
+                          이동 요청 승인
+                          {pendingCount > 0 && (
+                            <span className="ml-auto px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-red-500 text-white">{pendingCount}</span>
+                          )}
+                        </button>
+                      )}
+                      {/* 프로젝트 이동 요청 */}
+                      <button
+                        onClick={() => { setShowDropdown(false); setShowTransferModal(true); }}
+                        className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                      >
+                        <ArrowRightLeft className="h-4 w-4 text-gray-400" />
+                        프로젝트 이동 요청
+                      </button>
                       <button
                         onClick={() => { setShowDropdown(false); setShowPwModal(true); }}
                         className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
@@ -147,6 +192,12 @@ export default function Navbar() {
 
       {/* 비밀번호 변경 모달 */}
       <ChangePasswordModal open={showPwModal} onClose={() => setShowPwModal(false)} />
+
+      {/* PM 승인 모달 */}
+      <PmApprovalModal open={showPmModal} onClose={() => setShowPmModal(false)} />
+
+      {/* 프로젝트 이동 요청 모달 */}
+      <TransferRequestModal open={showTransferModal} onClose={() => setShowTransferModal(false)} />
 
       {/* 첫 로그인 시 강제 비밀번호 변경 */}
       {user?.must_change_password && (

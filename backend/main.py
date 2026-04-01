@@ -82,8 +82,15 @@ from auth_store import (
     update_session_info,
     get_user_project,
     get_user_projects,
+    is_pm,
+    request_transfer,
+    get_pending_transfers,
+    approve_transfer,
+    reject_transfer,
+    get_all_transfers,
     ADMIN_EMAIL,
     ALL_PROJECTS,
+    PROJECT_PMS,
 )
 import audit_log
 from data_store import (
@@ -172,7 +179,77 @@ async def api_me(request: Request):
     user = get_session_user(token)
     if not user:
         raise HTTPException(401, "인증이 필요합니다.")
-    return {"ok": True, "user": user}
+    # PM에게 대기 중인 이동 요청 수 포함
+    pending_count = len(get_pending_transfers(user["email"])) if user.get("is_pm") else 0
+    return {"ok": True, "user": user, "pending_transfers": pending_count}
+
+
+# ── 프로젝트 이동 요청/승인 ──────────────────────────────────────────────────
+
+@app.post("/api/auth/transfer-request", tags=["Auth"])
+async def api_transfer_request(request: Request):
+    """프로젝트 이동 요청."""
+    user = _get_user_context(request)
+    if not user:
+        raise HTTPException(401, "인증이 필요합니다.")
+    body = await request.json()
+    target = body.get("target_project", "")
+    reason = body.get("reason", "")
+    if not target:
+        raise HTTPException(400, "이동할 프로젝트를 지정하세요.")
+    result = request_transfer(user["email"], target, reason)
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    audit_log.log_event("transfer_request", email=user["email"], ip=_get_client_ip(request),
+                        detail=f"{result.get('current_project', '?')} → {target}")
+    return {"ok": True, "request": result}
+
+
+@app.get("/api/auth/pending-transfers", tags=["Auth"])
+async def api_pending_transfers(request: Request):
+    """대기 중인 이동 요청 목록 (PM/Admin)."""
+    user = _get_user_context(request)
+    if not user:
+        raise HTTPException(401, "인증이 필요합니다.")
+    if not user.get("is_pm") and not user.get("is_admin"):
+        return {"ok": True, "requests": []}
+    return {"ok": True, "requests": get_pending_transfers(user["email"])}
+
+
+@app.post("/api/auth/approve-transfer", tags=["Auth"])
+async def api_approve_transfer(request: Request):
+    """이동 요청 승인 (PM/Admin만)."""
+    user = _get_user_context(request)
+    if not user:
+        raise HTTPException(401, "인증이 필요합니다.")
+    if not user.get("is_pm") and not user.get("is_admin"):
+        raise HTTPException(403, "승인 권한이 없습니다.")
+    body = await request.json()
+    request_id = body.get("request_id", "")
+    result = approve_transfer(request_id, user["email"])
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    audit_log.log_event("transfer_approved", email=user["email"], ip=_get_client_ip(request),
+                        detail=f"{result.get('name', '?')}: {result.get('current_project', '?')} → {result.get('target_project', '?')}")
+    return {"ok": True, "request": result}
+
+
+@app.post("/api/auth/reject-transfer", tags=["Auth"])
+async def api_reject_transfer(request: Request):
+    """이동 요청 거절 (PM/Admin만)."""
+    user = _get_user_context(request)
+    if not user:
+        raise HTTPException(401, "인증이 필요합니다.")
+    if not user.get("is_pm") and not user.get("is_admin"):
+        raise HTTPException(403, "승인 권한이 없습니다.")
+    body = await request.json()
+    request_id = body.get("request_id", "")
+    result = reject_transfer(request_id, user["email"])
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    audit_log.log_event("transfer_rejected", email=user["email"], ip=_get_client_ip(request),
+                        detail=f"{result.get('name', '?')}: 거절")
+    return {"ok": True, "request": result}
 
 
 @app.post("/api/auth/change-password", tags=["Auth"])
