@@ -165,6 +165,7 @@ export interface AuthUser {
   email: string;
   name: string;
   must_change_password: boolean;
+  is_admin?: boolean;
 }
 
 export async function login(email: string, password: string): Promise<{ token: string; user: AuthUser }> {
@@ -1270,4 +1271,68 @@ export async function downloadProjectPpt(): Promise<void> {
   a.download = decodeURIComponent(filename);
   a.click();
   URL.revokeObjectURL(url);
+}
+
+
+// ── Admin API ─────────────────────────────────────────────────────────────────
+
+export interface AdminUser {
+  email: string;
+  name: string;
+  created_at: string;
+  must_change_password: boolean;
+  active_sessions: number;
+  session_ips: string[];
+}
+
+export interface AdminSession {
+  token_prefix: string;
+  email: string;
+  ip: string;
+  user_agent: string;
+  login_at: string;
+}
+
+export interface AuditLogEntry {
+  timestamp: string;
+  event: string;
+  email: string;
+  ip: string;
+  detail: string;
+}
+
+export async function getAdminDashboard(): Promise<{
+  ok: boolean;
+  users: AdminUser[];
+  active_sessions: AdminSession[];
+  login_history: AuditLogEntry[];
+  data_activity: AuditLogEntry[];
+  total_sessions: number;
+  total_users: number;
+}> {
+  return apiFetch("/admin/dashboard");
+}
+
+export async function getAdminAuditLog(params?: {
+  limit?: number;
+  offset?: number;
+  email?: string;
+  event?: string;
+  ip?: string;
+}): Promise<{ ok: boolean; logs: AuditLogEntry[]; total: number }> {
+  const qs = new URLSearchParams();
+  if (params?.limit) qs.set("limit", String(params.limit));
+  if (params?.offset) qs.set("offset", String(params.offset));
+  if (params?.email) qs.set("email", params.email);
+  if (params?.event) qs.set("event", params.event);
+  if (params?.ip) qs.set("ip", params.ip);
+  const q = qs.toString() ? `?${qs}` : "";
+  return apiFetch(`/admin/audit-log${q}`);
+}
+
+export async function adminForceLogout(email: string): Promise<{ ok: boolean; sessions_removed: number }> {
+  return apiFetch("/admin/force-logout", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
 }

@@ -3,11 +3,11 @@
 import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ClipboardList, Play, BarChart3, Settings, GitBranch, Sparkles, FolderKanban, LogOut, KeyRound } from "lucide-react";
+import { ClipboardList, Play, BarChart3, Settings, GitBranch, Sparkles, FolderKanban, LogOut, KeyRound, Shield } from "lucide-react";
 import { useAuth } from "@/components/AuthProvider";
 import ChangePasswordModal from "@/components/ChangePasswordModal";
 
-const navItems = [
+const baseNavItems = [
   { href: "/tasks",              label: "Task 목록",     icon: ClipboardList },
   { href: "/classify",           label: "분류 실행",     icon: Play          },
   { href: "/results",            label: "결과 확인",     icon: BarChart3     },
@@ -16,6 +16,7 @@ const navItems = [
   { href: "/project-management", label: "과제 관리",     icon: FolderKanban  },
   { href: "/settings",           label: "설정",          icon: Settings      },
 ];
+const adminNavItem = { href: "/admin", label: "Admin", icon: Shield };
 
 export default function Navbar() {
   const pathname = usePathname();
@@ -59,7 +60,7 @@ export default function Navbar() {
 
             {/* 메뉴 + 사용자 */}
             <div className="flex items-center gap-1">
-              {navItems.map(({ href, label, icon: Icon }) => {
+              {[...baseNavItems, ...(user?.is_admin ? [adminNavItem] : [])].map(({ href, label, icon: Icon }) => {
                 const active = pathname.startsWith(href);
                 return (
                   <Link

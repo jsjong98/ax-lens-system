@@ -76,7 +76,12 @@ from auth_store import (
     verify_reset_code,
     reset_password,
     send_reset_email,
+    get_all_sessions,
+    get_all_users_info,
+    force_logout_user,
+    ADMIN_EMAIL,
 )
+import audit_log
 from data_store import (
     save_data, load_data, clear_data, get_saved_status,
     set_current_project, get_current_project, list_projects, save_meta,
@@ -120,6 +125,14 @@ init_default_users()
 from pydantic import BaseModel as _BaseModel
 
 
+def _get_client_ip(request: Request) -> str:
+    """클라이언트 IP 추출 (프록시 헤더 우선)."""
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else ""
+
+
 class _LoginRequest(_BaseModel):
     email: str
     password: str
@@ -131,8 +144,10 @@ class _ChangePasswordRequest(_BaseModel):
 
 
 @app.post("/api/auth/login", tags=["Auth"])
-async def api_login(body: _LoginRequest):
-    token = authenticate(body.email, body.password)
+async def api_login(body: _LoginRequest, request: Request):
+    ip = _get_client_ip(request)
+    ua = request.headers.get("user-agent", "")
+    token = authenticate(body.email, body.password, ip=ip, user_agent=ua)
     if not token:
         raise HTTPException(401, "이메일 또는 비밀번호가 올바르지 않습니다.")
     user = get_session_user(token)
@@ -877,6 +892,8 @@ async def upload_excel(file: UploadFile = File(...)):
             _tasks_cache = new_tasks
         except Exception:
             pass
+
+    audit_log.log_event("excel_upload", detail=f"{file.filename} ({len(_tasks_cache)} tasks)")
 
     return {
         "message": "업로드 성공",
@@ -3039,3 +3056,78 @@ async def export_project_ppt():
         media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_fn}"},
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Admin 전용 API
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _require_admin(request: Request) -> dict:
+    """Admin 권한 확인. Admin이 아니면 403."""
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    user = get_session_user(token)
+    if not user:
+        raise HTTPException(401, "인증이 필요합니다.")
+    if user.get("email") != ADMIN_EMAIL:
+        audit_log.log_event("admin_denied", email=user["email"], ip=_get_client_ip(request))
+        raise HTTPException(403, "관리자 권한이 필요합니다.")
+    return user
+
+
+@app.get("/api/admin/dashboard", tags=["Admin"])
+async def admin_dashboard(request: Request):
+    """Admin 대시보드: 사용자/세션/활동 요약."""
+    _require_admin(request)
+    users = get_all_users_info()
+    sessions = get_all_sessions()
+    login_history = audit_log.get_login_history(limit=30)
+    data_activity = audit_log.get_data_activity(limit=30)
+    audit_log.log_event("admin_view", email=ADMIN_EMAIL, ip=_get_client_ip(request), detail="dashboard")
+    return {
+        "ok": True,
+        "users": users,
+        "active_sessions": sessions,
+        "login_history": login_history,
+        "data_activity": data_activity,
+        "total_sessions": len(sessions),
+        "total_users": len(users),
+    }
+
+
+@app.get("/api/admin/audit-log", tags=["Admin"])
+async def admin_audit_log(
+    request: Request,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    email: str = Query(""),
+    event: str = Query(""),
+    ip: str = Query(""),
+):
+    """감사 로그 조회 (필터링 가능)."""
+    _require_admin(request)
+    logs, total = audit_log.get_logs(
+        limit=limit, offset=offset,
+        email_filter=email, event_filter=event, ip_filter=ip,
+    )
+    return {"ok": True, "logs": logs, "total": total, "limit": limit, "offset": offset}
+
+
+@app.get("/api/admin/sessions", tags=["Admin"])
+async def admin_sessions(request: Request):
+    """모든 활성 세션 조회."""
+    _require_admin(request)
+    return {"ok": True, "sessions": get_all_sessions()}
+
+
+@app.post("/api/admin/force-logout", tags=["Admin"])
+async def admin_force_logout(request: Request):
+    """특정 사용자의 모든 세션 강제 종료."""
+    _require_admin(request)
+    body = await request.json()
+    target_email = body.get("email", "")
+    if not target_email:
+        raise HTTPException(400, "이메일이 필요합니다.")
+    count = force_logout_user(target_email)
+    audit_log.log_event("admin_force_logout", email=ADMIN_EMAIL, ip=_get_client_ip(request),
+                        detail=f"{target_email}: {count}개 세션 종료")
+    return {"ok": True, "email": target_email, "sessions_removed": count}
