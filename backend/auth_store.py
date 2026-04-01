@@ -173,6 +173,22 @@ def authenticate(email: str, password: str, ip: str = "", user_agent: str = "") 
     return token
 
 
+def update_session_info(token: str, ip: str = "", user_agent: str = "") -> None:
+    """세션에 IP/UA 정보를 갱신 (기존 세션 호환용)."""
+    session = _sessions.get(token)
+    if not session:
+        return
+    changed = False
+    if ip and not session.get("ip"):
+        session["ip"] = ip
+        changed = True
+    if user_agent and not session.get("user_agent"):
+        session["user_agent"] = user_agent
+        changed = True
+    if changed:
+        _save_sessions()
+
+
 def get_session_user(token: str) -> dict | None:
     """토큰으로 세션 조회."""
     session = _sessions.get(token)

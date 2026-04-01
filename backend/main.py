@@ -79,6 +79,7 @@ from auth_store import (
     get_all_sessions,
     get_all_users_info,
     force_logout_user,
+    update_session_info,
     ADMIN_EMAIL,
 )
 import audit_log
@@ -157,6 +158,8 @@ async def api_login(body: _LoginRequest, request: Request):
 @app.get("/api/auth/me", tags=["Auth"])
 async def api_me(request: Request):
     token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    # 세션에 IP/UA가 없으면 갱신 (기존 세션 호환)
+    update_session_info(token, ip=_get_client_ip(request), user_agent=request.headers.get("user-agent", ""))
     user = get_session_user(token)
     if not user:
         raise HTTPException(401, "인증이 필요합니다.")
