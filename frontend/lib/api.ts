@@ -756,6 +756,148 @@ export async function generateToBe(params: {
   return apiFetch(`/workflow/generate-tobe${query}`, { method: "POST" });
 }
 
+// ── Workflow Excel Upload + Step 1/2 ─────────────────────────────────────────
+
+export interface WorkflowExcelTask {
+  id: string;
+  l2: string;
+  l3: string;
+  l4: string;
+  name: string;
+  description: string;
+  performer: string;
+  label: string;
+  reason: string;
+  criterion: string;
+  ai_prerequisites: string;
+  feedback: string;
+}
+
+export interface WorkflowExcelUploadResult {
+  ok: boolean;
+  filename: string;
+  task_count: number;
+  has_classification: boolean;
+  classified_count: number;
+  sheets: Array<{ name: string; recommended: boolean; row_count: number; l5_count: number }>;
+}
+
+export interface WorkflowStepResult extends NewWorkflowResult {
+  benchmark_insights?: string[];
+  l2_restructure?: string;
+  design_philosophy?: string;
+}
+
+export interface WorkflowChatResponse {
+  ok: boolean;
+  message: string;
+  updated: boolean;
+  result: WorkflowStepResult | null;
+}
+
+export async function uploadWorkflowExcel(file: File): Promise<WorkflowExcelUploadResult> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const token = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null;
+  const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+  const res = await fetch(`${BACKEND_DIRECT}/api/workflow/upload-excel`, {
+    method: "POST",
+    headers,
+    body: formData,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function selectWorkflowExcelSheet(sheetName: string): Promise<{
+  ok: boolean;
+  sheet_name: string;
+  task_count: number;
+  classified_count: number;
+}> {
+  return apiFetch("/workflow/select-excel-sheet", {
+    method: "POST",
+    body: JSON.stringify({ sheet_name: sheetName }),
+  });
+}
+
+export async function getWorkflowExcelTasks(): Promise<{
+  total: number;
+  classified: number;
+  tasks: WorkflowExcelTask[];
+}> {
+  return apiFetch("/workflow/excel-tasks");
+}
+
+export interface BenchmarkTableRow {
+  source: string;
+  industry: string;
+  process_area: string;
+  ai_technology: string;
+  use_case: string;
+  outcome: string;
+  implication: string;
+  url: string;
+}
+
+export interface BenchmarkStep1Result {
+  ok: boolean;
+  result_count: number;
+  benchmark_table: BenchmarkTableRow[];
+  summary: string;
+}
+
+export async function benchmarkWorkflowStep1(params?: {
+  companies?: string;
+}): Promise<BenchmarkStep1Result> {
+  return apiFetch("/workflow/benchmark-step1", {
+    method: "POST",
+    body: JSON.stringify(params || {}),
+  });
+}
+
+export async function generateWorkflowStep1(params: {
+  prompt?: string;
+  process_name?: string;
+}): Promise<{ ok: boolean } & WorkflowStepResult> {
+  return apiFetch("/workflow/generate-step1", {
+    method: "POST",
+    body: JSON.stringify(params),
+  });
+}
+
+export async function chatWorkflowStep1(message: string): Promise<WorkflowChatResponse> {
+  return apiFetch("/workflow/chat-step1", {
+    method: "POST",
+    body: JSON.stringify({ message }),
+  });
+}
+
+export async function generateWorkflowStep2(params?: {
+  additional_context?: string;
+}): Promise<{ ok: boolean } & WorkflowStepResult> {
+  return apiFetch("/workflow/generate-step2", {
+    method: "POST",
+    body: JSON.stringify(params || {}),
+  });
+}
+
+export async function getWorkflowStepResults(): Promise<{
+  ok: boolean;
+  has_excel: boolean;
+  has_asis: boolean;
+  has_step1: boolean;
+  has_step2: boolean;
+  step1: WorkflowStepResult | null;
+  step2: WorkflowStepResult | null;
+  chat_history: Array<{ role: string; content: string }>;
+}> {
+  return apiFetch("/workflow/step-results");
+}
+
 // ── New Workflow ──────────────────────────────────────────────────────────────
 
 export interface ExcelSheet {

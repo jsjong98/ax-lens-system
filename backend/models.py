@@ -52,6 +52,19 @@ class Task(BaseModel):
     remark: str = Field("", description="F-2. 비고")
     standard_or_specialized: str = Field("", description="F-3. 표준 vs. 특화 구분")
 
+    # ── 분류 결과 열 (AH~AO) — 엑셀에 분류 결과가 포함된 경우 ──
+    # 1차 평가
+    cls_1st_label: str = Field("", description="1차 분류결과 (AI / AI + Human / Human)")
+    cls_1st_knockout: str = Field("", description="적용기준 (Knock-out)")
+    cls_1st_reason: str = Field("", description="1차 판단근거")
+    cls_1st_ai_prereq: str = Field("", description="AI 수행 필요여건")
+    # 두산 검토
+    cls_doosan_label: str = Field("", description="두산 검토 분류 결과 (변경 필요 시)")
+    cls_doosan_feedback: str = Field("", description="두산 검토 Feedback")
+    # 최종 PwC 검토
+    cls_final_label: str = Field("", description="최종 분류 결과")
+    cls_final_feedback: str = Field("", description="PwC Feedback")
+
 
 # ── 분류 결과 관련 ────────────────────────────────────────────────────────────
 

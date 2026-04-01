@@ -1215,7 +1215,844 @@ async def upload_ppt_workflow(file: UploadFile = File(...)):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# To-Be Workflow 생성
+# Workflow — 엑셀 업로드 (분류 결과 포함) + 2단계 설계
+# ─────────────────────────────────────────────────────────────────────────────
+
+_wf_excel_tasks: list = []     # Workflow용 엑셀 Task 캐시
+_wf_classification: dict = {}  # 엑셀에서 추출한 분류 결과
+_wf_step1_cache: dict = {}     # Step 1 결과 캐시
+_wf_step2_cache: dict = {}     # Step 2 결과 캐시
+_wf_chat_history: list = []    # Step 1 채팅 이력
+
+
+@app.post("/api/workflow/upload-excel", tags=["Workflow"])
+async def upload_workflow_excel(file: UploadFile = File(...)):
+    """
+    분류 결과가 포함된 엑셀 업로드.
+    As-Is 프로세스 + 분류 결과를 읽어 Workflow 설계에 활용합니다.
+    """
+    from excel_reader import load_tasks, list_sheets
+
+    content = await file.read()
+    uploads_dir = Path(__file__).parent / "uploads"
+    uploads_dir.mkdir(exist_ok=True)
+    save_path = uploads_dir / (file.filename or "workflow_excel.xlsx")
+    save_path.write_bytes(content)
+
+    # 시트 목록
+    sheets = list_sheets(str(save_path))
+
+    # 추천 시트로 Task 로드
+    recommended = next((s["name"] for s in sheets if s.get("recommended")), None)
+    tasks = load_tasks(str(save_path), sheet_name=recommended)
+
+    global _wf_excel_tasks, _wf_classification, _wf_chat_history
+    global _wf_step1_cache, _wf_step2_cache
+    _wf_excel_tasks = tasks
+    _wf_classification = {}
+    _wf_step1_cache = {}
+    _wf_step2_cache = {}
+    _wf_chat_history = []
+
+    # 분류 결과 추출 (최종 > 두산 > 1차 순 fallback)
+    has_classification = False
+    for t in tasks:
+        label = (t.cls_final_label or t.cls_doosan_label or t.cls_1st_label).strip()
+        if label:
+            has_classification = True
+            reason = t.cls_1st_reason or ""
+            knockout = t.cls_1st_knockout or ""
+            ai_prereq = t.cls_1st_ai_prereq or ""
+            feedback = t.cls_final_feedback or t.cls_doosan_feedback or ""
+            _wf_classification[t.id] = {
+                "label": label,
+                "reason": reason,
+                "criterion": knockout,
+                "ai_prerequisites": ai_prereq,
+                "feedback": feedback,
+                "task_name": t.name,
+                "hybrid_note": "",
+                "input_types": "",
+                "output_types": "",
+            }
+
+    # 엑셀 파일도 _tasks_cache에 반영 (기존 분류 로직과 호환)
+    global _tasks_cache
+    _tasks_cache = tasks
+
+    return {
+        "ok": True,
+        "filename": file.filename,
+        "task_count": len(tasks),
+        "has_classification": has_classification,
+        "classified_count": len(_wf_classification),
+        "sheets": [
+            {
+                "name": s["name"],
+                "recommended": s.get("recommended", False),
+                "row_count": s.get("task_count", 0),
+                "l5_count": s.get("task_count", 0),
+            }
+            for s in sheets
+        ],
+    }
+
+
+@app.post("/api/workflow/select-excel-sheet", tags=["Workflow"])
+async def select_workflow_excel_sheet(request: Request):
+    """엑셀 시트 선택 (Workflow용)."""
+    from excel_reader import load_tasks
+
+    body = await request.json()
+    sheet_name = body.get("sheet_name", "")
+    if not sheet_name:
+        raise HTTPException(400, "시트 이름이 필요합니다.")
+
+    uploads_dir = Path(__file__).parent / "uploads"
+    excel_files = list(uploads_dir.glob("*.xlsx"))
+    if not excel_files:
+        raise HTTPException(404, "업로드된 엑셀 파일이 없습니다.")
+
+    tasks = load_tasks(str(excel_files[-1]), sheet_name=sheet_name)
+
+    global _wf_excel_tasks, _wf_classification, _tasks_cache
+    _wf_excel_tasks = tasks
+    _tasks_cache = tasks
+    _wf_classification = {}
+
+    for t in tasks:
+        label = (t.cls_final_label or t.cls_doosan_label or t.cls_1st_label).strip()
+        if label:
+            _wf_classification[t.id] = {
+                "label": label,
+                "reason": t.cls_1st_reason or "",
+                "criterion": t.cls_1st_knockout or "",
+                "ai_prerequisites": t.cls_1st_ai_prereq or "",
+                "feedback": t.cls_final_feedback or t.cls_doosan_feedback or "",
+                "task_name": t.name,
+                "hybrid_note": "",
+                "input_types": "",
+                "output_types": "",
+            }
+
+    return {
+        "ok": True,
+        "sheet_name": sheet_name,
+        "task_count": len(tasks),
+        "classified_count": len(_wf_classification),
+    }
+
+
+@app.get("/api/workflow/excel-tasks", tags=["Workflow"])
+async def get_workflow_excel_tasks():
+    """엑셀에서 로드한 Task 목록 + 분류 결과를 반환합니다."""
+    tasks = []
+    for t in _wf_excel_tasks:
+        cls = _wf_classification.get(t.id, {})
+        tasks.append({
+            "id": t.id,
+            "l2": t.l2, "l3": t.l3, "l4": t.l4,
+            "name": t.name,
+            "description": t.description,
+            "performer": t.performer,
+            "label": cls.get("label", ""),
+            "reason": cls.get("reason", ""),
+            "criterion": cls.get("criterion", ""),
+            "ai_prerequisites": cls.get("ai_prerequisites", ""),
+            "feedback": cls.get("feedback", ""),
+        })
+    return {
+        "total": len(tasks),
+        "classified": len(_wf_classification),
+        "tasks": tasks,
+    }
+
+
+_wf_benchmark_results: list = []   # 벤치마킹 검색 결과 (raw)
+_wf_benchmark_table: list = []     # 벤치마킹 결과 테이블 (LLM 분석 후)
+
+
+def _build_task_and_pain_summary() -> tuple[str, str, str]:
+    """엑셀 Task 데이터로 task_summary, pain_summary, process_name을 만든다."""
+    l2_names = list({t.l2 for t in _wf_excel_tasks if t.l2})
+    process_name = l2_names[0] if l2_names else "HR 프로세스"
+
+    task_lines = []
+    for t in _wf_excel_tasks:
+        cls = _wf_classification.get(t.id, {})
+        label = cls.get("label", "미분류")
+        task_lines.append(f"- [{t.id}] {t.name} (L3: {t.l3}, L4: {t.l4}) — 분류: {label}")
+
+    pain_lines = []
+    for t in _wf_excel_tasks:
+        pains = []
+        if t.pain_time: pains.append("시간/속도")
+        if t.pain_accuracy: pains.append("정확성")
+        if t.pain_repetition: pains.append("반복/수작업")
+        if t.pain_data: pains.append("정보/데이터")
+        if t.pain_system: pains.append("시스템/도구")
+        if t.pain_communication: pains.append("의사소통")
+        if pains:
+            pain_lines.append(f"- [{t.id}] {t.name}: {', '.join(pains)}")
+
+    return (
+        process_name,
+        "\n".join(task_lines),
+        "\n".join(pain_lines) if pain_lines else "Pain Point 정보 없음",
+    )
+
+
+def _step1_system_prompt(process_name: str, task_summary: str, pain_summary: str,
+                         benchmark_text: str = "") -> str:
+    return f"""당신은 AI 기반 업무 혁신 설계 전문가입니다.
+선도사례 벤치마킹을 기반으로 To-Be Workflow 기본 설계를 수행합니다.
+
+## 프로세스: {process_name}
+
+## 분류 결과가 포함된 L5 Task 목록
+{task_summary}
+
+## Pain Point 현황
+{pain_summary}
+
+{benchmark_text}
+
+## 설계 방향
+- **Top-Down 접근**: 선도사가 어떻게 AI를 적용하는지 분석하여 Lv.2~3 프로세스 재구조화
+- **Lv.4~5 AI 적용 기본 설계**: 각 Activity/Task에 어떤 AI를 적용할지 기본 설계
+- 분류 결과가 'AI' 또는 'AI + Human'인 Task는 AI 적용 대상
+- 분류 결과가 'Human'인 Task도 보조 AI 적용 가능성 검토
+- Senior AI가 Junior AI들을 오케스트레이션하는 구조
+
+## 출력 형식 (JSON만 출력, 마크다운 코드 블록 없음)
+{{
+  "blueprint_summary": "전체 설계 요약 (3~5문장)",
+  "process_name": "{process_name}",
+  "benchmark_insights": [
+    {{"source": "기업명", "insight": "구체적 사례", "application": "적용 방안", "url": ""}}
+  ],
+  "l2_restructure": "Lv.2~3 프로세스 재구조화 방향",
+  "full_auto_count": 정수,
+  "human_in_loop_count": 정수,
+  "human_supervised_count": 정수,
+  "agents": [
+    {{
+      "agent_id": "agent_1",
+      "agent_name": "에이전트명",
+      "agent_type": "에이전트 유형",
+      "ai_technique": "AI 기법",
+      "description": "역할 설명",
+      "automation_level": "Human-on-the-Loop",
+      "assigned_tasks": [
+        {{
+          "task_id": "원본 Task ID",
+          "task_name": "Task명",
+          "l4": "L4 명",
+          "l3": "L3 명",
+          "ai_role": "AI 역할",
+          "human_role": "사람 역할",
+          "input_data": ["입력 데이터"],
+          "output_data": ["출력 결과물"],
+          "automation_level": "Human-on-the-Loop"
+        }}
+      ]
+    }}
+  ],
+  "execution_flow": [
+    {{
+      "step": 1,
+      "step_name": "단계명",
+      "step_type": "sequential",
+      "description": "설명",
+      "agent_ids": ["agent_1"],
+      "task_ids": ["Task ID"]
+    }}
+  ]
+}}
+"""
+
+
+async def _call_llm_step1(system: str, messages: list) -> dict | None:
+    """Step 1 LLM 호출 공통 로직."""
+    settings = load_settings()
+    anthropic_key = os.getenv("ANTHROPIC_API_KEY", "") or settings.anthropic_api_key
+    result_data = None
+
+    if anthropic_key:
+        try:
+            from anthropic import AsyncAnthropic
+            client = AsyncAnthropic(api_key=anthropic_key)
+            response = await client.messages.create(
+                model=settings.anthropic_model or "claude-sonnet-4-6",
+                max_tokens=8192,
+                system=system,
+                messages=messages,
+            )
+            raw = response.content[0].text
+            from new_workflow_generator import _extract_json
+            result_data = _extract_json(raw)
+            return result_data
+        except Exception as e:
+            print(f"[workflow-step1] Anthropic 실패: {e}")
+
+    openai_key = os.getenv("OPENAI_API_KEY", "") or settings.api_key
+    if openai_key:
+        try:
+            from openai import AsyncOpenAI
+            client = AsyncOpenAI(api_key=openai_key)
+            response = await client.chat.completions.create(
+                model=settings.model or "gpt-5.4",
+                temperature=0.0,
+                messages=[{"role": "system", "content": system}, *messages],
+                response_format={"type": "json_object"},
+            )
+            raw = response.choices[0].message.content or "{}"
+            return json.loads(raw)
+        except Exception as e:
+            print(f"[workflow-step1] OpenAI 실패: {e}")
+
+    return None
+
+
+def _save_step1_result(result_data: dict) -> dict:
+    """Step 1 LLM 결과를 파싱하여 캐시에 저장하고 반환."""
+    from new_workflow_generator import _parse_freeform_result, result_to_dict
+    parsed = _parse_freeform_result(result_data)
+    result_dict = result_to_dict(parsed)
+    result_dict["benchmark_insights"] = result_data.get("benchmark_insights", [])
+    result_dict["l2_restructure"] = result_data.get("l2_restructure", "")
+    result_dict["benchmark_table"] = list(_wf_benchmark_table)
+
+    global _wf_step1_cache
+    _wf_step1_cache = result_dict
+    return result_dict
+
+
+# ── 벤치마킹 전용 ──────────────────────────────────────────
+
+@app.post("/api/workflow/benchmark-step1", tags=["Workflow"])
+async def benchmark_workflow_step1(request: Request):
+    """
+    Step 1-A: 벤치마킹 수행.
+    Big Tech / Industry 선도사의 AI 적용 사례를 검색하여 결과 테이블을 생성합니다.
+    프롬프트와 순서 무관하게 독립 실행 가능.
+    """
+    from benchmark_search import search_benchmarks
+
+    if not _wf_excel_tasks:
+        raise HTTPException(400, "엑셀을 먼저 업로드하세요.")
+
+    body = await request.json()
+    extra_companies = body.get("companies", "")  # 추가 검색 기업명
+
+    process_name, task_summary, pain_summary = _build_task_and_pain_summary()
+
+    # L2~L5 키워드 추출
+    l3_names = list({t.l3 for t in _wf_excel_tasks if t.l3})[:5]
+    l4_names = list({t.l4 for t in _wf_excel_tasks if t.l4})[:5]
+
+    bm_data = {
+        "process_name": process_name,
+        "agents": [],
+        "blueprint_summary": (
+            f"{process_name} 프로세스 (L3: {', '.join(l3_names)}, L4: {', '.join(l4_names)}) "
+            f"AI 적용 벤치마킹"
+        ),
+    }
+
+    # 추가 기업 검색 쿼리
+    if extra_companies:
+        bm_data["extra_queries"] = [
+            f"{extra_companies} '{process_name}' AI automation case study results 2024 2025",
+            f"{extra_companies} {' '.join(l3_names[:2])} AI 자동화 도입 사례 성과",
+        ]
+
+    raw_results = await search_benchmarks(bm_data)
+
+    global _wf_benchmark_results, _wf_benchmark_table
+    _wf_benchmark_results = raw_results
+
+    # LLM으로 벤치마킹 결과 분석하여 구조화된 테이블 생성
+    bm_analysis_system = f"""당신은 AI 업무 혁신 벤치마킹 분석 전문가입니다.
+검색 결과에서 **실제 기업명과 구체적 AI 적용 방법 및 성과**를 추출하여 정리합니다.
+
+## 프로세스: {process_name}
+## L3 영역: {', '.join(l3_names)}
+## L4 활동: {', '.join(l4_names)}
+
+## 중요 원칙
+- **솔루션 Provider가 아닌, AI를 '도입·활용한' 기업** 사례만 추출
+- Big Tech(Google, Amazon, Meta 등)의 **내부** AI 활용 사례는 OK
+- Industry 선도사(Fortune 500, 한국 대기업)의 AI 도입 성과 우선
+- 구체적 기업명 없는 사례는 제외
+- 수치화된 성과(%, 시간, 비용) 포함 시 우선 선정
+
+## 출력 형식 (JSON만, 마크다운 코드 블록 없음)
+{{
+  "benchmark_table": [
+    {{
+      "source": "기업명 (고유 기업명 1개만)",
+      "industry": "산업군",
+      "process_area": "적용 프로세스 영역 (L2~L5 중 해당)",
+      "ai_technology": "적용 AI 기술",
+      "use_case": "구체적 적용 사례 (1~2문장)",
+      "outcome": "성과/효과 (수치 포함)",
+      "implication": "두산 향 시사점",
+      "url": "출처 URL"
+    }}
+  ],
+  "summary": "벤치마킹 종합 요약 (3~5문장)"
+}}
+"""
+
+    bm_user = "## 웹 검색 결과\n\n"
+    for i, r in enumerate(raw_results[:15], 1):
+        content = r.get("content", r.get("snippet", ""))
+        bm_user += f"### [{i}] {r['title']}\n"
+        if r.get("url"):
+            bm_user += f"- URL: {r['url']}\n"
+        bm_user += f"- 내용: {content[:600]}\n\n"
+
+    bm_user += "\n위 검색 결과에서 벤치마킹 테이블을 작성해주세요."
+
+    result_data = await _call_llm_step1(bm_analysis_system, [{"role": "user", "content": bm_user}])
+
+    if not result_data:
+        # fallback: raw 결과를 그대로 테이블화
+        _wf_benchmark_table = [
+            {
+                "source": r.get("title", "")[:30],
+                "industry": "",
+                "process_area": process_name,
+                "ai_technology": "",
+                "use_case": r.get("snippet", "")[:100],
+                "outcome": "",
+                "implication": "",
+                "url": r.get("url", ""),
+            }
+            for r in raw_results[:10]
+        ]
+    else:
+        _wf_benchmark_table = result_data.get("benchmark_table", [])
+
+    # 채팅 이력에 기록
+    global _wf_chat_history
+    summary_text = result_data.get("summary", "") if result_data else f"벤치마킹 검색 완료: {len(raw_results)}개 결과"
+    _wf_chat_history.append({"role": "assistant", "content": f"[벤치마킹 완료] {summary_text}"})
+
+    # 이미 Step1 결과가 있으면 벤치마킹 테이블 추가
+    if _wf_step1_cache:
+        _wf_step1_cache["benchmark_table"] = list(_wf_benchmark_table)
+
+    return {
+        "ok": True,
+        "result_count": len(raw_results),
+        "benchmark_table": _wf_benchmark_table,
+        "summary": summary_text,
+    }
+
+
+# ── Step 1 프롬프트 기반 기본 설계 ──────────────────────────
+
+@app.post("/api/workflow/generate-step1", tags=["Workflow"])
+async def generate_workflow_step1(request: Request):
+    """
+    Step 1-B: 프롬프트 기반 Workflow 기본 설계 (Top-Down, Lv.2~5).
+    벤치마킹과 순서 무관하게 독립 실행 가능.
+    프롬프트에 특정 기업이 언급되면 해당 기업 벤치마킹도 자동 수행.
+    """
+    from benchmark_search import search_benchmarks
+
+    if not _wf_excel_tasks:
+        raise HTTPException(400, "엑셀을 먼저 업로드하세요.")
+
+    body = await request.json()
+    user_prompt = body.get("prompt", "")
+    process_name_override = body.get("process_name", "")
+
+    process_name, task_summary, pain_summary = _build_task_and_pain_summary()
+    if process_name_override:
+        process_name = process_name_override
+
+    # 프롬프트에서 기업명 감지 → 추가 벤치마킹
+    import re as _re
+    company_pattern = _re.findall(
+        r'(?:Google|Amazon|Meta|Microsoft|Apple|Unilever|삼성|현대|SK|LG|두산|'
+        r'JPMorgan|Goldman|DoorDash|Siemens|GE|SAP|Workday|IBM|Oracle|'
+        r'[A-Z][a-z]+(?:\s[A-Z][a-z]+)*)',
+        user_prompt or "",
+    )
+    prompt_companies = list(set(company_pattern))
+
+    # 벤치마킹 결과가 있으면 포함, 없으면 프롬프트 기업으로 빠른 검색
+    benchmark_text = ""
+    if _wf_benchmark_table:
+        benchmark_text = "## 벤치마킹 결과 (이미 수행됨)\n"
+        for bm in _wf_benchmark_table[:8]:
+            benchmark_text += (
+                f"- **{bm.get('source', '')}** ({bm.get('industry', '')}): "
+                f"{bm.get('use_case', '')} → {bm.get('outcome', '')}\n"
+            )
+    elif prompt_companies:
+        # 프롬프트에 기업이 언급됨 → 빠른 벤치마킹
+        bm_data = {
+            "process_name": process_name,
+            "agents": [],
+            "blueprint_summary": f"{' '.join(prompt_companies)} {process_name} AI 적용 사례",
+        }
+        raw = await search_benchmarks(bm_data)
+        if raw:
+            global _wf_benchmark_results
+            _wf_benchmark_results = raw
+            benchmark_text = "## 벤치마킹 검색 결과 (프롬프트 기업 기반)\n"
+            for r in raw[:8]:
+                content = r.get("content", r.get("snippet", ""))
+                benchmark_text += f"- **{r['title']}**: {content[:200]}\n"
+
+    system = _step1_system_prompt(process_name, task_summary, pain_summary, benchmark_text)
+
+    global _wf_chat_history
+    actual_prompt = user_prompt or "선도사례를 분석하여 To-Be Workflow 기본 설계를 수행해주세요."
+    _wf_chat_history.append({"role": "user", "content": actual_prompt})
+
+    result_data = await _call_llm_step1(system, list(_wf_chat_history))
+
+    if not result_data:
+        raise HTTPException(500, "AI 모델 호출에 실패했습니다. API 키를 확인하세요.")
+
+    _wf_chat_history.append({"role": "assistant", "content": json.dumps(result_data, ensure_ascii=False)[:500]})
+
+    result_dict = _save_step1_result(result_data)
+
+    return {"ok": True, **result_dict}
+
+
+# ── Step 1 채팅 ─────────────────────────────────────────────
+
+@app.post("/api/workflow/chat-step1", tags=["Workflow"])
+async def chat_workflow_step1(request: Request):
+    """
+    Step 1 채팅: 기본 설계에 대한 추가 질문/수정 요청.
+    특정 기업명이 언급되면 해당 기업의 벤치마킹도 추가로 수행합니다.
+    """
+    from benchmark_search import search_benchmarks
+
+    body = await request.json()
+    user_message = body.get("message", "")
+    if not user_message:
+        raise HTTPException(400, "메시지가 필요합니다.")
+
+    process_name, task_summary, pain_summary = _build_task_and_pain_summary()
+
+    # 메시지에서 기업명 감지 → 추가 벤치마킹
+    import re as _re
+    company_pattern = _re.findall(
+        r'(?:Google|Amazon|Meta|Microsoft|Apple|Unilever|삼성|현대|SK|LG|두산|'
+        r'JPMorgan|Goldman|DoorDash|Siemens|GE|SAP|Workday|IBM|Oracle|'
+        r'[A-Z][a-z]+(?:\s[A-Z][a-z]+)*)',
+        user_message,
+    )
+    extra_bm_text = ""
+    if company_pattern:
+        companies = list(set(company_pattern))
+        bm_data = {
+            "process_name": process_name,
+            "agents": [],
+            "blueprint_summary": f"{' '.join(companies)} {process_name} AI 적용",
+        }
+        raw = await search_benchmarks(bm_data)
+        if raw:
+            extra_bm_text = "\n\n[추가 벤치마킹 결과]\n"
+            for r in raw[:5]:
+                content = r.get("content", r.get("snippet", ""))
+                extra_bm_text += f"- {r['title']}: {content[:200]}\n"
+
+    # 기존 설계 결과 or 벤치마킹 결과가 있으면 포함
+    context = ""
+    if _wf_step1_cache:
+        context = f"현재 설계 결과:\n{json.dumps(_wf_step1_cache, ensure_ascii=False, indent=2)[:3000]}"
+    elif _wf_benchmark_table:
+        context = "벤치마킹 결과만 있는 상태입니다. 설계는 아직 생성되지 않았습니다.\n"
+        context += "벤치마킹 테이블:\n"
+        for bm in _wf_benchmark_table[:5]:
+            context += f"- {bm.get('source', '')}: {bm.get('use_case', '')}\n"
+
+    chat_system = f"""당신은 AI 기반 업무 혁신 설계 전문가입니다.
+현재 '{process_name}' 프로세스의 Step 1 (벤치마킹 기반 기본 설계)을 진행 중입니다.
+
+{context}
+{extra_bm_text}
+
+사용자의 추가 질문이나 수정 요청에 답변하세요.
+수정 요청인 경우, 기존 JSON 구조를 유지하면서 수정된 전체 JSON을 출력하세요.
+일반 질문인 경우, 자연어로 답변하세요.
+
+## 분류 결과 포함 L5 Task 목록 (참고)
+{task_summary[:2000]}
+"""
+
+    global _wf_chat_history
+    _wf_chat_history.append({"role": "user", "content": user_message})
+
+    settings = load_settings()
+    anthropic_key = os.getenv("ANTHROPIC_API_KEY", "") or settings.anthropic_api_key
+    response_text = ""
+
+    if anthropic_key:
+        try:
+            from anthropic import AsyncAnthropic
+            client = AsyncAnthropic(api_key=anthropic_key)
+            response = await client.messages.create(
+                model=settings.anthropic_model or "claude-sonnet-4-6",
+                max_tokens=8192,
+                system=chat_system,
+                messages=_wf_chat_history,
+            )
+            response_text = response.content[0].text
+        except Exception as e:
+            print(f"[workflow-chat] Anthropic 실패: {e}")
+
+    if not response_text:
+        openai_key = os.getenv("OPENAI_API_KEY", "") or settings.api_key
+        if openai_key:
+            try:
+                from openai import AsyncOpenAI
+                client = AsyncOpenAI(api_key=openai_key)
+                resp = await client.chat.completions.create(
+                    model=settings.model or "gpt-5.4",
+                    temperature=0.0,
+                    messages=[
+                        {"role": "system", "content": chat_system},
+                        *_wf_chat_history,
+                    ],
+                )
+                response_text = resp.choices[0].message.content or ""
+            except Exception as e:
+                print(f"[workflow-chat] OpenAI 실패: {e}")
+
+    if not response_text:
+        raise HTTPException(500, "AI 모델 호출에 실패했습니다.")
+
+    _wf_chat_history.append({"role": "assistant", "content": response_text})
+
+    # JSON이 포함되어 있으면 캐시 업데이트
+    updated = False
+    try:
+        from new_workflow_generator import _extract_json, _parse_freeform_result, result_to_dict
+        data = _extract_json(response_text)
+        parsed = _parse_freeform_result(data)
+        result_dict = result_to_dict(parsed)
+        result_dict["benchmark_insights"] = data.get("benchmark_insights", _wf_step1_cache.get("benchmark_insights", []))
+        result_dict["l2_restructure"] = data.get("l2_restructure", _wf_step1_cache.get("l2_restructure", ""))
+        result_dict["benchmark_table"] = list(_wf_benchmark_table)
+        _wf_step1_cache.clear()
+        _wf_step1_cache.update(result_dict)
+        updated = True
+    except Exception:
+        pass
+
+    return {
+        "ok": True,
+        "message": response_text,
+        "updated": updated,
+        "result": _wf_step1_cache if updated else None,
+    }
+
+
+@app.post("/api/workflow/generate-step2", tags=["Workflow"])
+async def generate_workflow_step2(request: Request):
+    """
+    Step 2: Pain Point + PwC 분석 기반 상세 설계 (Bottom-Up, Lv.4~5).
+    Step 1 결과를 바탕으로 상세 설계를 수행합니다.
+    """
+    if not _wf_step1_cache:
+        raise HTTPException(400, "Step 1을 먼저 실행하세요.")
+
+    body = await request.json() if True else {}
+    additional_context = body.get("additional_context", "") if body else ""
+
+    process_name = _wf_step1_cache.get("process_name", "HR 프로세스")
+
+    # 상세 Pain Point 분석
+    pain_detail_lines = []
+    for t in _wf_excel_tasks:
+        pains = []
+        if t.pain_time: pains.append(f"시간/속도: {t.pain_time}")
+        if t.pain_accuracy: pains.append(f"정확성: {t.pain_accuracy}")
+        if t.pain_repetition: pains.append(f"반복/수작업: {t.pain_repetition}")
+        if t.pain_data: pains.append(f"정보/데이터: {t.pain_data}")
+        if t.pain_system: pains.append(f"시스템/도구: {t.pain_system}")
+        if t.pain_communication: pains.append(f"의사소통: {t.pain_communication}")
+        if pains:
+            cls = _wf_classification.get(t.id, {})
+            pain_detail_lines.append(
+                f"### [{t.id}] {t.name} (분류: {cls.get('label', '미분류')})\n"
+                f"  Pain Point: {'; '.join(pains)}\n"
+                f"  비고: {t.remark or '없음'}"
+            )
+
+    pain_detail = "\n".join(pain_detail_lines) if pain_detail_lines else "상세 Pain Point 정보 없음"
+
+    # As-Is 워크플로우 정보 (있으면 포함)
+    asis_info = ""
+    if "parsed" in _workflow_cache:
+        parsed = _workflow_cache["parsed"]
+        for sheet in parsed.sheets:
+            asis_info += f"\n### 시트: {sheet.name}\n"
+            for node in sheet.l4_nodes:
+                asis_info += f"- L4 [{node.task_id}] {node.label}\n"
+                for l5 in sheet.l5_nodes:
+                    asis_info += f"  - L5 [{l5.task_id}] {l5.label}\n"
+
+    step2_system = f"""당신은 AI 기반 업무 혁신 설계 전문가입니다.
+Step 1에서 도출된 기본 설계를 기반으로, 두산에 최적화된 **AI 기반 To-Be Workflow 상세 설계**를 수행합니다.
+
+## 핵심 철학
+- **Bottom-Up 접근**: As-Is 프로세스의 Pain Point를 Deep-dive 분석
+- **Senior AI 기반 End-to-End 오케스트레이션 구조로 전환**
+- Step 1(Top-Down)의 벤치마킹 인사이트 + Step 2(Bottom-Up)의 Pain Point 분석을 융합
+
+## 프로세스: {process_name}
+
+## Step 1 기본 설계 결과
+{json.dumps(_wf_step1_cache, ensure_ascii=False, indent=2)[:4000]}
+
+## As-Is 워크플로우 구조
+{asis_info or "As-Is 워크플로우 정보 없음 (JSON/PPT 미업로드)"}
+
+## 상세 Pain Point Deep-dive
+{pain_detail}
+
+{f"## 추가 컨텍스트{chr(10)}{additional_context}" if additional_context else ""}
+
+## 상세 설계 요구사항
+1. Lv.4~5 단위로 구체적인 AI 적용 방안 설계
+2. 각 Agent의 구체적 역할, 사용 AI 기법, Input/Output 명시
+3. Human-on-the-Loop 중심으로 설계 (Senior AI가 전체 관리)
+4. 기존 As-Is에 없던 혁신적 Task 추가 가능
+5. Pain Point를 근본적으로 해결하는 방향
+
+## 출력 형식 (JSON만 출력, 마크다운 코드 블록 없음)
+{{
+  "blueprint_summary": "상세 설계 요약 (5~7문장, Step 1 대비 개선점 포함)",
+  "process_name": "{process_name}",
+  "design_philosophy": "상세 설계 철학/방향 설명",
+  "full_auto_count": 정수,
+  "human_in_loop_count": 정수,
+  "human_supervised_count": 정수,
+  "agents": [
+    {{
+      "agent_id": "agent_1",
+      "agent_name": "에이전트명",
+      "agent_type": "에이전트 유형",
+      "ai_technique": "AI 기법 (구체적)",
+      "description": "역할 설명 (상세)",
+      "automation_level": "Human-on-the-Loop",
+      "assigned_tasks": [
+        {{
+          "task_id": "Task ID",
+          "task_name": "Task명",
+          "l4": "L4 명",
+          "l3": "L3 명",
+          "ai_role": "AI 구체적 역할",
+          "human_role": "사람 역할",
+          "input_data": ["입력 데이터 상세"],
+          "output_data": ["출력 결과물 상세"],
+          "automation_level": "Human-on-the-Loop"
+        }}
+      ]
+    }}
+  ],
+  "execution_flow": [
+    {{
+      "step": 1,
+      "step_name": "단계명",
+      "step_type": "sequential",
+      "description": "상세 설명",
+      "agent_ids": ["agent_1"],
+      "task_ids": ["Task ID"]
+    }}
+  ]
+}}
+"""
+
+    settings = load_settings()
+    anthropic_key = os.getenv("ANTHROPIC_API_KEY", "") or settings.anthropic_api_key
+
+    result_data = None
+
+    if anthropic_key:
+        try:
+            from anthropic import AsyncAnthropic
+            client = AsyncAnthropic(api_key=anthropic_key)
+            response = await client.messages.create(
+                model=settings.anthropic_model or "claude-sonnet-4-6",
+                max_tokens=8192,
+                system=step2_system,
+                messages=[{"role": "user", "content": "Step 1 결과와 Pain Point를 기반으로 상세 설계를 수행해주세요."}],
+            )
+            raw = response.content[0].text
+            from new_workflow_generator import _extract_json
+            result_data = _extract_json(raw)
+        except Exception as e:
+            print(f"[workflow-step2] Anthropic 실패: {e}")
+
+    if not result_data:
+        openai_key = os.getenv("OPENAI_API_KEY", "") or settings.api_key
+        if openai_key:
+            try:
+                from openai import AsyncOpenAI
+                client = AsyncOpenAI(api_key=openai_key)
+                response = await client.chat.completions.create(
+                    model=settings.model or "gpt-5.4",
+                    temperature=0.0,
+                    messages=[
+                        {"role": "system", "content": step2_system},
+                        {"role": "user", "content": "Step 1 결과와 Pain Point를 기반으로 상세 설계를 수행해주세요."},
+                    ],
+                    response_format={"type": "json_object"},
+                )
+                raw = response.choices[0].message.content or "{}"
+                result_data = json.loads(raw)
+            except Exception as e:
+                print(f"[workflow-step2] OpenAI 실패: {e}")
+
+    if not result_data:
+        raise HTTPException(500, "AI 모델 호출에 실패했습니다. API 키를 확인하세요.")
+
+    from new_workflow_generator import _parse_freeform_result, result_to_dict
+    parsed = _parse_freeform_result(result_data)
+    result_dict = result_to_dict(parsed)
+    result_dict["design_philosophy"] = result_data.get("design_philosophy", "")
+
+    global _wf_step2_cache
+    _wf_step2_cache = result_dict
+
+    # New Workflow 캐시에도 반영 (과제 정의서/설계서 생성에 활용)
+    _new_workflow_cache.clear()
+    _new_workflow_cache.update(result_dict)
+    _persist_cache("new_workflow", _new_workflow_cache)
+
+    return {"ok": True, **result_dict}
+
+
+@app.get("/api/workflow/step-results", tags=["Workflow"])
+async def get_workflow_step_results():
+    """Step 1 / Step 2 결과를 반환합니다."""
+    return {
+        "ok": True,
+        "has_excel": len(_wf_excel_tasks) > 0,
+        "has_asis": "parsed" in _workflow_cache,
+        "has_step1": bool(_wf_step1_cache),
+        "has_step2": bool(_wf_step2_cache),
+        "step1": _wf_step1_cache if _wf_step1_cache else None,
+        "step2": _wf_step2_cache if _wf_step2_cache else None,
+        "chat_history": _wf_chat_history,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# To-Be Workflow 생성 (기존)
 # ─────────────────────────────────────────────────────────────────────────────
 
 @app.post("/api/workflow/slide-l4-mapping", tags=["Workflow"])

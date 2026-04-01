@@ -55,6 +55,17 @@ _COL = {
     # F-2~F-3
     "remark":                  32,  # AF 비고
     "standard_or_specialized": 33,  # AG 표준 vs 특화
+    # ── 1차 평가 (AH~AK열) ──
+    "cls_1st_label":           34,  # AH 1차 분류결과
+    "cls_1st_knockout":        35,  # AI 적용기준(Knock-out)
+    "cls_1st_reason":          36,  # AJ 1차 판단근거
+    "cls_1st_ai_prereq":       37,  # AK AI 수행 필요여건
+    # ── 두산 검토 (AL~AM열) ──
+    "cls_doosan_label":        38,  # AL 분류 결과(변경 필요 시 작성)
+    "cls_doosan_feedback":     39,  # AM Feedback
+    # ── 최종 PwC 검토 (AN~AO열) ──
+    "cls_final_label":         40,  # AN 최종 분류 결과
+    "cls_final_feedback":      41,  # AO PwC Feedback
 }
 
 # ── 시트 자동 감지 ────────────────────────────────────────────────────────────
@@ -169,7 +180,10 @@ def _find_excel(base_dir: Path) -> Path:
 
 def _cell(row: tuple, col: int) -> str:
     """1-based 열 번호로 행에서 값 추출 후 문자열 변환."""
-    val = row[col - 1]
+    idx = col - 1
+    if idx < 0 or idx >= len(row):
+        return ""
+    val = row[idx]
     if val is None:
         return ""
     return str(val).strip()
@@ -308,6 +322,15 @@ def load_tasks(
                 # F-2~F-3
                 remark=_cell(row, _COL["remark"]),
                 standard_or_specialized=_cell(row, _COL["standard_or_specialized"]),
+                # 분류 결과 (있으면 읽기)
+                cls_1st_label=_cell(row, _COL["cls_1st_label"]),
+                cls_1st_knockout=_cell(row, _COL["cls_1st_knockout"]),
+                cls_1st_reason=_cell(row, _COL["cls_1st_reason"]),
+                cls_1st_ai_prereq=_cell(row, _COL["cls_1st_ai_prereq"]),
+                cls_doosan_label=_cell(row, _COL["cls_doosan_label"]),
+                cls_doosan_feedback=_cell(row, _COL["cls_doosan_feedback"]),
+                cls_final_label=_cell(row, _COL["cls_final_label"]),
+                cls_final_feedback=_cell(row, _COL["cls_final_feedback"]),
             )
         )
 
