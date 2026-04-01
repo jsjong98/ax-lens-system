@@ -1336,3 +1336,27 @@ export async function adminForceLogout(email: string): Promise<{ ok: boolean; se
     body: JSON.stringify({ email }),
   });
 }
+
+export interface UploadedFile {
+  filename: string;
+  size_kb: number;
+  modified: string;
+}
+
+export async function getAdminUploads(): Promise<{ ok: boolean; directory: string; files: UploadedFile[] }> {
+  return apiFetch("/admin/uploads");
+}
+
+export async function downloadAdminFile(filename: string): Promise<void> {
+  const token = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null;
+  const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+  const res = await fetch(`${BACKEND_DIRECT}/api/admin/download/${encodeURIComponent(filename)}`, { headers });
+  if (!res.ok) throw new Error("다운로드 실패");
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}

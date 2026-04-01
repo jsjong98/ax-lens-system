@@ -1254,9 +1254,8 @@ async def upload_workflow_excel(file: UploadFile = File(...)):
     from excel_reader import load_tasks, list_sheets
 
     content = await file.read()
-    uploads_dir = Path(__file__).parent / "uploads"
-    uploads_dir.mkdir(exist_ok=True)
-    save_path = uploads_dir / (file.filename or "workflow_excel.xlsx")
+    _UPLOAD_DIR.mkdir(exist_ok=True)
+    save_path = _UPLOAD_DIR / (file.filename or "workflow_excel.xlsx")
     save_path.write_bytes(content)
 
     # 시트 목록
@@ -1328,8 +1327,7 @@ async def select_workflow_excel_sheet(request: Request):
     if not sheet_name:
         raise HTTPException(400, "시트 이름이 필요합니다.")
 
-    uploads_dir = Path(__file__).parent / "uploads"
-    excel_files = list(uploads_dir.glob("*.xlsx"))
+    excel_files = list(_UPLOAD_DIR.glob("*.xlsx"))
     if not excel_files:
         raise HTTPException(404, "업로드된 엑셀 파일이 없습니다.")
 
@@ -3136,3 +3134,38 @@ async def admin_force_logout(request: Request):
     audit_log.log_event("admin_force_logout", email=ADMIN_EMAIL, ip=_get_client_ip(request),
                         detail=f"{target_email}: {count}개 세션 종료")
     return {"ok": True, "email": target_email, "sessions_removed": count}
+
+
+@app.get("/api/admin/uploads", tags=["Admin"])
+async def admin_list_uploads(request: Request):
+    """업로드된 파일 목록 조회."""
+    _require_admin(request)
+    files = []
+    if _UPLOAD_DIR.exists():
+        for f in sorted(_UPLOAD_DIR.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
+            if f.is_file():
+                stat = f.stat()
+                files.append({
+                    "filename": f.name,
+                    "size_kb": round(stat.st_size / 1024, 1),
+                    "modified": __import__("datetime").datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                })
+    return {"ok": True, "directory": str(_UPLOAD_DIR), "files": files}
+
+
+@app.get("/api/admin/download/{filename}", tags=["Admin"])
+async def admin_download_file(filename: str, request: Request):
+    """업로드된 파일 다운로드."""
+    _require_admin(request)
+    # 경로 순회 방지
+    safe_name = Path(filename).name
+    file_path = _UPLOAD_DIR / safe_name
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(404, f"파일을 찾을 수 없습니다: {safe_name}")
+    from urllib.parse import quote
+    encoded = quote(safe_name)
+    return StreamingResponse(
+        open(file_path, "rb"),
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"},
+    )

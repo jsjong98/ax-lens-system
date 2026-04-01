@@ -5,14 +5,17 @@ import {
   getAdminDashboard,
   getAdminAuditLog,
   adminForceLogout,
+  getAdminUploads,
+  downloadAdminFile,
   type AdminUser,
   type AdminSession,
   type AuditLogEntry,
+  type UploadedFile,
 } from "@/lib/api";
 
 const PWC = { primary: "#A62121", primaryLight: "#D95578" };
 
-type Tab = "overview" | "sessions" | "audit" | "login";
+type Tab = "overview" | "sessions" | "audit" | "login" | "files";
 
 export default function AdminPage() {
   const [tab, setTab] = useState<Tab>("overview");
@@ -26,6 +29,8 @@ export default function AdminPage() {
   const [error, setError] = useState("");
   const [auditFilter, setAuditFilter] = useState({ email: "", event: "", ip: "" });
   const [usage, setUsage] = useState<Record<string, { total_calls: number; input_tokens: number; output_tokens: number; estimated_cost_usd: number; last_used: string | null }>>({});
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const [uploadDir, setUploadDir] = useState("");
 
   const loadDashboard = useCallback(async () => {
     setLoading(true);
@@ -61,6 +66,16 @@ export default function AdminPage() {
 
   useEffect(() => { loadDashboard(); }, [loadDashboard]);
   useEffect(() => { if (tab === "audit") loadAuditLog(); }, [tab, loadAuditLog]);
+
+  const loadFiles = useCallback(async () => {
+    try {
+      const data = await getAdminUploads();
+      setUploadedFiles(data.files);
+      setUploadDir(data.directory);
+    } catch {}
+  }, []);
+
+  useEffect(() => { if (tab === "files") loadFiles(); }, [tab, loadFiles]);
 
   const handleForceLogout = async (email: string) => {
     if (!confirm(`${email}의 모든 세션을 강제 종료하시겠습니까?`)) return;
@@ -106,6 +121,7 @@ export default function AdminPage() {
           ["sessions", "활성 세션"],
           ["login", "접속 기록"],
           ["audit", "감사 로그"],
+          ["files", "업로드 파일"],
         ] as [Tab, string][]).map(([key, label]) => (
           <button
             key={key}
@@ -392,6 +408,52 @@ export default function AdminPage() {
               </table>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ═══ 업로드 파일 ═══ */}
+      {tab === "files" && (
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+            <div>
+              <span className="text-sm font-bold text-gray-700">서버 업로드 파일</span>
+              <span className="text-xs text-gray-400 ml-2">{uploadDir}</span>
+            </div>
+            <button onClick={loadFiles} className="text-xs text-gray-400 hover:text-red-500">새로고침</button>
+          </div>
+          {uploadedFiles.length === 0 ? (
+            <div className="text-center py-10 text-gray-400 text-sm">업로드된 파일이 없습니다.</div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-200 bg-gray-50/50">
+                  <th className="text-left px-4 py-2 font-medium text-gray-600">파일명</th>
+                  <th className="text-right px-4 py-2 font-medium text-gray-600">크기</th>
+                  <th className="text-left px-4 py-2 font-medium text-gray-600">수정일</th>
+                  <th className="text-center px-4 py-2 font-medium text-gray-600">다운로드</th>
+                </tr>
+              </thead>
+              <tbody>
+                {uploadedFiles.map((f) => (
+                  <tr key={f.filename} className="border-b border-gray-100 hover:bg-gray-50">
+                    <td className="px-4 py-2 text-xs font-medium text-gray-800">{f.filename}</td>
+                    <td className="px-4 py-2 text-xs text-gray-500 text-right">{f.size_kb.toLocaleString()} KB</td>
+                    <td className="px-4 py-2 text-xs text-gray-500">{f.modified.replace("T", " ").slice(0, 19)}</td>
+                    <td className="px-4 py-2 text-center">
+                      <button
+                        onClick={async () => {
+                          try { await downloadAdminFile(f.filename); } catch (e) { alert((e as Error).message); }
+                        }}
+                        className="text-xs text-blue-600 hover:text-blue-800 underline"
+                      >
+                        다운로드
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       )}
     </div>
