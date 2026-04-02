@@ -4015,7 +4015,10 @@ async def admin_download_file(filename: str, request: Request):
 @app.on_event("startup")
 async def _restore_from_persist():
     """서버 재시작 후에도 이전에 업로드한 파일이 자동 복구됩니다."""
+    global _wf_excel_tasks, _wf_classification, _tasks_cache, _current_excel_path
+
     from workflow_parser import parse_workflow_json, get_workflow_summary
+    from excel_reader import load_tasks
 
     # 1) Workflow JSON 복구
     json_path = _WF_DIR / "workflow.json"
@@ -4039,9 +4042,7 @@ async def _restore_from_persist():
         excel_files = sorted(_WF_DIR.glob("*.xlsx"), key=lambda x: x.stat().st_mtime)
         if excel_files:
             try:
-                from excel_reader import load_tasks
                 tasks = load_tasks(str(excel_files[-1]))
-                global _wf_excel_tasks, _wf_classification, _tasks_cache
                 _wf_excel_tasks = tasks
                 _tasks_cache = tasks
                 _wf_classification = {}
@@ -4068,9 +4069,7 @@ async def _restore_from_persist():
         task_excels = sorted(_UPLOAD_DIR.glob("*.xlsx"), key=lambda x: x.stat().st_mtime)
         if task_excels:
             try:
-                from excel_reader import load_tasks
                 _tasks_cache = load_tasks(str(task_excels[-1]))
-                global _current_excel_path
                 _current_excel_path = task_excels[-1]
                 print(f"[STARTUP] Task Excel 복구 완료: {task_excels[-1].name}")
             except Exception as e:
