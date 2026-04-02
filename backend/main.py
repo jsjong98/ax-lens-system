@@ -1660,21 +1660,46 @@ async def benchmark_workflow_step1(request: Request):
     """
     from benchmark_search import search_benchmarks
 
-    if not _wf_excel_tasks:
-        raise HTTPException(400, "엑셀을 먼저 업로드하세요.")
+    if not _wf_excel_tasks and "parsed" not in _workflow_cache:
+        raise HTTPException(400, "엑셀 또는 As-Is 워크플로우를 먼저 업로드하세요.")
 
     body = await request.json()
     extra_companies = body.get("companies", "")  # 추가 검색 기업명
+    sheet_id_bm = body.get("sheet_id", "")
 
     process_name, task_summary, pain_summary = _build_task_and_pain_summary()
 
-    # L2~L5 키워드 추출
-    l3_names = list({t.l3 for t in _wf_excel_tasks if t.l3})[:5]
-    l4_names = list({t.l4 for t in _wf_excel_tasks if t.l4})[:5]
+    # ── 엑셀 기반 L2/L3/L4 추출 ──────────────────────────────────────────────
+    l2_names = list({t.l2 for t in _wf_excel_tasks if t.l2})[:3]
+    l3_names = list({t.l3 for t in _wf_excel_tasks if t.l3})[:8]
+    l4_names = list({t.l4 for t in _wf_excel_tasks if t.l4})[:10]
+
+    # ── As-Is 워크플로우 노드에서 L2/L3/L4 보완 ─────────────────────────────
+    if "parsed" in _workflow_cache:
+        parsed = _workflow_cache["parsed"]
+        target_sheets = (
+            [s for s in parsed.sheets if s.sheet_id == sheet_id_bm] or parsed.sheets
+        ) if sheet_id_bm else parsed.sheets
+        for s in target_sheets:
+            for node in s.nodes.values():
+                lv = node.level
+                lbl = node.label.strip()
+                if not lbl:
+                    continue
+                if lv == "L2" and lbl not in l2_names:
+                    l2_names.append(lbl)
+                elif lv == "L3" and lbl not in l3_names:
+                    l3_names.append(lbl)
+                elif lv == "L4" and lbl not in l4_names:
+                    l4_names.append(lbl)
+        l2_names = l2_names[:3]
+        l3_names = l3_names[:8]
+        l4_names = l4_names[:10]
 
     bm_data = {
         "process_name": process_name,
         "agents": [],
+        "l2_names": l2_names,
         "l3_names": l3_names,
         "l4_names": l4_names,
         "blueprint_summary": (
@@ -1685,9 +1710,10 @@ async def benchmark_workflow_step1(request: Request):
 
     # 추가 기업 검색 쿼리
     if extra_companies:
+        focus = l4_names[0] if l4_names else (l3_names[0] if l3_names else process_name)
         bm_data["extra_queries"] = [
             f"{extra_companies} '{process_name}' AI automation case study results 2024 2025",
-            f"{extra_companies} {' '.join(l3_names[:2])} AI 자동화 도입 사례 성과",
+            f"{extra_companies} '{focus}' AI 자동화 도입 사례 성과",
         ]
 
     raw_results = await search_benchmarks(bm_data)
@@ -1700,12 +1726,15 @@ async def benchmark_workflow_step1(request: Request):
 검색 결과에서 **실제 기업명과 구체적 AI 적용 방법 및 성과**를 추출하여 정리합니다.
 
 ## 프로세스: {process_name}
+## L2 대분류: {', '.join(l2_names)}
 ## L3 영역 (분석 핵심 단위): {', '.join(l3_names)}
-## L4 활동: {', '.join(l4_names)}
+## L4 세부 활동 (최우선 매핑 기준): {', '.join(l4_names)}
 
 ## 중요 원칙
-- **반드시 L3 영역({', '.join(l3_names[:3])}) 단위로 매핑**하여 구체적 사례 추출
-- 프로세스 전체가 아닌, 개별 L3 활동에 AI를 어떻게 적용했는지 구체적으로 기술
+- **우선순위: L4 세부 활동 → L3 영역 → L2 대분류 순으로 가장 구체적인 단위에 매핑**
+- L4 수준 활동명과 매칭되는 사례가 있으면 반드시 L4 기준으로 기술
+- L4 사례가 없을 때만 L3, L3도 없을 때 L2 수준으로 기술
+- 프로세스 전체가 아닌, 개별 세부 활동에 AI를 어떻게 적용했는지 구체적으로 기술
 - **솔루션 Provider가 아닌, AI를 '도입·활용한' 기업** 사례만 추출
 - Big Tech(Google, Amazon, Meta 등)의 **내부** AI 활용 사례는 OK
 - Industry 선도사(Fortune 500, 한국 대기업)의 AI 도입 성과 우선

@@ -110,65 +110,74 @@ def _search_duckduckgo(query: str, max_results: int = 8) -> list[dict]:
 
 def _generate_search_queries(workflow_cache: dict) -> list[str]:
     """Big Tech·Industry 선도 기업의 AI 활용 사례를 찾기 위한 검색 쿼리 생성.
-    L3 단위 활동별로 구체적 쿼리를 생성하여 세부 벤치마킹 결과를 확보합니다."""
+    L4(가장 구체적) → L3 → L2 순으로 fallback하며 쿼리를 생성합니다.
+    엑셀 + As-Is 워크플로우에서 추출한 L2/L3/L4 이름을 모두 활용합니다."""
     process_name = workflow_cache.get("process_name", "")
+    l2_names: list[str] = workflow_cache.get("l2_names", [])
     l3_names: list[str] = workflow_cache.get("l3_names", [])
     l4_names: list[str] = workflow_cache.get("l4_names", [])
     agents = workflow_cache.get("agents", [])
 
     queries = []
 
-    # ── L3 단위 구체적 쿼리 (최대 3개) ──────────────────────────────────────
-    for l3 in l3_names[:3]:
+    # ── 1순위: L4 세부 활동 기반 구체적 쿼리 (최대 3개) ─────────────────────
+    for l4 in l4_names[:3]:
         queries.append(
-            f"enterprise company AI automation '{l3}' case study results 2024 2025 ROI"
+            f"enterprise company AI automation '{l4}' case study results 2024 2025 ROI"
         )
 
-    # ── L3가 없을 때 process_name 기반 fallback ──────────────────────────────
-    if not l3_names:
+    # ── 2순위: L3 영역 기반 쿼리 (L4가 부족한 경우 보완) ─────────────────────
+    # L4 결과가 충분하지 않을 수 있으므로 L3도 함께 수집
+    for l3 in l3_names[:3]:
         queries.append(
-            f"Google Amazon Meta Microsoft internal '{process_name}' "
+            f"enterprise '{l3}' AI automation adoption case study outcome 2024 2025"
+        )
+
+    # ── 3순위: L2 대분류 fallback (L3도 없는 경우) ───────────────────────────
+    if not l3_names and not l4_names:
+        fallback = l2_names[0] if l2_names else process_name
+        queries.append(
+            f"Google Amazon Meta Microsoft internal '{fallback}' "
             f"AI automation implementation results 2024 2025"
         )
         queries.append(
-            f"Fortune 500 enterprise '{process_name}' AI agent deployment "
-            f"case study ROI results"
+            f"Fortune 500 enterprise '{fallback}' AI agent deployment case study ROI"
         )
 
-    # ── L3 + 한국 대기업 조합 쿼리 ──────────────────────────────────────────
-    if l3_names:
-        l3_kr = " ".join(l3_names[:2])
-        queries.append(
-            f"삼성 현대 SK LG 두산 '{l3_kr}' AI 자동화 도입 사례 성과 2024 2025"
-        )
+    # ── 한국 대기업 + 가장 구체적인 레벨 ────────────────────────────────────
+    kr_focus = l4_names[0] if l4_names else (l3_names[0] if l3_names else (l2_names[0] if l2_names else process_name))
+    queries.append(
+        f"삼성 현대 SK LG 두산 '{kr_focus}' AI 자동화 도입 사례 성과 2024 2025"
+    )
 
-    # ── 에이전트 기술 기반 쿼리 ─────────────────────────────────────────────
+    # ── 에이전트 기술 × L4/L3 조합 ──────────────────────────────────────────
     techniques = set()
     for agent in agents[:3]:
         tech = agent.get("ai_technique", "")
         if tech:
             techniques.add(tech.split(",")[0].strip())
-    if techniques and l3_names:
+    if techniques:
         tech_str = " ".join(list(techniques)[:2])
+        focus = l4_names[0] if l4_names else (l3_names[0] if l3_names else process_name)
         queries.append(
-            f"enterprise {tech_str} '{l3_names[0]}' real world deployment outcome"
+            f"enterprise {tech_str} '{focus}' real world deployment outcome"
         )
 
-    # ── 글로벌 제조·중공업 기업 L3 적용 사례 ───────────────────────────────
-    if l3_names:
-        queries.append(
-            f"Siemens GE Honeywell Caterpillar Doosan '{l3_names[0]}' "
-            f"AI automation adoption results"
-        )
-
-    # ── 컨설팅 리서치 (L3 기준) ─────────────────────────────────────────────
-    focus = l3_names[0] if l3_names else process_name
+    # ── 글로벌 제조·중공업 기업 — 가장 구체적인 레벨 기준 ───────────────────
+    industry_focus = l4_names[0] if l4_names else (l3_names[0] if l3_names else process_name)
     queries.append(
-        f"McKinsey Deloitte PwC Gartner '{focus}' "
+        f"Siemens GE Honeywell Caterpillar Doosan '{industry_focus}' "
+        f"AI automation adoption results"
+    )
+
+    # ── 컨설팅 리서치 — L4 → L3 → L2 순 ────────────────────────────────────
+    report_focus = l4_names[0] if l4_names else (l3_names[0] if l3_names else (l2_names[0] if l2_names else process_name))
+    queries.append(
+        f"McKinsey Deloitte PwC Gartner '{report_focus}' "
         f"AI transformation benchmark industry report 2024 2025"
     )
 
-    return queries[:8]
+    return queries[:10]
 
 
 # ── 통합 검색 ────────────────────────────────────────────────────────────────
