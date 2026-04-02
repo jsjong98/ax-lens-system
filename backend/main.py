@@ -1675,6 +1675,8 @@ async def benchmark_workflow_step1(request: Request):
     bm_data = {
         "process_name": process_name,
         "agents": [],
+        "l3_names": l3_names,
+        "l4_names": l4_names,
         "blueprint_summary": (
             f"{process_name} 프로세스 (L3: {', '.join(l3_names)}, L4: {', '.join(l4_names)}) "
             f"AI 적용 벤치마킹"
@@ -1698,10 +1700,12 @@ async def benchmark_workflow_step1(request: Request):
 검색 결과에서 **실제 기업명과 구체적 AI 적용 방법 및 성과**를 추출하여 정리합니다.
 
 ## 프로세스: {process_name}
-## L3 영역: {', '.join(l3_names)}
+## L3 영역 (분석 핵심 단위): {', '.join(l3_names)}
 ## L4 활동: {', '.join(l4_names)}
 
 ## 중요 원칙
+- **반드시 L3 영역({', '.join(l3_names[:3])}) 단위로 매핑**하여 구체적 사례 추출
+- 프로세스 전체가 아닌, 개별 L3 활동에 AI를 어떻게 적용했는지 구체적으로 기술
 - **솔루션 Provider가 아닌, AI를 '도입·활용한' 기업** 사례만 추출
 - Big Tech(Google, Amazon, Meta 등)의 **내부** AI 활용 사례는 OK
 - Industry 선도사(Fortune 500, 한국 대기업)의 AI 도입 성과 우선
@@ -1714,15 +1718,15 @@ async def benchmark_workflow_step1(request: Request):
     {{
       "source": "기업명 (고유 기업명 1개만)",
       "industry": "산업군",
-      "process_area": "적용 프로세스 영역 (L2~L5 중 해당)",
+      "process_area": "적용 L3 활동명 (위 L3 영역 중 해당하는 것 선택)",
       "ai_technology": "적용 AI 기술",
-      "use_case": "구체적 적용 사례 (1~2문장)",
+      "use_case": "구체적 적용 사례 (1~2문장, L3 활동 기준)",
       "outcome": "성과/효과 (수치 포함)",
       "implication": "두산 향 시사점",
       "url": "출처 URL"
     }}
   ],
-  "summary": "벤치마킹 종합 요약 (3~5문장)"
+  "summary": "벤치마킹 종합 요약 — L3 활동별 핵심 시사점 중심 (3~5문장)"
 }}
 """
 
