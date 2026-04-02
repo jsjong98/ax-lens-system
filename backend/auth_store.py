@@ -99,7 +99,7 @@ def get_user_project(email: str) -> str | None:
                 return None  # 전체 접근
             return project
 
-    return None
+    return "미지정"
 
 
 def get_user_projects(email: str) -> list[str]:
@@ -124,8 +124,8 @@ def get_user_projects(email: str) -> list[str]:
         if name in members:
             return [project]
 
-    # 배정 안 된 사용자 → 빈 리스트 (접근 불가는 아님, 기본 프로젝트)
-    return user.get("projects", ALL_PROJECTS)
+    # 배정 안 된 사용자 → 접근 불가
+    return []
 
 
 def is_pm(email: str) -> bool:

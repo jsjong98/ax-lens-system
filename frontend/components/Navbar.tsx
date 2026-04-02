@@ -133,7 +133,9 @@ export default function Navbar() {
                           <div className="min-w-0">
                             <p className="text-sm font-semibold text-gray-900 truncate">{user.name}</p>
                             <p className="text-xs text-gray-500 truncate">{user.email}</p>
-                            {user.project ? (
+                            {user.project === "미지정" ? (
+                              <span className="inline-block mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-gray-100 text-gray-500">미지정</span>
+                            ) : user.project ? (
                               <span className="inline-block mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-700">{user.project}</span>
                             ) : user.is_admin ? (
                               <span className="inline-block mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-700">Admin</span>

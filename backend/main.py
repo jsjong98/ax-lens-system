@@ -382,10 +382,13 @@ async def get_project_list(request: Request):
     """저장된 프로젝트 목록 — 사용자 프로젝트로 필터링."""
     user_ctx = _get_user_context(request)
     if user_ctx:
-        projects = list_projects_for_user(
-            None if user_ctx.get("is_admin") or user_ctx.get("project") is None
-            else user_ctx.get("projects")
-        )
+        if user_ctx.get("project") == "미지정":
+            projects = []
+        else:
+            projects = list_projects_for_user(
+                None if user_ctx.get("is_admin") or user_ctx.get("project") is None
+                else user_ctx.get("projects")
+            )
     else:
         projects = list_projects()
     return {"ok": True, "projects": projects}
