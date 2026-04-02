@@ -1046,6 +1046,9 @@ export interface MappingCheckResult {
     total_l4_nodes: number;
     matched_l4_nodes: number;
     unmatched_l4_nodes: number;
+    total_l5_nodes: number;
+    matched_l5_nodes: number;
+    unmatched_l5_nodes: number;
     match_rate: number;
     cls_matched: Record<string, number>;
     cls_total: Record<string, number>;

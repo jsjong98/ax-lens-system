@@ -203,6 +203,8 @@ export default function MappingCheckPanel({ hasExcel, hasAsIs }: MappingCheckPan
   const clsTotal = result?.stats.cls_total || {};
   const totalMatched = result?.stats.matched_excel_tasks || 0;
   const totalExcel = result?.stats.total_excel_tasks || 0;
+  const totalL5 = result?.stats.total_l5_nodes || 0;
+  const matchedL5 = result?.stats.matched_l5_nodes || 0;
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
@@ -264,16 +266,16 @@ export default function MappingCheckPanel({ hasExcel, hasAsIs }: MappingCheckPan
               <div className="text-2xl font-black" style={{ color: result.stats.match_rate >= 80 ? "#15803D" : result.stats.match_rate >= 50 ? "#A16207" : "#DC2626" }}>
                 {result.stats.match_rate}%
               </div>
-              <div className="text-[10px] text-gray-500 mt-0.5">연결률</div>
+              <div className="text-[10px] text-gray-500 mt-0.5">연결률 (JSON L5 기준)</div>
             </div>
             <div className="rounded-xl border border-gray-200 p-3 text-center bg-white">
               <div className="text-lg font-bold text-gray-800">
-                {result.stats.matched_excel_tasks}
-                <span className="text-xs font-normal text-gray-400"> / {result.stats.total_excel_tasks}</span>
+                {matchedL5}
+                <span className="text-xs font-normal text-gray-400"> / {totalL5}</span>
               </div>
-              <div className="text-[10px] text-gray-500 mt-0.5">엑셀 Task 연결됨</div>
-              {result.stats.unmatched_excel_tasks > 0 && (
-                <div className="text-[10px] text-red-500 mt-0.5">미연결 {result.stats.unmatched_excel_tasks}행</div>
+              <div className="text-[10px] text-gray-500 mt-0.5">JSON L5 노드 연결됨</div>
+              {result.stats.unmatched_l5_nodes > 0 && (
+                <div className="text-[10px] text-red-500 mt-0.5">미연결 {result.stats.unmatched_l5_nodes}개</div>
               )}
             </div>
             <div className="rounded-xl border border-gray-200 p-3 text-center bg-white">
@@ -305,7 +307,7 @@ export default function MappingCheckPanel({ hasExcel, hasAsIs }: MappingCheckPan
                 {result.stats.match_rate >= 80
                   ? "AI/Human 분류 결과가 As-Is 노드에 잘 연결되어 있습니다. 벤치마킹·기본 설계에 분류 결과가 반영됩니다."
                   : result.stats.match_rate >= 40
-                  ? `부분 연결 — ${result.stats.unmatched_excel_tasks}개 Task가 As-Is L5 노드와 연결되지 않았습니다. 엑셀 Task ID와 JSON L5 task_id가 일치하는지 확인하세요.`
+                  ? `부분 연결 — JSON L5 노드 ${result.stats.unmatched_l5_nodes}개가 엑셀 Task와 연결되지 않았습니다. 엑셀 Task ID와 JSON L5 task_id가 일치하는지 확인하세요.`
                   : `연결률이 낮습니다 (${result.stats.match_rate}%). 엑셀 Task ID와 JSON/PPT의 L5 task_id 체계가 다를 수 있습니다. 아래 미연결 목록을 확인하세요.`
                 }
               </div>

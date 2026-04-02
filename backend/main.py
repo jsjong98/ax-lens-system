@@ -2755,9 +2755,13 @@ def _run_mapping_check() -> dict:
                     "label": _wf_classification.get(t.id, {}).get("label", "미분류"),
                 })
 
-    # 통계
-    total_excel = len(_wf_excel_tasks)
-    total_matched = len(matched_excel_ids)
+    # 통계 — 분모: JSON As-Is L5 노드 수 (엑셀 기준 아님)
+    total_l5_asis = sum(s["l5_count"] for s in sheets_result)
+    matched_l5_asis = sum(
+        sum(n["matched_l5"] for n in g["l4_nodes"])
+        for s in sheets_result
+        for g in s["l3_groups"]
+    )
     total_l4 = sum(
         sum(len(g["l4_nodes"]) for g in s["l3_groups"])
         for s in sheets_result
@@ -2768,19 +2772,19 @@ def _run_mapping_check() -> dict:
         for g in s["l3_groups"]
     )
 
-    # 매핑된 Task의 분류별 집계
+    # 연결된 L5 노드 기준 분류별 집계
     cls_matched: dict[str, int] = {}
     for sid in matched_excel_ids:
         lbl = _wf_classification.get(sid, {}).get("label", "미분류")
         cls_matched[lbl] = cls_matched.get(lbl, 0) + 1
 
-    # 전체 엑셀 분류별 집계
+    # 전체 엑셀 분류별 집계 (참고용)
     cls_total: dict[str, int] = {}
     for t in _wf_excel_tasks:
         lbl = _wf_classification.get(t.id, {}).get("label", "미분류")
         cls_total[lbl] = cls_total.get(lbl, 0) + 1
 
-    # L4 노드별 분류 집계 (매핑된 Task 기준)
+    # L4 노드별 분류 집계
     l4_cls_stats = []
     for s in sheets_result:
         for g in s["l3_groups"]:
@@ -2797,16 +2801,22 @@ def _run_mapping_check() -> dict:
         "has_excel": has_excel,
         "has_asis": has_asis,
         "stats": {
-            "total_excel_tasks": total_excel,
-            "matched_excel_tasks": total_matched,
-            "unmatched_excel_tasks": total_excel - total_matched,
+            # JSON L5 기준 (연결률 분모)
+            "total_l5_nodes": total_l5_asis,
+            "matched_l5_nodes": matched_l5_asis,
+            "unmatched_l5_nodes": total_l5_asis - matched_l5_asis,
+            "match_rate": round(matched_l5_asis / total_l5_asis * 100, 1) if total_l5_asis > 0 else 0,
+            # L4 기준
             "total_l4_nodes": total_l4,
             "matched_l4_nodes": matched_l4,
             "unmatched_l4_nodes": total_l4 - matched_l4,
-            "match_rate": round(total_matched / total_excel * 100, 1) if total_excel > 0 else 0,
+            # 엑셀 기준 (참고용)
+            "total_excel_tasks": len(_wf_excel_tasks),
+            "matched_excel_tasks": len(matched_excel_ids),
+            "unmatched_excel_tasks": len(_wf_excel_tasks) - len(matched_excel_ids),
             # 분류별 집계
-            "cls_matched": cls_matched,   # 매핑된 Task 중 AI/Human 현황
-            "cls_total": cls_total,        # 전체 엑셀 AI/Human 현황
+            "cls_matched": cls_matched,
+            "cls_total": cls_total,
         },
         "sheets": sheets_result,
         "excel_only": excel_only,
