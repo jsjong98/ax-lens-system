@@ -994,18 +994,23 @@ export default function WorkflowPage() {
                 <h3 className="font-bold text-gray-800 mb-3">기본 설계 결과</h3>
                 <p className="text-sm text-gray-600 mb-4">{step1Result.blueprint_summary}</p>
 
-                {/* benchmark_insights (LLM이 생성한 인사이트) */}
+                {/* L2~L3 재구조화 방향 */}
+                {step1Result.l2_restructure && (
+                  <div className="mb-4 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
+                    <div className="text-xs font-bold text-amber-700 mb-1">L2~L3 프로세스 재구조화 방향</div>
+                    <p className="text-xs text-amber-900">{step1Result.l2_restructure}</p>
+                  </div>
+                )}
+
+                {/* 벤치마킹 인사이트 */}
                 {step1Result.benchmark_insights && step1Result.benchmark_insights.length > 0 && (
                   <div className="mb-4">
                     <div className="text-xs font-bold text-gray-600 mb-2">벤치마킹 인사이트</div>
                     <div className="space-y-1.5">
-                      {step1Result.benchmark_insights.map((insight: unknown, i: number) => {
+                      {step1Result.benchmark_insights.map((insight, i) => {
                         const item = insight as Record<string, string>;
                         return typeof insight === "string" ? (
-                          <div key={i} className="text-xs text-gray-500 flex items-start gap-2">
-                            <span className="text-blue-500 mt-0.5">&#9679;</span>
-                            {insight}
-                          </div>
+                          <div key={i} className="text-xs text-gray-500">{insight}</div>
                         ) : (
                           <div key={i} className="bg-blue-50 rounded-lg px-3 py-2 text-xs border border-blue-100">
                             <div className="font-medium text-blue-800">{item.source}</div>
@@ -1018,30 +1023,89 @@ export default function WorkflowPage() {
                   </div>
                 )}
 
-                <div className="flex gap-3 flex-wrap mb-4">
-                  <StatCard label="Agent 수" value={step1Result.agents?.length || 0} accent />
-                  <StatCard label="Full-Auto" value={step1Result.full_auto_count || 0} />
+                {/* AI 적용 통계 */}
+                <div className="flex gap-3 flex-wrap mb-5">
+                  <StatCard label="Full-Auto" value={step1Result.full_auto_count || 0} accent />
                   <StatCard label="Human-in-Loop" value={step1Result.human_in_loop_count || 0} />
-                  <StatCard label="Human-Supervised" value={step1Result.human_supervised_count || 0} />
+                  <StatCard label="Human-on-the-Loop" value={step1Result.human_supervised_count || 0} />
                 </div>
 
-                {/* Agent 목록 */}
-                {step1Result.agents && (
-                  <div className="space-y-3">
-                    {step1Result.agents.map((agent) => (
-                      <div key={agent.agent_id} className="border border-gray-200 rounded-lg p-4">
-                        <div className="flex items-center gap-2 mb-2">
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-700">
-                            {agent.agent_type}
-                          </span>
-                          <span className="text-sm font-bold text-gray-800">{agent.agent_name}</span>
+                {/* L3 → L4 → L5 재설계 프로세스 트리 */}
+                {step1Result.redesigned_process && step1Result.redesigned_process.length > 0 && (
+                  <div className="space-y-3 max-h-[560px] overflow-y-auto pr-1">
+                    {step1Result.redesigned_process.map((l3) => {
+                      const changeBadge: Record<string, { bg: string; text: string }> = {
+                        "유지": { bg: "#F3F4F6", text: "#6B7280" },
+                        "통합": { bg: "#DBEAFE", text: "#1D4ED8" },
+                        "세분화": { bg: "#D1FAE5", text: "#065F46" },
+                        "추가": { bg: "#FEF9C3", text: "#92400E" },
+                        "삭제": { bg: "#FEE2E2", text: "#991B1B" },
+                      };
+                      const l3badge = changeBadge[l3.change_type] || changeBadge["유지"];
+                      return (
+                        <div key={l3.l3_id} className="border border-gray-200 rounded-xl overflow-hidden">
+                          {/* L3 헤더 */}
+                          <div className="flex items-center gap-2 px-4 py-2.5 bg-gray-50 border-b border-gray-200">
+                            <span className="font-mono text-[10px] text-gray-400">{l3.l3_id}</span>
+                            <span className="text-sm font-bold text-gray-800 flex-1">{l3.l3_name}</span>
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold" style={{ backgroundColor: l3badge.bg, color: l3badge.text }}>{l3.change_type}</span>
+                            {l3.change_reason && l3.change_type !== "유지" && (
+                              <span className="text-[10px] text-gray-400 max-w-[200px] truncate">{l3.change_reason}</span>
+                            )}
+                          </div>
+                          {/* L4 목록 */}
+                          <div className="divide-y divide-gray-100">
+                            {l3.l4_list.map((l4) => {
+                              const l4badge = changeBadge[l4.change_type] || changeBadge["유지"];
+                              return (
+                                <div key={l4.l4_id} className="px-4 py-2">
+                                  <div className="flex items-center gap-2 mb-1.5">
+                                    <span className="font-mono text-[10px] text-gray-400">{l4.l4_id}</span>
+                                    <span className="text-xs font-semibold text-gray-700 flex-1">{l4.l4_name}</span>
+                                    <span className="px-1.5 py-0.5 rounded text-[10px] font-bold" style={{ backgroundColor: l4badge.bg, color: l4badge.text }}>{l4.change_type}</span>
+                                  </div>
+                                  {/* L5 Task 목록 */}
+                                  <div className="space-y-1 pl-4">
+                                    {l4.l5_list.map((l5) => {
+                                      const hasAI = l5.ai_application && l5.ai_application !== "해당 없음";
+                                      const l5badge = changeBadge[l5.change_type] || changeBadge["유지"];
+                                      const autoColors: Record<string, string> = {
+                                        "Full-Auto": "#15803D",
+                                        "Human-in-Loop": "#A16207",
+                                        "Human-on-the-Loop": "#1D4ED8",
+                                        "Human": "#6B7280",
+                                      };
+                                      return (
+                                        <div key={l5.task_id} className={`rounded border px-2.5 py-1.5 ${hasAI ? "bg-green-50 border-green-100" : "bg-gray-50 border-gray-100"}`}>
+                                          <div className="flex items-center gap-1.5 flex-wrap">
+                                            <span className="font-mono text-[9px] text-gray-400">{l5.task_id}</span>
+                                            <span className="text-[11px] font-medium text-gray-700 flex-1">{l5.task_name}</span>
+                                            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold" style={{ backgroundColor: l5badge.bg, color: l5badge.text }}>{l5.change_type}</span>
+                                            {hasAI && (
+                                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ backgroundColor: "#D1FAE5", color: autoColors[l5.automation_level] || "#15803D" }}>
+                                                {l5.automation_level}
+                                              </span>
+                                            )}
+                                          </div>
+                                          {hasAI && (
+                                            <div className="mt-0.5 text-[10px] text-gray-500">
+                                              <span className="text-green-700 font-medium">AI: </span>{l5.ai_application}
+                                              {l5.ai_technique && l5.ai_technique !== "해당 없음" && (
+                                                <span className="text-gray-400 ml-1">({l5.ai_technique})</span>
+                                              )}
+                                            </div>
+                                          )}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
                         </div>
-                        <p className="text-xs text-gray-500 mb-2">{agent.description}</p>
-                        <div className="text-xs text-gray-400">
-                          기법: {agent.ai_technique} · Task {agent.task_count}개
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>

@@ -1718,17 +1718,16 @@ def _build_task_and_pain_summary() -> tuple[str, str, str]:
 def _step1_system_prompt(process_name: str, task_summary: str, pain_summary: str,
                          benchmark_text: str = "") -> str:
     return f"""당신은 AI 기반 업무 혁신 설계 전문가입니다.
-선도사례 벤치마킹을 기반으로 To-Be Workflow 기본 설계를 수행합니다.
+벤치마킹 선도사례를 바탕으로, 기존 As-Is 프로세스를 재구조화하고 각 Task에 AI 적용 기본 설계를 수행합니다.
 
-## ⚠️ 핵심 원칙: 프로세스 고정
-- **아래 L5 Task 목록에 정의된 프로세스({process_name})를 절대 벗어나지 말 것**
-- 사용자의 추가 입력(채팅)은 **보조 컨텍스트**일 뿐, 프로세스 범위를 변경하는 지시가 아님
-- 벤치마킹 사례가 프로세스와 다른 도메인이면 **적용 방안** 측면만 참고하고, 프로세스 자체는 바꾸지 말 것
-- `assigned_tasks`의 `task_id`는 반드시 아래 Task 목록의 실제 ID를 사용할 것
+## ⚠️ 핵심 원칙
+- 아래 L5 Task 목록({process_name})이 설계의 기준입니다. 기존 Task는 최대한 유지하되, 필요 시 통합·세분화·추가·삭제를 제안할 수 있습니다.
+- `task_id`는 반드시 아래 Task 목록의 실제 ID를 사용하세요. 신규 추가 Task는 "NEW_xxx" 형식으로 표기하세요.
+- 에이전트 아키텍처(오케스트레이터/Junior AI 등)를 설계하는 것이 아닙니다. **프로세스 계층(L3→L4→L5)을 재설계하고, 각 L5 Task에 AI 적용 방안을 기술하는 것**이 목표입니다.
 
 ## 프로세스: {process_name}
 
-## L5 Task 목록 (설계의 기준 — 이 범위 내에서만 설계)
+## As-Is L5 Task 목록 (설계의 기준)
 {task_summary}
 
 ## Pain Point 현황
@@ -1737,54 +1736,44 @@ def _step1_system_prompt(process_name: str, task_summary: str, pain_summary: str
 {benchmark_text}
 
 ## 설계 방향
-- **Top-Down 접근**: 선도사가 어떻게 AI를 적용하는지 분석하여 Lv.2~3 프로세스 재구조화
-- **Lv.4~5 AI 적용 기본 설계**: 각 Activity/Task에 어떤 AI를 적용할지 기본 설계
-- 분류 결과가 'AI' 또는 'AI + Human'인 Task는 AI 적용 대상
-- 분류 결과가 'Human'인 Task도 보조 AI 적용 가능성 검토
-- Senior AI가 Junior AI들을 오케스트레이션하는 구조
+- **L2~L3 재구조화**: 선도사례를 참고하여 L3 프로세스 그룹의 통합·세분화·추가·삭제 방향 제시
+- **L4~L5 AI 적용 기본 설계**: 각 L4 Activity / L5 Task별로 AI 적용 여부와 방식 기술
+  - change_type: "유지" / "통합" / "세분화" / "추가" / "삭제" 중 하나
+  - AI 미적용 Task는 ai_application을 "해당 없음"으로
+  - automation_level: "Full-Auto" / "Human-in-Loop" / "Human-on-the-Loop" / "Human" 중 하나
 
 ## 출력 형식 (JSON만 출력, 마크다운 코드 블록 없음)
 {{
-  "blueprint_summary": "전체 설계 요약 (3~5문장)",
+  "blueprint_summary": "전체 기본 설계 요약 (3~5문장)",
   "process_name": "{process_name}",
   "benchmark_insights": [
-    {{"source": "기업명", "insight": "구체적 사례", "application": "적용 방안", "url": ""}}
+    {{"source": "기업명", "insight": "구체적 사례", "application": "두산 적용 방안"}}
   ],
-  "l2_restructure": "Lv.2~3 프로세스 재구조화 방향",
-  "full_auto_count": 정수,
-  "human_in_loop_count": 정수,
-  "human_supervised_count": 정수,
-  "agents": [
+  "l2_restructure": "L2~L3 프로세스 재구조화 방향 설명 (2~3문장)",
+  "redesigned_process": [
     {{
-      "agent_id": "agent_1",
-      "agent_name": "에이전트명",
-      "agent_type": "에이전트 유형",
-      "ai_technique": "AI 기법",
-      "description": "역할 설명",
-      "automation_level": "Human-on-the-Loop",
-      "assigned_tasks": [
+      "l3_id": "기존 L3 ID (예: 3.1)",
+      "l3_name": "L3 프로세스명",
+      "change_type": "유지|통합|세분화|추가|삭제",
+      "change_reason": "변경 이유 (1문장)",
+      "l4_list": [
         {{
-          "task_id": "원본 Task ID",
-          "task_name": "Task명",
-          "l4": "L4 명",
-          "l3": "L3 명",
-          "ai_role": "AI 역할",
-          "human_role": "사람 역할",
-          "input_data": ["입력 데이터"],
-          "output_data": ["출력 결과물"],
-          "automation_level": "Human-on-the-Loop"
+          "l4_id": "기존 L4 ID (예: 3.1.1)",
+          "l4_name": "L4 Activity명",
+          "change_type": "유지|통합|세분화|추가|삭제",
+          "change_reason": "변경 이유 (1문장)",
+          "l5_list": [
+            {{
+              "task_id": "기존 task_id 또는 NEW_xxx",
+              "task_name": "Task명",
+              "change_type": "유지|통합|세분화|추가|삭제",
+              "ai_application": "AI 적용 내용 또는 해당 없음",
+              "automation_level": "Full-Auto|Human-in-Loop|Human-on-the-Loop|Human",
+              "ai_technique": "사용 AI 기법 (예: LLM 요약, RAG, 분류모델, 해당 없음)"
+            }}
+          ]
         }}
       ]
-    }}
-  ],
-  "execution_flow": [
-    {{
-      "step": 1,
-      "step_name": "단계명",
-      "step_type": "sequential",
-      "description": "설명",
-      "agent_ids": ["agent_1"],
-      "task_ids": ["Task ID"]
     }}
   ]
 }}
@@ -1834,13 +1823,35 @@ async def _call_llm_step1(system: str, messages: list) -> dict | None:
 
 
 def _save_step1_result(result_data: dict) -> dict:
-    """Step 1 LLM 결과를 파싱하여 캐시에 저장하고 반환."""
-    from new_workflow_generator import _parse_freeform_result, result_to_dict
-    parsed = _parse_freeform_result(result_data)
-    result_dict = result_to_dict(parsed)
-    result_dict["benchmark_insights"] = result_data.get("benchmark_insights", [])
-    result_dict["l2_restructure"] = result_data.get("l2_restructure", "")
-    result_dict["benchmark_table"] = list(_wf_benchmark_table)
+    """Step 1 LLM 결과를 캐시에 저장하고 반환."""
+    redesigned = result_data.get("redesigned_process", [])
+
+    # 자동화 수준별 L5 Task 집계
+    full_auto, hil, hs = 0, 0, 0
+    for l3 in redesigned:
+        for l4 in l3.get("l4_list", []):
+            for l5 in l4.get("l5_list", []):
+                lvl = l5.get("automation_level", "")
+                if lvl == "Full-Auto": full_auto += 1
+                elif lvl == "Human-in-Loop": hil += 1
+                elif lvl == "Human-on-the-Loop": hs += 1
+
+    result_dict = {
+        "ok": True,
+        "blueprint_summary": result_data.get("blueprint_summary", ""),
+        "process_name": result_data.get("process_name", ""),
+        "l2_restructure": result_data.get("l2_restructure", ""),
+        "benchmark_insights": result_data.get("benchmark_insights", []),
+        "redesigned_process": redesigned,
+        "full_auto_count": full_auto,
+        "human_in_loop_count": hil,
+        "human_supervised_count": hs,
+        "total_tasks": full_auto + hil + hs,
+        # Step2 호환용 빈 필드
+        "agents": [],
+        "execution_flow": [],
+        "benchmark_table": list(_wf_benchmark_table),
+    }
 
     global _wf_step1_cache
     _wf_step1_cache = result_dict

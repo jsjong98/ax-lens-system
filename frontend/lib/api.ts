@@ -862,10 +862,36 @@ export interface WorkflowExcelUploadResult {
   sheets: Array<{ name: string; recommended: boolean; row_count: number; l5_count: number }>;
 }
 
+export interface RedesignedL5Task {
+  task_id: string;
+  task_name: string;
+  change_type: string;
+  ai_application: string;
+  automation_level: string;
+  ai_technique: string;
+}
+
+export interface RedesignedL4 {
+  l4_id: string;
+  l4_name: string;
+  change_type: string;
+  change_reason: string;
+  l5_list: RedesignedL5Task[];
+}
+
+export interface RedesignedL3 {
+  l3_id: string;
+  l3_name: string;
+  change_type: string;
+  change_reason: string;
+  l4_list: RedesignedL4[];
+}
+
 export interface WorkflowStepResult extends NewWorkflowResult {
-  benchmark_insights?: string[];
+  benchmark_insights?: Array<{ source: string; insight: string; application: string }> | string[];
   l2_restructure?: string;
   design_philosophy?: string;
+  redesigned_process?: RedesignedL3[];
 }
 
 export interface WorkflowChatResponse {
