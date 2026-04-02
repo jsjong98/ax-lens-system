@@ -63,73 +63,65 @@ function ClsSummaryBar({ counts, total }: { counts: Record<string, number>; tota
 // ── L4 노드 행 ─────────────────────────────────────────────────────────────
 function L4Row({ node }: { node: MappingL4Node }) {
   const [open, setOpen] = useState(false);
-  const hasExcel = node.excel_tasks.length > 0;
-  const total = node.excel_tasks.length;
+  const hasAnyMatch = node.matched_l5 > 0;
   const cls = node.cls_summary || {};
 
   return (
-    <div className={`border rounded-lg mb-1 ${hasExcel ? "border-green-200 bg-green-50/30" : "border-red-200 bg-red-50/20"}`}>
+    <div className={`border rounded-lg mb-1 ${hasAnyMatch ? "border-green-200 bg-green-50/30" : "border-gray-200 bg-gray-50/30"}`}>
       <button
         className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-white/60 transition-colors rounded-lg"
         onClick={() => setOpen((v) => !v)}
       >
         {open ? <ChevronDown className="h-3.5 w-3.5 text-gray-400 shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 text-gray-400 shrink-0" />}
-        {hasExcel
+        {hasAnyMatch
           ? <CheckCircle className="h-3.5 w-3.5 text-green-500 shrink-0" />
           : <XCircle className="h-3.5 w-3.5 text-red-400 shrink-0" />}
         <span className="font-mono text-[10px] text-gray-400 shrink-0">{node.task_id}</span>
         <span className="text-xs font-medium text-gray-700 flex-1 truncate">{node.label}</span>
 
-        {hasExcel ? (
-          <div className="flex items-center gap-2 shrink-0">
-            <ClsSummaryBar counts={cls} total={total} />
-            <span className="text-[10px] text-green-600 font-bold">{total}행</span>
-          </div>
-        ) : (
-          <span className="shrink-0 text-[10px] text-red-400 font-medium">미연결</span>
-        )}
+        <div className="flex items-center gap-2 shrink-0">
+          {hasAnyMatch && <ClsSummaryBar counts={cls} total={node.matched_l5} />}
+          <span className={`text-[10px] font-bold ${hasAnyMatch ? "text-green-600" : "text-gray-400"}`}>
+            {node.matched_l5}/{node.total_l5} L5
+          </span>
+        </div>
       </button>
 
-      {open && (
-        <div className="px-3 pb-3 space-y-1.5">
-          {hasExcel ? (
-            <>
-              <div className="text-[10px] font-semibold text-gray-500 mb-1 flex items-center gap-1">
-                <Link2 className="h-3 w-3" /> 연결된 엑셀 Task ({total}행)
+      {open && node.l5_nodes.length > 0 && (
+        <div className="px-3 pb-3 space-y-1">
+          <div className="text-[10px] font-semibold text-gray-500 mb-1 flex items-center gap-1">
+            <Link2 className="h-3 w-3" /> L5 노드 ({node.total_l5}개 · 연결 {node.matched_l5}개)
+          </div>
+          {node.l5_nodes.map((l5) => (
+            <div
+              key={l5.task_id}
+              className={`rounded border px-2.5 py-1.5 flex items-start gap-2 ${
+                l5.matched ? "bg-white border-green-100" : "bg-gray-50 border-gray-200"
+              }`}
+            >
+              {l5.matched
+                ? <CheckCircle className="h-3.5 w-3.5 text-green-400 shrink-0 mt-0.5" />
+                : <XCircle className="h-3.5 w-3.5 text-gray-300 shrink-0 mt-0.5" />}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <span className="font-mono text-[9px] text-gray-400">{l5.task_id}</span>
+                  <span className="text-xs text-gray-700 font-medium truncate">{l5.label}</span>
+                </div>
+                {l5.matched && l5.excel_name && (
+                  <div className="text-[10px] text-gray-500 mt-0.5 truncate">
+                    ↳ {l5.excel_name}
+                  </div>
+                )}
+                {l5.matched && l5.description && (
+                  <div className="text-[10px] text-gray-400 mt-0.5 line-clamp-1">{l5.description}</div>
+                )}
               </div>
-              {node.excel_tasks.map((t) => (
-                <div key={t.id} className="bg-white rounded border border-green-100 px-2.5 py-1.5 flex items-start gap-2">
-                  <span className="font-mono text-[9px] text-gray-400 shrink-0 mt-0.5 w-16 truncate">{t.id}</span>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-xs text-gray-800 font-medium">{t.name}</div>
-                    {t.description && (
-                      <div className="text-[10px] text-gray-400 mt-0.5 line-clamp-1">{t.description}</div>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-1 shrink-0">
-                    <LabelBadge label={t.label} />
-                    <PainBadge points={t.pain_points} />
-                  </div>
-                </div>
-              ))}
-            </>
-          ) : (
-            <div className="flex items-center gap-1.5 text-[11px] text-red-500 bg-red-50 rounded px-2.5 py-1.5">
-              <XCircle className="h-3.5 w-3.5 shrink-0" />
-              <span>task_id <span className="font-mono">{node.task_id}</span>와 일치하는 엑셀 l4_id가 없습니다.</span>
+              <div className="flex items-center gap-1 shrink-0">
+                {l5.matched && l5.cls_label && <LabelBadge label={l5.cls_label} />}
+                {l5.matched && <PainBadge points={l5.pain_points} />}
+              </div>
             </div>
-          )}
-          {node.l5_nodes.length > 0 && (
-            <div className="mt-1">
-              <div className="text-[10px] font-semibold text-blue-600 mb-0.5">L5 하위 노드</div>
-              {node.l5_nodes.map((n) => (
-                <div key={n.task_id} className="flex items-center gap-2 text-[10px] text-gray-500 px-1">
-                  <span className="font-mono text-gray-400">{n.task_id}</span>
-                  <span>{n.label}</span>
-                </div>
-              ))}
-            </div>
-          )}
+          ))}
         </div>
       )}
     </div>
@@ -313,8 +305,8 @@ export default function MappingCheckPanel({ hasExcel, hasAsIs }: MappingCheckPan
                 {result.stats.match_rate >= 80
                   ? "AI/Human 분류 결과가 As-Is 노드에 잘 연결되어 있습니다. 벤치마킹·기본 설계에 분류 결과가 반영됩니다."
                   : result.stats.match_rate >= 40
-                  ? `부분 연결 — ${result.stats.unmatched_excel_tasks}개 Task가 As-Is 노드와 연결되지 않았습니다. 엑셀 l4_id와 JSON task_id가 일치하는지 확인하세요.`
-                  : `연결률이 낮습니다 (${result.stats.match_rate}%). 엑셀과 JSON/PPT의 L4 ID 체계가 다를 수 있습니다. 아래 미연결 목록을 확인하세요.`
+                  ? `부분 연결 — ${result.stats.unmatched_excel_tasks}개 Task가 As-Is L5 노드와 연결되지 않았습니다. 엑셀 Task ID와 JSON L5 task_id가 일치하는지 확인하세요.`
+                  : `연결률이 낮습니다 (${result.stats.match_rate}%). 엑셀 Task ID와 JSON/PPT의 L5 task_id 체계가 다를 수 있습니다. 아래 미연결 목록을 확인하세요.`
                 }
               </div>
             </div>
@@ -346,7 +338,7 @@ export default function MappingCheckPanel({ hasExcel, hasAsIs }: MappingCheckPan
                           <span className="text-[10px] font-mono text-gray-400">{g.task_id}</span>
                           <span className="text-xs font-bold text-gray-700">{g.label}</span>
                           <span className="text-[10px] text-gray-400 ml-auto">
-                            L4 {g.l4_nodes.length} · 엑셀 {g.total_excel}행
+                            L4 {g.l4_nodes.length} · L5 {g.total_l5}개 (연결 {g.matched_l5})
                           </span>
                         </div>
                       )}

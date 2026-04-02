@@ -1511,19 +1511,26 @@ _wf_benchmark_results: list = []   # 벤치마킹 검색 결과 (raw)
 _wf_benchmark_table: list = []     # 벤치마킹 결과 테이블 (LLM 분석 후)
 
 
-def _build_excel_index() -> tuple[dict, dict, dict]:
-    """엑셀 Task를 l4_id / l3_id / l2_id 기준으로 인덱싱."""
+def _build_excel_index() -> tuple[dict, dict, dict, dict]:
+    """엑셀 Task를 id(L5) / l4_id / l3_id / l2_id 기준으로 인덱싱.
+    반환: by_id, by_l4, by_l3, by_l2
+    - by_id : 엑셀 task id(L5 ID) → Task  (L5↔L5 직접 매핑)
+    - by_l4 : l4_id → [Task, ...]         (L4 그룹핑용)
+    """
+    by_id: dict[str, object] = {}
     by_l4: dict[str, list] = {}
     by_l3: dict[str, list] = {}
     by_l2: dict[str, list] = {}
     for t in _wf_excel_tasks:
+        if t.id:
+            by_id[t.id] = t
         if t.l4_id:
             by_l4.setdefault(t.l4_id, []).append(t)
         if t.l3_id:
             by_l3.setdefault(t.l3_id, []).append(t)
         if t.l2_id:
             by_l2.setdefault(t.l2_id, []).append(t)
-    return by_l4, by_l3, by_l2
+    return by_id, by_l4, by_l3, by_l2
 
 
 def _format_task_line(t, show_pain: bool = True) -> str:
@@ -1549,7 +1556,7 @@ def _build_mapped_asis_context(sheet_id: str = "") -> str:
         # As-Is 없으면 엑셀만으로 L3/L4 기반 컨텍스트 구성
         if not _wf_excel_tasks:
             return ""
-        by_l4, by_l3, _ = _build_excel_index()
+        _, by_l4, by_l3, _ = _build_excel_index()
         lines = ["## As-Is 프로세스 (엑셀 기반)\n"]
         cur_l3 = None
         for t in _wf_excel_tasks:
@@ -1568,7 +1575,7 @@ def _build_mapped_asis_context(sheet_id: str = "") -> str:
         [s for s in parsed.sheets if s.sheet_id == sheet_id] or parsed.sheets[:1]
     ) if sheet_id else parsed.sheets
 
-    by_l4, by_l3, by_l2 = _build_excel_index()
+    by_id, by_l4, by_l3, by_l2 = _build_excel_index()
     lines = ["## As-Is 워크플로우 + 엑셀 매핑\n"]
 
     for s in target_sheets:
@@ -1838,7 +1845,7 @@ async def benchmark_workflow_step1(request: Request):
     process_name, task_summary, pain_summary = _build_task_and_pain_summary()
 
     # ── 공통 인덱스 + L4/L3/L2 세부 정보 구축 ───────────────────────────────
-    excel_by_l4, excel_by_l3, excel_by_l2 = _build_excel_index()
+    _, excel_by_l4, excel_by_l3, excel_by_l2 = _build_excel_index()
 
     _PAIN_MAP = [
         ("pain_time", "시간/속도"), ("pain_accuracy", "정확성"),
@@ -2157,7 +2164,7 @@ async def chat_workflow_step1(request: Request):
 
     if company_pattern or wants_benchmark:
         companies = list(set(company_pattern)) if company_pattern else []
-        excel_by_l4, excel_by_l3, excel_by_l2 = _build_excel_index()
+        _, excel_by_l4, excel_by_l3, excel_by_l2 = _build_excel_index()
 
         _PAIN_MAP_BM = [("pain_time","시간/속도"),("pain_accuracy","정확성"),
                         ("pain_repetition","반복/수작업"),("pain_data","정보/데이터"),
@@ -2626,7 +2633,7 @@ async def get_mapping_check():
     if not has_excel and not has_asis:
         return {"ok": True, "has_excel": False, "has_asis": False, "sheets": [], "excel_only": [], "stats": {}}
 
-    by_l4, by_l3, by_l2 = _build_excel_index()
+    by_id, by_l4, by_l3, by_l2 = _build_excel_index()
 
     # 매핑된 엑셀 task id 추적
     matched_excel_ids: set[str] = set()
@@ -2647,105 +2654,86 @@ async def get_mapping_check():
                 parent_tid = parts[0] if len(parts) > 1 else n.task_id
                 l4_by_l3_tid.setdefault(parent_tid, []).append(n)
 
-            l3_groups = []
+            # L5 노드를 부모 L4 task_id 기준으로 그룹핑
+            l5_by_l4_tid: dict[str, list] = {}
+            for l5n in l5_nodes:
+                parts = l5n.task_id.rsplit(".", 1)
+                parent = parts[0] if len(parts) > 1 else l5n.task_id
+                l5_by_l4_tid.setdefault(parent, []).append(l5n)
 
+            def _make_l4_entry(l4n):
+                """L4 노드 하나에 대한 매핑 결과 구성 (L5↔엑셀 직접 매핑)."""
+                l5_children = sorted(l5_by_l4_tid.get(l4n.task_id, []), key=lambda x: x.task_id)
+
+                l5_entries = []
+                cls_counts: dict[str, int] = {}
+                for l5n in l5_children:
+                    excel_task = by_id.get(l5n.task_id)  # L5 ID 직접 매핑
+                    if excel_task:
+                        matched_excel_ids.add(excel_task.id)
+                        lbl = _wf_classification.get(excel_task.id, {}).get("label", "미분류")
+                        cls_counts[lbl] = cls_counts.get(lbl, 0) + 1
+                        pain_points = [
+                            p for p, v in [
+                                ("시간/속도", excel_task.pain_time),
+                                ("정확성", excel_task.pain_accuracy),
+                                ("반복/수작업", excel_task.pain_repetition),
+                                ("정보/데이터", excel_task.pain_data),
+                                ("시스템/도구", excel_task.pain_system),
+                            ] if v
+                        ]
+                        l5_entries.append({
+                            "task_id": l5n.task_id,
+                            "label": l5n.label,
+                            "matched": True,
+                            "excel_id": excel_task.id,
+                            "excel_name": excel_task.name,
+                            "cls_label": lbl,
+                            "pain_points": pain_points,
+                            "description": excel_task.description[:80] if excel_task.description else "",
+                        })
+                    else:
+                        l5_entries.append({
+                            "task_id": l5n.task_id,
+                            "label": l5n.label,
+                            "matched": False,
+                            "excel_id": "",
+                            "excel_name": "",
+                            "cls_label": "",
+                            "pain_points": [],
+                            "description": "",
+                        })
+
+                return {
+                    "task_id": l4n.task_id,
+                    "label": l4n.label,
+                    "level": "L4",
+                    "l5_nodes": l5_entries,
+                    "cls_summary": cls_counts,
+                    "matched_l5": sum(1 for e in l5_entries if e["matched"]),
+                    "total_l5": len(l5_entries),
+                }
+
+            l3_groups = []
             if l3_nodes:
                 for l3n in sorted(l3_nodes, key=lambda x: x.task_id):
                     children = l4_by_l3_tid.get(l3n.task_id, [])
-                    l4_list = []
-                    for l4n in sorted(children, key=lambda x: x.task_id):
-                        excel_tasks = by_l4.get(l4n.task_id, [])
-                        for t in excel_tasks:
-                            matched_excel_ids.add(t.id)
-
-                        # L5 자식 노드
-                        l5_children = sorted(
-                            [n for n in l5_nodes if n.task_id.startswith(l4n.task_id + ".")],
-                            key=lambda x: x.task_id
-                        )
-
-                        et_list = [
-                            {
-                                "id": t.id,
-                                "name": t.name,
-                                "label": _wf_classification.get(t.id, {}).get("label", "미분류"),
-                                "pain_points": [
-                                    p for p, v in [
-                                        ("시간/속도", t.pain_time),
-                                        ("정확성", t.pain_accuracy),
-                                        ("반복/수작업", t.pain_repetition),
-                                        ("정보/데이터", t.pain_data),
-                                        ("시스템/도구", t.pain_system),
-                                    ] if v
-                                ],
-                                "description": t.description[:80] if t.description else "",
-                            }
-                            for t in excel_tasks
-                        ]
-                        cls_counts: dict[str, int] = {}
-                        for et in et_list:
-                            cls_counts[et["label"]] = cls_counts.get(et["label"], 0) + 1
-                        l4_list.append({
-                            "task_id": l4n.task_id,
-                            "label": l4n.label,
-                            "level": "L4",
-                            "excel_tasks": et_list,
-                            "cls_summary": cls_counts,
-                            "l5_nodes": [
-                                {"task_id": n.task_id, "label": n.label}
-                                for n in l5_children
-                            ],
-                            "matched": len(excel_tasks) > 0,
-                        })
-
+                    l4_list = [_make_l4_entry(l4n) for l4n in sorted(children, key=lambda x: x.task_id)]
                     l3_groups.append({
                         "task_id": l3n.task_id,
                         "label": l3n.label,
                         "l4_nodes": l4_list,
-                        "total_excel": sum(len(x["excel_tasks"]) for x in l4_list),
+                        "total_l5": sum(x["total_l5"] for x in l4_list),
+                        "matched_l5": sum(x["matched_l5"] for x in l4_list),
                     })
             else:
-                # L3 노드 없으면 L4 직접 나열
-                l4_list = []
-                for l4n in sorted(l4_nodes, key=lambda x: x.task_id):
-                    excel_tasks = by_l4.get(l4n.task_id, [])
-                    for t in excel_tasks:
-                        matched_excel_ids.add(t.id)
-                    et_list2 = [
-                        {
-                            "id": t.id,
-                            "name": t.name,
-                            "label": _wf_classification.get(t.id, {}).get("label", "미분류"),
-                            "pain_points": [
-                                p for p, v in [
-                                    ("시간/속도", t.pain_time),
-                                    ("정확성", t.pain_accuracy),
-                                    ("반복/수작업", t.pain_repetition),
-                                    ("정보/데이터", t.pain_data),
-                                    ("시스템/도구", t.pain_system),
-                                ] if v
-                            ],
-                            "description": t.description[:80] if t.description else "",
-                        }
-                        for t in excel_tasks
-                    ]
-                    cls_counts2: dict[str, int] = {}
-                    for et in et_list2:
-                        cls_counts2[et["label"]] = cls_counts2.get(et["label"], 0) + 1
-                    l4_list.append({
-                        "task_id": l4n.task_id,
-                        "label": l4n.label,
-                        "level": "L4",
-                        "excel_tasks": et_list2,
-                        "cls_summary": cls_counts2,
-                        "l5_nodes": [],
-                        "matched": len(excel_tasks) > 0,
-                    })
+                l4_list = [_make_l4_entry(l4n) for l4n in sorted(l4_nodes, key=lambda x: x.task_id)]
                 l3_groups.append({
                     "task_id": "",
                     "label": "(L3 없음)",
                     "l4_nodes": l4_list,
-                    "total_excel": sum(len(x["excel_tasks"]) for x in l4_list),
+                    "total_l5": sum(x["total_l5"] for x in l4_list),
+                    "matched_l5": sum(x["matched_l5"] for x in l4_list),
                 })
 
             sheets_result.append({
@@ -2753,6 +2741,7 @@ async def get_mapping_check():
                 "sheet_name": s.name,
                 "l3_count": len(l3_nodes),
                 "l4_count": len(l4_nodes),
+                "l5_count": len(l5_nodes),
                 "l3_groups": l3_groups,
             })
 

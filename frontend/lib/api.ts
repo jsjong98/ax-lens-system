@@ -989,10 +989,13 @@ export async function getWorkflowStepResults(): Promise<{
 
 // ── Mapping Check ────────────────────────────────────────────────────────────
 
-export interface MappingExcelTask {
-  id: string;
-  name: string;
+export interface MappingL5Node {
+  task_id: string;
   label: string;
+  matched: boolean;
+  excel_id: string;
+  excel_name: string;
+  cls_label: string;
   pain_points: string[];
   description: string;
 }
@@ -1001,17 +1004,18 @@ export interface MappingL4Node {
   task_id: string;
   label: string;
   level: string;
-  excel_tasks: MappingExcelTask[];
+  l5_nodes: MappingL5Node[];
   cls_summary?: Record<string, number>;
-  l5_nodes: { task_id: string; label: string }[];
-  matched: boolean;
+  matched_l5: number;
+  total_l5: number;
 }
 
 export interface MappingL3Group {
   task_id: string;
   label: string;
   l4_nodes: MappingL4Node[];
-  total_excel: number;
+  total_l5: number;
+  matched_l5: number;
 }
 
 export interface MappingSheet {
