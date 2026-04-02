@@ -1928,11 +1928,16 @@ async def benchmark_workflow_step1(request: Request):
   "benchmark_table": [
     {{
       "source": "기업명 (고유 기업명 1개만)",
+      "company_type": "Tech 상한선 | 非Tech 실제 구현",
       "industry": "산업군",
       "process_area": "매핑된 L4 활동명 (위 L4 목록 중 해당하는 것, 없으면 L3명)",
+      "ai_adoption_goal": "AI 도입 목표 (비용절감·속도개선·정확도향상 등)",
       "ai_technology": "적용 AI 기술",
+      "key_data": "핵심 데이터 (어떤 데이터로 AI를 구동하는지)",
+      "adoption_method": "도입 방식 (자체개발 | SaaS | API | 파트너십)",
       "use_case": "구체적 적용 사례 (1~2문장, L4 활동 기준)",
       "outcome": "성과/효과 (수치 포함)",
+      "infrastructure": "인프라/시스템 기반",
       "implication": "두산 향 시사점 (해당 L4 활동의 Pain Point 해결 관점)",
       "url": "출처 URL"
     }}
@@ -2092,30 +2097,80 @@ async def chat_workflow_step1(request: Request):
         r'[A-Z][a-z]+(?:\s[A-Z][a-z]+)*)',
         user_message,
     )
+    # 메시지에서 벤치마킹 관련 키워드 감지
+    bm_keywords = ["벤치마킹", "사례", "benchmark", "case study", "도입 사례", "적용 사례"]
+    wants_benchmark = any(kw in user_message.lower() for kw in bm_keywords) or bool(company_pattern)
+
     extra_bm_text = ""
-    if company_pattern:
-        companies = list(set(company_pattern))
+    new_bm_entries: list[dict] = []
+
+    if company_pattern or wants_benchmark:
+        companies = list(set(company_pattern)) if company_pattern else []
+        excel_by_l4, excel_by_l3, excel_by_l2 = _build_excel_index()
+
+        _PAIN_MAP_BM = [("pain_time","시간/속도"),("pain_accuracy","정확성"),
+                        ("pain_repetition","반복/수작업"),("pain_data","정보/데이터"),
+                        ("pain_system","시스템/도구"),("pain_communication","의사소통/협업")]
+
+        def _get_pains_bm(tasks):
+            found = set()
+            for t in tasks:
+                for f, lbl in _PAIN_MAP_BM:
+                    if getattr(t, f, ""): found.add(lbl)
+            return list(found)
+
+        l4_details_chat = []
+        for l4_id, tasks in list(excel_by_l4.items())[:4]:
+            name = tasks[0].l4 if tasks else ""
+            if name:
+                l4_details_chat.append({"name": name, "task_id": l4_id,
+                    "pain_points": _get_pains_bm(tasks),
+                    "description": "", "task_names": []})
+
         bm_data = {
             "process_name": process_name,
             "agents": [],
-            "blueprint_summary": f"{' '.join(companies)} {process_name} AI 적용",
+            "l4_details": l4_details_chat,
+            "l4_names": [d["name"] for d in l4_details_chat],
+            "l3_names": list({t.l3 for t in _wf_excel_tasks if t.l3})[:4],
+            "l2_names": list({t.l2 for t in _wf_excel_tasks if t.l2})[:2],
+            "l3_details": [], "l2_details": [],
+            "blueprint_summary": f"{' '.join(companies) + ' ' if companies else ''}{process_name} AI 적용",
         }
+        if companies:
+            bm_data["extra_queries"] = [
+                f"{' '.join(companies)} '{process_name}' AI automation case study 2024 2025",
+            ]
         raw = await search_benchmarks(bm_data)
+
         if raw:
-            extra_bm_text = "\n\n[추가 벤치마킹 결과]\n"
-            for r in raw[:5]:
-                content = r.get("content", r.get("snippet", ""))
-                extra_bm_text += f"- {r['title']}: {content[:200]}\n"
+            # LLM으로 새 벤치마킹 분석
+            bm_sys = f"""벤치마킹 분석 전문가입니다. 검색 결과에서 '{process_name}' 프로세스 관련 사례를 추출합니다.
+L4 활동: {', '.join(bm_data['l4_names'][:4])}
+관련성 없는 사례는 제외. 출력 형식 (JSON만):
+{{"benchmark_table": [{{"source":"","company_type":"Tech 상한선|非Tech 실제 구현","industry":"","process_area":"","ai_adoption_goal":"","ai_technology":"","key_data":"","adoption_method":"","use_case":"","outcome":"","infrastructure":"","implication":"","url":""}}]}}"""
+            bm_user_msg = "## 검색 결과\n" + "\n".join(
+                f"[{i+1}] {r['title']}\n{r.get('content',r.get('snippet',''))[:400]}"
+                for i, r in enumerate(raw[:10])
+            )
+            bm_result = await _call_llm_step1(bm_sys, [{"role":"user","content":bm_user_msg}])
+            if bm_result and bm_result.get("benchmark_table"):
+                new_bm_entries = bm_result["benchmark_table"]
+                # 기존 테이블에 없는 기업 사례만 추가
+                existing_sources = {b.get("source","") for b in _wf_benchmark_table}
+                for entry in new_bm_entries:
+                    if entry.get("source","") not in existing_sources:
+                        _wf_benchmark_table.append(entry)
+                extra_bm_text = f"\n\n[추가 벤치마킹 — {len(new_bm_entries)}건 분석 완료]"
 
     # 기존 설계 결과 or 벤치마킹 결과가 있으면 포함
     context = ""
     if _wf_step1_cache:
         context = f"현재 설계 결과:\n{json.dumps(_wf_step1_cache, ensure_ascii=False, indent=2)[:3000]}"
-    elif _wf_benchmark_table:
-        context = "벤치마킹 결과만 있는 상태입니다. 설계는 아직 생성되지 않았습니다.\n"
-        context += "벤치마킹 테이블:\n"
-        for bm in _wf_benchmark_table[:5]:
-            context += f"- {bm.get('source', '')}: {bm.get('use_case', '')}\n"
+    if _wf_benchmark_table:
+        context += "\n\n현재 벤치마킹 테이블:\n"
+        for bm in _wf_benchmark_table[:8]:
+            context += f"- [{bm.get('company_type','?')}] {bm.get('source','')}: {bm.get('use_case','')}\n"
 
     chat_system = f"""당신은 AI 기반 업무 혁신 설계 전문가입니다.
 현재 '{process_name}' 프로세스의 Step 1 (벤치마킹 기반 기본 설계)을 진행 중입니다.
@@ -2201,6 +2256,8 @@ async def chat_workflow_step1(request: Request):
         "message": response_text,
         "updated": updated,
         "result": _wf_step1_cache if updated else None,
+        "benchmark_updated": len(new_bm_entries) > 0,
+        "benchmark_table": list(_wf_benchmark_table),
     }
 
 

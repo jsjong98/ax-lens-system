@@ -844,6 +844,8 @@ export interface WorkflowChatResponse {
   message: string;
   updated: boolean;
   result: WorkflowStepResult | null;
+  benchmark_updated?: boolean;
+  benchmark_table?: BenchmarkTableRow[];
 }
 
 export async function uploadWorkflowExcel(file: File): Promise<WorkflowExcelUploadResult> {
@@ -885,11 +887,16 @@ export async function getWorkflowExcelTasks(): Promise<{
 
 export interface BenchmarkTableRow {
   source: string;
+  company_type?: string;
   industry: string;
   process_area: string;
+  ai_adoption_goal?: string;
   ai_technology: string;
+  key_data?: string;
+  adoption_method?: string;
   use_case: string;
   outcome: string;
+  infrastructure?: string;
   implication: string;
   url: string;
 }

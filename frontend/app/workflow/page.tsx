@@ -232,6 +232,9 @@ export default function WorkflowPage() {
       if (result.updated && result.result) {
         setStep1Result(result.result);
       }
+      if (result.benchmark_table && result.benchmark_table.length > 0) {
+        setBenchmarkTable(result.benchmark_table);
+      }
     } catch (e) {
       setChatMessages((prev) => [...prev, { role: "assistant", content: `오류: ${(e as Error).message}` }]);
     } finally {
@@ -702,16 +705,22 @@ export default function WorkflowPage() {
                     <div className="text-[10px] text-gray-500 max-w-[60%] text-right">{benchmarkSummary.slice(0, 150)}</div>
                   )}
                 </div>
-                <div className="max-h-[300px] overflow-y-auto rounded-lg border border-blue-200">
-                  <table className="w-full text-xs">
+                <div className="max-h-[340px] overflow-y-auto overflow-x-auto rounded-lg border border-blue-200">
+                  <table className="w-full text-xs" style={{ minWidth: "1100px" }}>
                     <thead className="sticky top-0 bg-blue-50 border-b border-blue-200">
                       <tr>
-                        <th className="text-left px-3 py-2 font-medium text-blue-800">기업</th>
-                        <th className="text-left px-3 py-2 font-medium text-blue-800">산업</th>
-                        <th className="text-left px-3 py-2 font-medium text-blue-800">AI 기술</th>
-                        <th className="text-left px-3 py-2 font-medium text-blue-800">적용 사례</th>
-                        <th className="text-left px-3 py-2 font-medium text-blue-800">성과</th>
-                        <th className="text-left px-3 py-2 font-medium text-blue-800">시사점</th>
+                        <th className="text-left px-3 py-2 font-medium text-blue-800 whitespace-nowrap">기업</th>
+                        <th className="text-left px-3 py-2 font-medium text-blue-800 whitespace-nowrap">유형</th>
+                        <th className="text-left px-3 py-2 font-medium text-blue-800 whitespace-nowrap">산업</th>
+                        <th className="text-left px-3 py-2 font-medium text-blue-800 whitespace-nowrap">적용 L4</th>
+                        <th className="text-left px-3 py-2 font-medium text-blue-800 whitespace-nowrap">도입 목표</th>
+                        <th className="text-left px-3 py-2 font-medium text-blue-800 whitespace-nowrap">AI 기술</th>
+                        <th className="text-left px-3 py-2 font-medium text-blue-800 whitespace-nowrap">핵심 데이터</th>
+                        <th className="text-left px-3 py-2 font-medium text-blue-800 whitespace-nowrap">도입 방식</th>
+                        <th className="text-left px-3 py-2 font-medium text-blue-800 whitespace-nowrap">적용 사례</th>
+                        <th className="text-left px-3 py-2 font-medium text-blue-800 whitespace-nowrap">성과</th>
+                        <th className="text-left px-3 py-2 font-medium text-blue-800 whitespace-nowrap">인프라</th>
+                        <th className="text-left px-3 py-2 font-medium text-blue-800 whitespace-nowrap">두산 시사점</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -722,12 +731,24 @@ export default function WorkflowPage() {
                               <a href={row.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{row.source}</a>
                             ) : row.source}
                           </td>
-                          <td className="px-3 py-2 text-gray-500">{row.industry}</td>
+                          <td className="px-3 py-2 whitespace-nowrap">
+                            {row.company_type && (
+                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${row.company_type.includes("Tech") && !row.company_type.includes("非") ? "bg-indigo-50 text-indigo-700" : "bg-orange-50 text-orange-700"}`}>
+                                {row.company_type.includes("非") ? "非Tech" : "Tech"}
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{row.industry}</td>
+                          <td className="px-3 py-2 text-gray-600 max-w-[120px]">{row.process_area}</td>
+                          <td className="px-3 py-2 text-gray-600 max-w-[120px]">{row.ai_adoption_goal}</td>
                           <td className="px-3 py-2">
                             <span className="px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 text-[10px] font-medium">{row.ai_technology}</span>
                           </td>
+                          <td className="px-3 py-2 text-gray-500 max-w-[120px]">{row.key_data}</td>
+                          <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{row.adoption_method}</td>
                           <td className="px-3 py-2 text-gray-600 max-w-[200px]">{row.use_case}</td>
-                          <td className="px-3 py-2 text-green-700 font-medium max-w-[150px]">{row.outcome}</td>
+                          <td className="px-3 py-2 text-green-700 font-medium max-w-[130px]">{row.outcome}</td>
+                          <td className="px-3 py-2 text-gray-500 max-w-[120px]">{row.infrastructure}</td>
                           <td className="px-3 py-2 text-gray-500 max-w-[180px]">{row.implication}</td>
                         </tr>
                       ))}
