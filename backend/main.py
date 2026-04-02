@@ -2657,28 +2657,42 @@ async def get_mapping_check():
             l4_nodes = s.l4_nodes
             l5_nodes = [n for n in s.nodes.values() if n.level == "L5"]
 
-            # L4를 부모 L3 기준으로 그룹핑
-            l4_by_l3_tid: dict[str, list] = {}
-            for n in l4_nodes:
-                parts = n.task_id.rsplit(".", 1)
-                parent_tid = parts[0] if len(parts) > 1 else n.task_id
-                l4_by_l3_tid.setdefault(parent_tid, []).append(n)
-
-            # L5 노드를 부모 L4 task_id 기준으로 그룹핑
+            # L5 노드를 부모 L4 task_id prefix 기준으로 그룹핑
             l5_by_l4_tid: dict[str, list] = {}
             for l5n in l5_nodes:
+                if not l5n.task_id:
+                    continue
                 parts = l5n.task_id.rsplit(".", 1)
                 parent = parts[0] if len(parts) > 1 else l5n.task_id
                 l5_by_l4_tid.setdefault(parent, []).append(l5n)
 
-            def _make_l4_entry(l4n):
-                """L4 노드 하나에 대한 매핑 결과 구성 (L5↔엑셀 직접 매핑)."""
-                l5_children = sorted(l5_by_l4_tid.get(l4n.task_id, []), key=lambda x: x.task_id)
+            # L4 노드가 없거나 task_id가 비어 있으면 L5 prefix에서 합성
+            effective_l4_map: dict[str, str] = {}  # task_id → label
+            for l4n in l4_nodes:
+                if l4n.task_id:
+                    effective_l4_map[l4n.task_id] = l4n.label
+            # L5 prefix에서 L4 task_id를 파생 (L4 노드가 없거나 누락된 경우 보완)
+            for l4_tid in l5_by_l4_tid:
+                if l4_tid not in effective_l4_map:
+                    # 엑셀에서 L4 이름 찾기
+                    xl_l4_tasks = by_l4.get(l4_tid, [])
+                    effective_l4_map[l4_tid] = xl_l4_tasks[0].l4 if xl_l4_tasks else l4_tid
+
+            # L4를 부모 L3 기준으로 그룹핑 (effective_l4_map 기반)
+            l4_by_l3_tid: dict[str, list] = {}
+            for l4_tid in sorted(effective_l4_map):
+                parts = l4_tid.rsplit(".", 1)
+                parent_l3 = parts[0] if len(parts) > 1 else l4_tid
+                l4_by_l3_tid.setdefault(parent_l3, []).append(l4_tid)
+
+            def _make_l4_entry(l4_tid: str, l4_label: str):
+                """L4 task_id 하나에 대한 매핑 결과 구성 (L5↔엑셀 직접 매핑)."""
+                l5_children = sorted(l5_by_l4_tid.get(l4_tid, []), key=lambda x: x.task_id)
 
                 l5_entries = []
                 cls_counts: dict[str, int] = {}
                 for l5n in l5_children:
-                    excel_task = by_id.get(l5n.task_id)  # L5 ID 직접 매핑
+                    excel_task = by_id.get(l5n.task_id)
                     if excel_task:
                         matched_excel_ids.add(excel_task.id)
                         lbl = _wf_classification.get(excel_task.id, {}).get("label", "미분류")
@@ -2715,8 +2729,8 @@ async def get_mapping_check():
                         })
 
                 return {
-                    "task_id": l4n.task_id,
-                    "label": l4n.label,
+                    "task_id": l4_tid,
+                    "label": l4_label,
                     "level": "L4",
                     "l5_nodes": l5_entries,
                     "cls_summary": cls_counts,
@@ -2724,23 +2738,27 @@ async def get_mapping_check():
                     "total_l5": len(l5_entries),
                 }
 
+            # L3 그룹핑 (L3 노드가 있으면 사용, 없으면 L4 prefix로 L3 파생)
             l3_groups = []
-            if l3_nodes:
-                for l3n in sorted(l3_nodes, key=lambda x: x.task_id):
-                    children = l4_by_l3_tid.get(l3n.task_id, [])
-                    l4_list = [_make_l4_entry(l4n) for l4n in sorted(children, key=lambda x: x.task_id)]
-                    l3_groups.append({
-                        "task_id": l3n.task_id,
-                        "label": l3n.label,
-                        "l4_nodes": l4_list,
-                        "total_l5": sum(x["total_l5"] for x in l4_list),
-                        "matched_l5": sum(x["matched_l5"] for x in l4_list),
-                    })
-            else:
-                l4_list = [_make_l4_entry(l4n) for l4n in sorted(l4_nodes, key=lambda x: x.task_id)]
+            l3_node_map = {n.task_id: n.label for n in l3_nodes if n.task_id}
+
+            # L3 task_id 목록: 명시적 L3 노드 + L4 prefix에서 파생
+            all_l3_tids: set[str] = set(l3_node_map.keys())
+            for l4_tid in effective_l4_map:
+                parts = l4_tid.rsplit(".", 1)
+                all_l3_tids.add(parts[0] if len(parts) > 1 else l4_tid)
+
+            for l3_tid in sorted(all_l3_tids):
+                l4_tids = l4_by_l3_tid.get(l3_tid, [])
+                if not l4_tids:
+                    continue
+                l4_list = [_make_l4_entry(tid, effective_l4_map[tid]) for tid in sorted(l4_tids)]
+                # L3 label: 명시적 노드 > 엑셀 L3명 > task_id
+                xl_l3_tasks = by_l3.get(l3_tid, [])
+                l3_label = l3_node_map.get(l3_tid) or (xl_l3_tasks[0].l3 if xl_l3_tasks else l3_tid)
                 l3_groups.append({
-                    "task_id": "",
-                    "label": "(L3 없음)",
+                    "task_id": l3_tid,
+                    "label": l3_label,
                     "l4_nodes": l4_list,
                     "total_l5": sum(x["total_l5"] for x in l4_list),
                     "matched_l5": sum(x["matched_l5"] for x in l4_list),
@@ -2750,7 +2768,7 @@ async def get_mapping_check():
                 "sheet_id": s.sheet_id,
                 "sheet_name": s.name,
                 "l3_count": len(l3_nodes),
-                "l4_count": len(l4_nodes),
+                "l4_count": len(effective_l4_map),
                 "l5_count": len(l5_nodes),
                 "l3_groups": l3_groups,
             })
