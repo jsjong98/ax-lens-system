@@ -128,6 +128,19 @@ app.add_middleware(
     allow_headers=["Content-Type", "Authorization", "X-Session-Token"],
 )
 
+# 500 에러에도 CORS 헤더 보장
+from fastapi.responses import JSONResponse as _JSONResponse
+@app.exception_handler(Exception)
+async def _global_exception_handler(request: Request, exc: Exception):
+    origin = request.headers.get("origin", "")
+    cors_origin = origin if origin in _all_origins else (_all_origins[0] if _all_origins else "*")
+    return _JSONResponse(
+        status_code=500,
+        content={"detail": str(exc)},
+        headers={"Access-Control-Allow-Origin": cors_origin,
+                 "Access-Control-Allow-Credentials": "true"},
+    )
+
 # ── 기본 사용자 초기화 ─────────────────────────────────────────────────────────
 init_default_users()
 
@@ -2632,22 +2645,24 @@ async def save_slide_l4_mapping(request: Request):
 
 @app.get("/api/workflow/mapping-check", tags=["Workflow"])
 async def get_mapping_check():
-    """
-    엑셀 Task ↔ As-Is 워크플로우 노드 매핑 현황을 반환합니다.
-    - L4/L3/L2 노드별로 매칭된 엑셀 Task 목록 제공
-    - 미매핑 엑셀 Task (excel_only) 및 미매핑 노드 (asis_only) 식별
-    """
+    """엑셀 Task ↔ As-Is 워크플로우 노드 매핑 현황을 반환합니다."""
+    try:
+        return _run_mapping_check()
+    except Exception as exc:
+        print(f"[ERROR] mapping-check 실패: {exc}", flush=True)
+        import traceback; traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"매핑 분석 오류: {exc}")
+
+
+def _run_mapping_check() -> dict:
     has_excel = bool(_wf_excel_tasks)
     has_asis = "parsed" in _workflow_cache
 
     if not has_excel and not has_asis:
         return {"ok": True, "has_excel": False, "has_asis": False, "sheets": [], "excel_only": [], "stats": {}}
 
-    by_id, by_l4, by_l3, by_l2 = _build_excel_index()
-
-    # 매핑된 엑셀 task id 추적
+    by_id, by_l4, by_l3, _ = _build_excel_index()
     matched_excel_ids: set[str] = set()
-
     sheets_result = []
 
     if has_asis:
@@ -2657,121 +2672,74 @@ async def get_mapping_check():
             l4_nodes = s.l4_nodes
             l5_nodes = [n for n in s.nodes.values() if n.level == "L5"]
 
-            # L5 노드를 부모 L4 task_id prefix 기준으로 그룹핑
-            l5_by_l4_tid: dict[str, list] = {}
+            # L5 → 부모 L4 prefix 그룹핑
+            l5_by_l4: dict[str, list] = {}
             for l5n in l5_nodes:
                 if not l5n.task_id:
                     continue
                 parts = l5n.task_id.rsplit(".", 1)
                 parent = parts[0] if len(parts) > 1 else l5n.task_id
-                l5_by_l4_tid.setdefault(parent, []).append(l5n)
+                l5_by_l4.setdefault(parent, []).append(l5n)
 
-            # L4 노드가 없거나 task_id가 비어 있으면 L5 prefix에서 합성
-            effective_l4_map: dict[str, str] = {}  # task_id → label
+            # L4 유효 맵: 명시 L4 노드 + L5 prefix 파생
+            eff_l4: dict[str, str] = {}
             for l4n in l4_nodes:
                 if l4n.task_id:
-                    effective_l4_map[l4n.task_id] = l4n.label
-            # L5 prefix에서 L4 task_id를 파생 (L4 노드가 없거나 누락된 경우 보완)
-            for l4_tid in l5_by_l4_tid:
-                if l4_tid not in effective_l4_map:
-                    # 엑셀에서 L4 이름 찾기
-                    xl_l4_tasks = by_l4.get(l4_tid, [])
-                    effective_l4_map[l4_tid] = xl_l4_tasks[0].l4 if xl_l4_tasks else l4_tid
+                    eff_l4[l4n.task_id] = l4n.label
+            for l4_tid in l5_by_l4:
+                if l4_tid not in eff_l4:
+                    xl = by_l4.get(l4_tid, [])
+                    eff_l4[l4_tid] = xl[0].l4 if xl else l4_tid
 
-            # L4를 부모 L3 기준으로 그룹핑 (effective_l4_map 기반)
-            l4_by_l3_tid: dict[str, list] = {}
-            for l4_tid in sorted(effective_l4_map):
+            # L3 유효 맵
+            l3_node_map: dict[str, str] = {n.task_id: n.label for n in l3_nodes if n.task_id}
+            eff_l3: dict[str, list] = {}  # l3_tid → [l4_tid, ...]
+            for l4_tid in sorted(eff_l4):
                 parts = l4_tid.rsplit(".", 1)
-                parent_l3 = parts[0] if len(parts) > 1 else l4_tid
-                l4_by_l3_tid.setdefault(parent_l3, []).append(l4_tid)
+                l3_tid = parts[0] if len(parts) > 1 else l4_tid
+                eff_l3.setdefault(l3_tid, []).append(l4_tid)
 
-            def _make_l4_entry(l4_tid: str, l4_label: str):
-                """L4 task_id 하나에 대한 매핑 결과 구성 (L5↔엑셀 직접 매핑)."""
-                l5_children = sorted(l5_by_l4_tid.get(l4_tid, []), key=lambda x: x.task_id)
-
-                l5_entries = []
-                cls_counts: dict[str, int] = {}
-                for l5n in l5_children:
-                    excel_task = by_id.get(l5n.task_id)
-                    if excel_task:
-                        matched_excel_ids.add(excel_task.id)
-                        lbl = _wf_classification.get(excel_task.id, {}).get("label", "미분류")
+            # L4 엔트리 생성 (closure 피하고 인자로 전달)
+            def _l4_entry(l4_tid, l4_label, _l5_by_l4=l5_by_l4, _by_id=by_id):
+                children = sorted(_l5_by_l4.get(l4_tid, []), key=lambda x: x.task_id)
+                entries, cls_counts = [], {}
+                for l5n in children:
+                    et = _by_id.get(l5n.task_id)
+                    if et:
+                        matched_excel_ids.add(et.id)
+                        lbl = _wf_classification.get(et.id, {}).get("label", "미분류")
                         cls_counts[lbl] = cls_counts.get(lbl, 0) + 1
-                        pain_points = [
-                            p for p, v in [
-                                ("시간/속도", excel_task.pain_time),
-                                ("정확성", excel_task.pain_accuracy),
-                                ("반복/수작업", excel_task.pain_repetition),
-                                ("정보/데이터", excel_task.pain_data),
-                                ("시스템/도구", excel_task.pain_system),
-                            ] if v
-                        ]
-                        l5_entries.append({
-                            "task_id": l5n.task_id,
-                            "label": l5n.label,
-                            "matched": True,
-                            "excel_id": excel_task.id,
-                            "excel_name": excel_task.name,
-                            "cls_label": lbl,
-                            "pain_points": pain_points,
-                            "description": excel_task.description[:80] if excel_task.description else "",
-                        })
+                        pains = [p for p, v in [
+                            ("시간/속도", et.pain_time), ("정확성", et.pain_accuracy),
+                            ("반복/수작업", et.pain_repetition), ("정보/데이터", et.pain_data),
+                            ("시스템/도구", et.pain_system),
+                        ] if v]
+                        entries.append({"task_id": l5n.task_id, "label": l5n.label,
+                            "matched": True, "excel_id": et.id, "excel_name": et.name,
+                            "cls_label": lbl, "pain_points": pains,
+                            "description": (et.description or "")[:80]})
                     else:
-                        l5_entries.append({
-                            "task_id": l5n.task_id,
-                            "label": l5n.label,
-                            "matched": False,
-                            "excel_id": "",
-                            "excel_name": "",
-                            "cls_label": "",
-                            "pain_points": [],
-                            "description": "",
-                        })
+                        entries.append({"task_id": l5n.task_id, "label": l5n.label,
+                            "matched": False, "excel_id": "", "excel_name": "",
+                            "cls_label": "", "pain_points": [], "description": ""})
+                return {"task_id": l4_tid, "label": l4_label, "level": "L4",
+                        "l5_nodes": entries, "cls_summary": cls_counts,
+                        "matched_l5": sum(1 for e in entries if e["matched"]),
+                        "total_l5": len(entries)}
 
-                return {
-                    "task_id": l4_tid,
-                    "label": l4_label,
-                    "level": "L4",
-                    "l5_nodes": l5_entries,
-                    "cls_summary": cls_counts,
-                    "matched_l5": sum(1 for e in l5_entries if e["matched"]),
-                    "total_l5": len(l5_entries),
-                }
-
-            # L3 그룹핑 (L3 노드가 있으면 사용, 없으면 L4 prefix로 L3 파생)
             l3_groups = []
-            l3_node_map = {n.task_id: n.label for n in l3_nodes if n.task_id}
-
-            # L3 task_id 목록: 명시적 L3 노드 + L4 prefix에서 파생
-            all_l3_tids: set[str] = set(l3_node_map.keys())
-            for l4_tid in effective_l4_map:
-                parts = l4_tid.rsplit(".", 1)
-                all_l3_tids.add(parts[0] if len(parts) > 1 else l4_tid)
-
-            for l3_tid in sorted(all_l3_tids):
-                l4_tids = l4_by_l3_tid.get(l3_tid, [])
-                if not l4_tids:
-                    continue
-                l4_list = [_make_l4_entry(tid, effective_l4_map[tid]) for tid in sorted(l4_tids)]
-                # L3 label: 명시적 노드 > 엑셀 L3명 > task_id
-                xl_l3_tasks = by_l3.get(l3_tid, [])
-                l3_label = l3_node_map.get(l3_tid) or (xl_l3_tasks[0].l3 if xl_l3_tasks else l3_tid)
-                l3_groups.append({
-                    "task_id": l3_tid,
-                    "label": l3_label,
+            for l3_tid in sorted(eff_l3):
+                l4_list = [_l4_entry(tid, eff_l4[tid]) for tid in sorted(eff_l3[l3_tid])]
+                xl3 = by_l3.get(l3_tid, [])
+                l3_label = l3_node_map.get(l3_tid) or (xl3[0].l3 if xl3 else l3_tid)
+                l3_groups.append({"task_id": l3_tid, "label": l3_label,
                     "l4_nodes": l4_list,
                     "total_l5": sum(x["total_l5"] for x in l4_list),
-                    "matched_l5": sum(x["matched_l5"] for x in l4_list),
-                })
+                    "matched_l5": sum(x["matched_l5"] for x in l4_list)})
 
-            sheets_result.append({
-                "sheet_id": s.sheet_id,
-                "sheet_name": s.name,
-                "l3_count": len(l3_nodes),
-                "l4_count": len(effective_l4_map),
-                "l5_count": len(l5_nodes),
-                "l3_groups": l3_groups,
-            })
+            sheets_result.append({"sheet_id": s.sheet_id, "sheet_name": s.name,
+                "l3_count": len(l3_nodes), "l4_count": len(eff_l4),
+                "l5_count": len(l5_nodes), "l3_groups": l3_groups})
 
     # 엑셀 전용 (매핑 안 된 Task)
     excel_only = []
@@ -4032,35 +4000,38 @@ async def admin_download_file(filename: str, request: Request):
 
 @app.on_event("startup")
 async def _restore_from_persist():
-    """서버 재시작 후에도 이전에 업로드한 파일이 자동 복구됩니다."""
+    """서버 재시작 후 persist 파일에서 캐시 자동 복구 (비동기 — 이벤트 루프 블로킹 없음)."""
+    import asyncio
+    asyncio.create_task(_restore_task())
+
+
+async def _restore_task():
+    """실제 복구 작업 — 블로킹 I/O를 스레드풀에서 실행."""
+    import asyncio
     global _wf_excel_tasks, _wf_classification, _tasks_cache, _current_excel_path
 
     from workflow_parser import parse_workflow_json, get_workflow_summary
     from excel_reader import load_tasks
 
-    # 1) Workflow JSON 복구
+    # 1) Workflow JSON 복구 (JSON 파싱은 빠르므로 직접 실행)
     json_path = _WF_DIR / "workflow.json"
     if json_path.exists() and "parsed" not in _workflow_cache:
         try:
             data = json.loads(json_path.read_text(encoding="utf-8"))
-            parsed = parse_workflow_json(data)
+            parsed = await asyncio.to_thread(parse_workflow_json, data)
             summary = get_workflow_summary(parsed)
-            _workflow_cache.update({
-                "filename": "workflow.json",
-                "parsed": parsed,
-                "summary": summary,
-                "raw": data,
-            })
-            print(f"[STARTUP] Workflow JSON 복구 완료: {json_path}")
+            _workflow_cache.update({"filename": "workflow.json", "parsed": parsed,
+                                    "summary": summary, "raw": data})
+            print(f"[STARTUP] Workflow JSON 복구 완료", flush=True)
         except Exception as e:
-            print(f"[STARTUP] Workflow JSON 복구 실패: {e}")
+            print(f"[STARTUP] Workflow JSON 복구 실패: {e}", flush=True)
 
-    # 2) Workflow Excel 복구 (분류 결과 포함)
+    # 2) Workflow Excel 복구 (openpyxl 블로킹 → 스레드풀)
     if not _wf_excel_tasks:
         excel_files = sorted(_WF_DIR.glob("*.xlsx"), key=lambda x: x.stat().st_mtime)
         if excel_files:
             try:
-                tasks = load_tasks(str(excel_files[-1]))
+                tasks = await asyncio.to_thread(load_tasks, str(excel_files[-1]))
                 _wf_excel_tasks = tasks
                 _tasks_cache = tasks
                 _wf_classification = {}
@@ -4068,27 +4039,23 @@ async def _restore_from_persist():
                     label = (t.cls_final_label or t.cls_doosan_label or t.cls_1st_label or "").strip()
                     if label:
                         _wf_classification[t.id] = {
-                            "label": label,
-                            "reason": t.cls_1st_reason or "",
+                            "label": label, "reason": t.cls_1st_reason or "",
                             "criterion": t.cls_1st_knockout or "",
                             "ai_prerequisites": t.cls_1st_ai_prereq or "",
                             "feedback": t.cls_final_feedback or t.cls_doosan_feedback or "",
-                            "task_name": t.name,
-                            "hybrid_note": "",
-                            "input_types": "",
-                            "output_types": "",
+                            "task_name": t.name, "hybrid_note": "", "input_types": "", "output_types": "",
                         }
-                print(f"[STARTUP] Workflow Excel 복구 완료: {excel_files[-1].name} ({len(tasks)}개 Task)")
+                print(f"[STARTUP] Workflow Excel 복구 완료: {excel_files[-1].name} ({len(tasks)}개)", flush=True)
             except Exception as e:
-                print(f"[STARTUP] Workflow Excel 복구 실패: {e}")
+                print(f"[STARTUP] Workflow Excel 복구 실패: {e}", flush=True)
 
-    # 3) Task 분류 엑셀 복구 (_tasks_cache)
+    # 3) Task 분류 엑셀 복구
     if not _tasks_cache:
         task_excels = sorted(_UPLOAD_DIR.glob("*.xlsx"), key=lambda x: x.stat().st_mtime)
         if task_excels:
             try:
-                _tasks_cache = load_tasks(str(task_excels[-1]))
+                _tasks_cache = await asyncio.to_thread(load_tasks, str(task_excels[-1]))
                 _current_excel_path = task_excels[-1]
-                print(f"[STARTUP] Task Excel 복구 완료: {task_excels[-1].name}")
+                print(f"[STARTUP] Task Excel 복구 완료: {task_excels[-1].name}", flush=True)
             except Exception as e:
-                print(f"[STARTUP] Task Excel 복구 실패: {e}")
+                print(f"[STARTUP] Task Excel 복구 실패: {e}", flush=True)
