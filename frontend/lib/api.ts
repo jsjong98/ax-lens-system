@@ -1569,10 +1569,26 @@ export interface UploadedFile {
   filename: string;
   size_kb: number;
   modified: string;
+  path?: string;
 }
 
 export async function getAdminUploads(): Promise<{ ok: boolean; directory: string; files: UploadedFile[] }> {
   return apiFetch("/admin/uploads");
+}
+
+export interface AdminUploadsAll {
+  ok: boolean;
+  categories: {
+    task_excel: UploadedFile[];
+    wf_excel: UploadedFile[];
+    wf_json: UploadedFile[];
+    wf_ppt: UploadedFile[];
+    new_workflow: UploadedFile[];
+  };
+}
+
+export async function getAdminUploadsAll(): Promise<AdminUploadsAll> {
+  return apiFetch("/admin/uploads-all");
 }
 
 export async function downloadAdminFile(filename: string): Promise<void> {

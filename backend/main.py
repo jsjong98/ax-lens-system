@@ -934,6 +934,8 @@ async def export_comparison():
 _PERSIST_ROOT = Path("/app/persist") if Path("/app/persist").exists() else Path(__file__).parent
 _UPLOAD_DIR = _PERSIST_ROOT / "uploads"
 _UPLOAD_DIR.mkdir(exist_ok=True)
+_WF_DIR = _PERSIST_ROOT / "workflow"
+_WF_DIR.mkdir(exist_ok=True)
 _current_excel_path: Path | None = None
 
 
@@ -1108,8 +1110,8 @@ async def upload_workflow(file: UploadFile = File(...)):
         "raw": data,
     }
 
-    # 워크플로우 JSON도 파일로 저장
-    save_path = Path(__file__).parent / "workflow.json"
+    # 워크플로우 JSON도 파일로 저장 (persist 볼륨)
+    save_path = _WF_DIR / "workflow.json"
     save_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
     return {
@@ -1145,7 +1147,7 @@ async def get_workflow():
     global _workflow_cache
     if "summary" not in _workflow_cache:
         # 파일에서 로드 시도
-        save_path = Path(__file__).parent / "workflow.json"
+        save_path = _WF_DIR / "workflow.json"
         if save_path.exists():
             data = json.loads(save_path.read_text(encoding="utf-8"))
             parsed = parse_workflow_json(data)
@@ -1287,6 +1289,11 @@ async def upload_ppt_workflow(file: UploadFile = File(...)):
     from ppt_parser import parse_ppt, match_nodes_to_tasks, ppt_slide_to_react_flow, ppt_to_parsed_workflow
 
     content = await file.read()
+    # PPT 파일을 persist 볼륨에 저장
+    safe_ppt_name = Path(file.filename or "workflow.pptx").name
+    ppt_save_path = _WF_DIR / safe_ppt_name
+    ppt_save_path.write_bytes(content)
+
     try:
         parsed = parse_ppt(content)
     except Exception as e:
@@ -1375,8 +1382,9 @@ async def upload_workflow_excel(file: UploadFile = File(...)):
     from excel_reader import load_tasks, list_sheets
 
     content = await file.read()
-    _UPLOAD_DIR.mkdir(exist_ok=True)
-    save_path = _UPLOAD_DIR / (file.filename or "workflow_excel.xlsx")
+    _WF_DIR.mkdir(exist_ok=True)
+    safe_wf_excel_name = Path(file.filename or "workflow_excel.xlsx").name
+    save_path = _WF_DIR / safe_wf_excel_name
     save_path.write_bytes(content)
 
     # 시트 목록
@@ -1448,7 +1456,9 @@ async def select_workflow_excel_sheet(request: Request):
     if not sheet_name:
         raise HTTPException(400, "시트 이름이 필요합니다.")
 
-    excel_files = list(_UPLOAD_DIR.glob("*.xlsx"))
+    excel_files = sorted(_WF_DIR.glob("*.xlsx"), key=lambda x: x.stat().st_mtime)
+    if not excel_files:
+        excel_files = sorted(_UPLOAD_DIR.glob("*.xlsx"), key=lambda x: x.stat().st_mtime)
     if not excel_files:
         raise HTTPException(404, "업로드된 엑셀 파일이 없습니다.")
 
@@ -2831,7 +2841,7 @@ async def generate_tobe_workflow(
     # 워크플로우 로드
     global _workflow_cache
     if "parsed" not in _workflow_cache:
-        save_path = Path(__file__).parent / "workflow.json"
+        save_path = _WF_DIR / "workflow.json"
         if save_path.exists():
             data = json.loads(save_path.read_text(encoding="utf-8"))
             parsed = parse_workflow_json(data)
@@ -3855,30 +3865,90 @@ async def admin_force_logout(request: Request):
     return {"ok": True, "email": target_email, "sessions_removed": count}
 
 
+def _file_info(f: Path) -> dict:
+    stat = f.stat()
+    import datetime as _dt
+    return {
+        "filename": f.name,
+        "size_kb": round(stat.st_size / 1024, 1),
+        "modified": _dt.datetime.fromtimestamp(stat.st_mtime).isoformat(),
+        "path": str(f),
+    }
+
+
 @app.get("/api/admin/uploads", tags=["Admin"])
 async def admin_list_uploads(request: Request):
-    """업로드된 파일 목록 조회."""
+    """업로드된 파일 목록 조회 (Task 분류용 엑셀)."""
     _require_admin(request)
     files = []
     if _UPLOAD_DIR.exists():
         for f in sorted(_UPLOAD_DIR.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
             if f.is_file():
-                stat = f.stat()
-                files.append({
-                    "filename": f.name,
-                    "size_kb": round(stat.st_size / 1024, 1),
-                    "modified": __import__("datetime").datetime.fromtimestamp(stat.st_mtime).isoformat(),
-                })
+                files.append(_file_info(f))
     return {"ok": True, "directory": str(_UPLOAD_DIR), "files": files}
+
+
+@app.get("/api/admin/uploads-all", tags=["Admin"])
+async def admin_list_uploads_all(request: Request):
+    """카테고리별 업로드 파일 목록 조회."""
+    _require_admin(request)
+    import datetime as _dt
+
+    def _dir_files(directory: Path, exts=None) -> list:
+        if not directory.exists():
+            return []
+        result = []
+        for f in sorted(directory.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
+            if f.is_file() and (exts is None or f.suffix.lower() in exts):
+                result.append(_file_info(f))
+        return result
+
+    # Task 분류 엑셀
+    task_excel = _dir_files(_UPLOAD_DIR, {".xlsx", ".xls"})
+
+    # Workflow 파일들
+    wf_excel = _dir_files(_WF_DIR, {".xlsx", ".xls"})
+    wf_json = [_file_info(_WF_DIR / "workflow.json")] if (_WF_DIR / "workflow.json").exists() else []
+    wf_ppt = _dir_files(_WF_DIR, {".pptx", ".ppt"})
+
+    # New Workflow 결과 JSON들
+    nw_files = []
+    for name in ["new_workflow_result.json", "project_definition.json", "project_design.json", "benchmark_result.json"]:
+        p = _PERSIST_ROOT / name
+        if p.exists():
+            nw_files.append(_file_info(p))
+    # data / results 폴더 내 파일도 포함
+    for sub in ["data", "results"]:
+        sub_dir = _PERSIST_ROOT / sub
+        if sub_dir.exists():
+            for f in sorted(sub_dir.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True)[:20]:
+                if f.is_file():
+                    entry = _file_info(f)
+                    entry["filename"] = f"{sub}/{f.name}"
+                    nw_files.append(entry)
+
+    return {
+        "ok": True,
+        "categories": {
+            "task_excel": task_excel,
+            "wf_excel": wf_excel,
+            "wf_json": wf_json,
+            "wf_ppt": wf_ppt,
+            "new_workflow": nw_files,
+        },
+    }
 
 
 @app.get("/api/admin/download/{filename}", tags=["Admin"])
 async def admin_download_file(filename: str, request: Request):
-    """업로드된 파일 다운로드."""
+    """업로드된 파일 다운로드 (Task 분류 엑셀 또는 Workflow 파일)."""
     _require_admin(request)
     # 경로 순회 방지
     safe_name = Path(filename).name
+    # Task 분류 엑셀 먼저, 없으면 Workflow 디렉토리에서 찾기
     file_path = _UPLOAD_DIR / safe_name
+    if not file_path.exists():
+        file_path = _WF_DIR / safe_name
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(404, f"파일을 찾을 수 없습니다: {safe_name}")
     from urllib.parse import quote
@@ -3888,3 +3958,72 @@ async def admin_download_file(filename: str, request: Request):
         media_type="application/octet-stream",
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"},
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 서버 시작 시 persist 파일에서 캐시 자동 복구
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.on_event("startup")
+async def _restore_from_persist():
+    """서버 재시작 후에도 이전에 업로드한 파일이 자동 복구됩니다."""
+    from workflow_parser import parse_workflow_json, get_workflow_summary
+
+    # 1) Workflow JSON 복구
+    json_path = _WF_DIR / "workflow.json"
+    if json_path.exists() and "parsed" not in _workflow_cache:
+        try:
+            data = json.loads(json_path.read_text(encoding="utf-8"))
+            parsed = parse_workflow_json(data)
+            summary = get_workflow_summary(parsed)
+            _workflow_cache.update({
+                "filename": "workflow.json",
+                "parsed": parsed,
+                "summary": summary,
+                "raw": data,
+            })
+            print(f"[STARTUP] Workflow JSON 복구 완료: {json_path}")
+        except Exception as e:
+            print(f"[STARTUP] Workflow JSON 복구 실패: {e}")
+
+    # 2) Workflow Excel 복구 (분류 결과 포함)
+    if not _wf_excel_tasks:
+        excel_files = sorted(_WF_DIR.glob("*.xlsx"), key=lambda x: x.stat().st_mtime)
+        if excel_files:
+            try:
+                from excel_reader import load_tasks
+                tasks = load_tasks(str(excel_files[-1]))
+                global _wf_excel_tasks, _wf_classification, _tasks_cache
+                _wf_excel_tasks = tasks
+                _tasks_cache = tasks
+                _wf_classification = {}
+                for t in tasks:
+                    label = (t.cls_final_label or t.cls_doosan_label or t.cls_1st_label or "").strip()
+                    if label:
+                        _wf_classification[t.id] = {
+                            "label": label,
+                            "reason": t.cls_1st_reason or "",
+                            "criterion": t.cls_1st_knockout or "",
+                            "ai_prerequisites": t.cls_1st_ai_prereq or "",
+                            "feedback": t.cls_final_feedback or t.cls_doosan_feedback or "",
+                            "task_name": t.name,
+                            "hybrid_note": "",
+                            "input_types": "",
+                            "output_types": "",
+                        }
+                print(f"[STARTUP] Workflow Excel 복구 완료: {excel_files[-1].name} ({len(tasks)}개 Task)")
+            except Exception as e:
+                print(f"[STARTUP] Workflow Excel 복구 실패: {e}")
+
+    # 3) Task 분류 엑셀 복구 (_tasks_cache)
+    if not _tasks_cache:
+        task_excels = sorted(_UPLOAD_DIR.glob("*.xlsx"), key=lambda x: x.stat().st_mtime)
+        if task_excels:
+            try:
+                from excel_reader import load_tasks
+                _tasks_cache = load_tasks(str(task_excels[-1]))
+                global _current_excel_path
+                _current_excel_path = task_excels[-1]
+                print(f"[STARTUP] Task Excel 복구 완료: {task_excels[-1].name}")
+            except Exception as e:
+                print(f"[STARTUP] Task Excel 복구 실패: {e}")

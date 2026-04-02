@@ -6,11 +6,13 @@ import {
   getAdminAuditLog,
   adminForceLogout,
   getAdminUploads,
+  getAdminUploadsAll,
   downloadAdminFile,
   type AdminUser,
   type AdminSession,
   type AuditLogEntry,
   type UploadedFile,
+  type AdminUploadsAll,
 } from "@/lib/api";
 
 const PWC = { primary: "#A62121", primaryLight: "#D95578" };
@@ -31,6 +33,8 @@ export default function AdminPage() {
   const [usage, setUsage] = useState<Record<string, { total_calls: number; input_tokens: number; output_tokens: number; estimated_cost_usd: number; last_used: string | null }>>({});
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [uploadDir, setUploadDir] = useState("");
+  const [uploadsAll, setUploadsAll] = useState<AdminUploadsAll["categories"] | null>(null);
+  const [fileSubTab, setFileSubTab] = useState<"task_excel" | "wf_excel" | "wf_json" | "wf_ppt" | "new_workflow">("task_excel");
 
   const loadDashboard = useCallback(async () => {
     setLoading(true);
@@ -69,9 +73,10 @@ export default function AdminPage() {
 
   const loadFiles = useCallback(async () => {
     try {
-      const data = await getAdminUploads();
-      setUploadedFiles(data.files);
-      setUploadDir(data.directory);
+      const [basic, all] = await Promise.all([getAdminUploads(), getAdminUploadsAll()]);
+      setUploadedFiles(basic.files);
+      setUploadDir(basic.directory);
+      setUploadsAll(all.categories);
     } catch {}
   }, []);
 
@@ -421,47 +426,62 @@ export default function AdminPage() {
 
       {/* ═══ 업로드 파일 ═══ */}
       {tab === "files" && (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+        <div className="space-y-3">
+          {/* 헤더 */}
+          <div className="flex items-center justify-between">
             <div>
-              <span className="text-sm font-bold text-gray-700">서버 업로드 파일</span>
+              <span className="text-sm font-bold text-gray-700">서버 파일 현황</span>
               <span className="text-xs text-gray-400 ml-2">{uploadDir}</span>
             </div>
-            <button onClick={loadFiles} className="text-xs text-gray-400 hover:text-red-500">새로고침</button>
+            <button onClick={loadFiles} className="text-xs text-gray-400 hover:text-red-500 px-3 py-1.5 border border-gray-200 rounded-lg">새로고침</button>
           </div>
-          {uploadedFiles.length === 0 ? (
-            <div className="text-center py-10 text-gray-400 text-sm">업로드된 파일이 없습니다.</div>
-          ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-200 bg-gray-50/50">
-                  <th className="text-left px-4 py-2 font-medium text-gray-600">파일명</th>
-                  <th className="text-right px-4 py-2 font-medium text-gray-600">크기</th>
-                  <th className="text-left px-4 py-2 font-medium text-gray-600">수정일</th>
-                  <th className="text-center px-4 py-2 font-medium text-gray-600">다운로드</th>
-                </tr>
-              </thead>
-              <tbody>
-                {uploadedFiles.map((f) => (
-                  <tr key={f.filename} className="border-b border-gray-100 hover:bg-gray-50">
-                    <td className="px-4 py-2 text-xs font-medium text-gray-800">{f.filename}</td>
-                    <td className="px-4 py-2 text-xs text-gray-500 text-right">{f.size_kb.toLocaleString()} KB</td>
-                    <td className="px-4 py-2 text-xs text-gray-500">{f.modified.replace("T", " ").slice(0, 19)}</td>
-                    <td className="px-4 py-2 text-center">
-                      <button
-                        onClick={async () => {
-                          try { await downloadAdminFile(f.filename); } catch (e) { alert((e as Error).message); }
-                        }}
-                        className="text-xs text-blue-600 hover:text-blue-800 underline"
-                      >
-                        다운로드
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+
+          {/* 서브탭 */}
+          <div className="flex gap-0.5 bg-gray-100 p-1 rounded-xl">
+            {([
+              ["task_excel",    "Task 목록",       uploadedFiles.length],
+              ["wf_excel",      "Workflow-Excel",  uploadsAll?.wf_excel.length ?? 0],
+              ["wf_json",       "Workflow-JSON",   uploadsAll?.wf_json.length ?? 0],
+              ["wf_ppt",        "Workflow-PPTX",   uploadsAll?.wf_ppt.length ?? 0],
+              ["new_workflow",  "New Workflow",     uploadsAll?.new_workflow.length ?? 0],
+            ] as [typeof fileSubTab, string, number][]).map(([key, label, cnt]) => (
+              <button
+                key={key}
+                onClick={() => setFileSubTab(key)}
+                className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition ${
+                  fileSubTab === key
+                    ? "bg-white shadow text-red-700 font-bold"
+                    : "text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                {label}
+                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                  cnt > 0 ? "bg-red-100 text-red-700" : "bg-gray-200 text-gray-400"
+                }`}>{cnt}</span>
+              </button>
+            ))}
+          </div>
+
+          {/* 서브탭 설명 */}
+          <div className="text-[11px] text-gray-400 px-1">
+            {fileSubTab === "task_excel"   && "Task 분류 실행용 엑셀 파일 (분류 탭에서 업로드)"}
+            {fileSubTab === "wf_excel"     && "Workflow 설계용 분류 결과 엑셀 (Workflow 탭 > 엑셀 업로드)"}
+            {fileSubTab === "wf_json"      && "As-Is 워크플로우 JSON (Workflow 탭 > JSON 업로드) — 서버 재시작 후 자동 복구됨"}
+            {fileSubTab === "wf_ppt"       && "As-Is 워크플로우 PPT (Workflow 탭 > PPT 업로드) — 서버 재시작 후 자동 복구됨"}
+            {fileSubTab === "new_workflow"  && "New Workflow 생성 결과 및 프로젝트 정의서 JSON"}
+          </div>
+
+          {/* 파일 테이블 */}
+          <FileTable
+            files={
+              fileSubTab === "task_excel"   ? uploadedFiles :
+              fileSubTab === "wf_excel"     ? (uploadsAll?.wf_excel ?? []) :
+              fileSubTab === "wf_json"      ? (uploadsAll?.wf_json ?? []) :
+              fileSubTab === "wf_ppt"       ? (uploadsAll?.wf_ppt ?? []) :
+                                              (uploadsAll?.new_workflow ?? [])
+            }
+            onDownload={downloadAdminFile}
+          />
         </div>
       )}
     </div>
@@ -473,6 +493,43 @@ function Stat({ label, value, accent }: { label: string; value: number; accent?:
     <div className={`rounded-lg border px-5 py-4 min-w-[130px] ${accent ? "bg-red-50 border-red-200" : "bg-white border-gray-200"}`}>
       <div className="text-xs text-gray-500">{label}</div>
       <div className={`text-2xl font-bold mt-0.5 ${accent ? "text-red-700" : "text-gray-800"}`}>{value}</div>
+    </div>
+  );
+}
+
+function FileTable({ files, onDownload }: { files: { filename: string; size_kb: number; modified: string }[]; onDownload: (name: string) => Promise<void> }) {
+  if (files.length === 0) {
+    return <div className="text-center py-10 text-gray-400 text-sm bg-white rounded-xl border border-gray-200">파일이 없습니다.</div>;
+  }
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-gray-200 bg-gray-50/50">
+            <th className="text-left px-4 py-2 font-medium text-gray-600">파일명</th>
+            <th className="text-right px-4 py-2 font-medium text-gray-600">크기</th>
+            <th className="text-left px-4 py-2 font-medium text-gray-600">수정일</th>
+            <th className="text-center px-4 py-2 font-medium text-gray-600">다운로드</th>
+          </tr>
+        </thead>
+        <tbody>
+          {files.map((f) => (
+            <tr key={f.filename} className="border-b border-gray-100 hover:bg-gray-50">
+              <td className="px-4 py-2 text-xs font-medium text-gray-800 font-mono">{f.filename}</td>
+              <td className="px-4 py-2 text-xs text-gray-500 text-right">{f.size_kb.toLocaleString()} KB</td>
+              <td className="px-4 py-2 text-xs text-gray-500">{f.modified.replace("T", " ").slice(0, 19)}</td>
+              <td className="px-4 py-2 text-center">
+                <button
+                  onClick={async () => { try { await onDownload(f.filename); } catch (e) { alert((e as Error).message); } }}
+                  className="text-xs text-blue-600 hover:text-blue-800 underline"
+                >
+                  다운로드
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
