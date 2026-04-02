@@ -1115,8 +1115,26 @@ async def upload_workflow(file: UploadFile = File(...)):
     return {
         "ok": True,
         "filename": file.filename,
-        **summary,
+        **_enrich_summary_with_cls(summary),
     }
+
+
+def _enrich_summary_with_cls(summary: dict) -> dict:
+    """summary의 l4_details.child_l5s 각 항목에 엑셀 분류 라벨을 붙입니다.
+    엑셀 task id == As-Is L5 node task_id 인 경우 직접 매핑."""
+    if not _wf_classification:
+        return summary
+
+    import copy
+    result = copy.deepcopy(summary)
+    for sheet in result.get("sheets", []):
+        for l4 in sheet.get("l4_details", []):
+            for l5 in l4.get("child_l5s", []):
+                tid = l5.get("task_id", "")
+                cls = _wf_classification.get(tid, {})
+                l5["cls_label"] = cls.get("label", "") if cls else ""
+                l5["cls_reason"] = cls.get("reason", "") if cls else ""
+    return result
 
 
 @app.get("/api/workflow/summary", tags=["Workflow"])
@@ -1141,7 +1159,7 @@ async def get_workflow():
         else:
             raise HTTPException(404, "업로드된 워크플로우가 없습니다.")
 
-    return _workflow_cache["summary"]
+    return _enrich_summary_with_cls(_workflow_cache["summary"])
 
 
 @app.get("/api/workflow/sheets", tags=["Workflow"])

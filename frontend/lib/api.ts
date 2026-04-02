@@ -657,7 +657,7 @@ export interface WorkflowSheetSummary {
     label: string;
     description: string;
     child_l5_count: number;
-    child_l5s: WorkflowStepTask[];
+    child_l5s: Array<WorkflowStepTask & { cls_label?: string; cls_reason?: string }>;
     branches?: WorkflowBranch[];
   }>;
   decision_nodes?: WorkflowDecisionNode[];

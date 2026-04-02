@@ -560,6 +560,18 @@ export default function WorkflowPage() {
                           {(currentSheet.decision_count ?? 0) > 0 && (
                             <StatCard label="Decision" value={currentSheet.decision_count ?? 0} />
                           )}
+                          {/* L5 분류 연결 집계 */}
+                          {(() => {
+                            const counts: Record<string, number> = {};
+                            currentSheet.l4_details.forEach((l4) =>
+                              l4.child_l5s.forEach((l5) => {
+                                if (l5.cls_label) counts[l5.cls_label] = (counts[l5.cls_label] || 0) + 1;
+                              })
+                            );
+                            return Object.entries(counts).map(([lbl, cnt]) => (
+                              <StatCard key={lbl} label={lbl === "AI + Human" ? "AI+Human" : lbl} value={cnt} />
+                            ));
+                          })()}
                           <StatCard label="총 스텝" value={currentSheet.total_steps} />
                         </>
                       )}
@@ -604,23 +616,64 @@ export default function WorkflowPage() {
                       <div className="max-h-[420px] overflow-y-auto space-y-3 pr-1">
                         {currentSheet.l4_details.map((l4) => (
                           <div key={l4.node_id} className="bg-white rounded-lg border border-gray-200 p-4">
-                            <div className="flex items-center gap-2 mb-2">
+                            <div className="flex items-center gap-2 mb-2 flex-wrap">
                               <span className="text-xs font-mono px-2 py-0.5 rounded" style={{ backgroundColor: PWC.bg, color: PWC.primary }}>
                                 {l4.task_id}
                               </span>
-                              <span className="font-semibold text-sm">{l4.label}</span>
+                              <span className="font-semibold text-sm flex-1">{l4.label}</span>
+                              {/* L5 분류 집계 미니 뱃지 */}
+                              {(() => {
+                                const counts: Record<string, number> = {};
+                                l4.child_l5s.forEach((l5) => {
+                                  if (l5.cls_label) counts[l5.cls_label] = (counts[l5.cls_label] || 0) + 1;
+                                });
+                                return Object.entries(counts).map(([lbl, cnt]) => {
+                                  const s =
+                                    lbl === "AI"         ? { bg: "#DCFCE7", text: "#15803D" } :
+                                    lbl === "AI + Human" ? { bg: "#FEF9C3", text: "#A16207" } :
+                                    lbl === "Human"      ? { bg: "#FEE2E2", text: "#DC2626" } :
+                                    { bg: "#F3F4F6", text: "#6B7280" };
+                                  return (
+                                    <span key={lbl} className="px-1.5 py-0.5 rounded text-[9px] font-bold shrink-0"
+                                      style={{ backgroundColor: s.bg, color: s.text }}>
+                                      {lbl === "AI + Human" ? "A+H" : lbl} {cnt}
+                                    </span>
+                                  );
+                                });
+                              })()}
                             </div>
 
                             {/* L5 자식 */}
                             {l4.child_l5s.length > 0 && (
                               <div className="ml-4 space-y-1 mb-2">
-                                {l4.child_l5s.map((l5, i) => (
-                                  <div key={l5.node_id || i} className="flex items-center gap-2 text-xs text-gray-600">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-gray-300" />
-                                    <span className="font-mono text-gray-400">{l5.task_id}</span>
-                                    <span>{l5.label}</span>
-                                  </div>
-                                ))}
+                                {l4.child_l5s.map((l5, i) => {
+                                  const cls = l5.cls_label;
+                                  const clsStyle =
+                                    cls === "AI"         ? { bg: "#DCFCE7", text: "#15803D" } :
+                                    cls === "AI + Human" ? { bg: "#FEF9C3", text: "#A16207" } :
+                                    cls === "Human"      ? { bg: "#FEE2E2", text: "#DC2626" } :
+                                    null;
+                                  return (
+                                    <div key={l5.node_id || i} className="flex items-center gap-2 text-xs text-gray-600 py-0.5">
+                                      <span className="w-1.5 h-1.5 rounded-full bg-gray-300 shrink-0" />
+                                      <span className="font-mono text-gray-400 shrink-0">{l5.task_id}</span>
+                                      <span className="flex-1">{l5.label}</span>
+                                      {clsStyle ? (
+                                        <span
+                                          className="shrink-0 px-2 py-0.5 rounded-full text-[9px] font-bold"
+                                          style={{ backgroundColor: clsStyle.bg, color: clsStyle.text }}
+                                          title={l5.cls_reason || cls}
+                                        >
+                                          {cls}
+                                        </span>
+                                      ) : cls === "" ? null : (
+                                        <span className="shrink-0 px-2 py-0.5 rounded-full text-[9px] font-bold bg-gray-100 text-gray-400">
+                                          미분류
+                                        </span>
+                                      )}
+                                    </div>
+                                  );
+                                })}
                               </div>
                             )}
 
