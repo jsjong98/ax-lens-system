@@ -2646,28 +2646,33 @@ async def get_mapping_check():
                             key=lambda x: x.task_id
                         )
 
+                        et_list = [
+                            {
+                                "id": t.id,
+                                "name": t.name,
+                                "label": _wf_classification.get(t.id, {}).get("label", "미분류"),
+                                "pain_points": [
+                                    p for p, v in [
+                                        ("시간/속도", t.pain_time),
+                                        ("정확성", t.pain_accuracy),
+                                        ("반복/수작업", t.pain_repetition),
+                                        ("정보/데이터", t.pain_data),
+                                        ("시스템/도구", t.pain_system),
+                                    ] if v
+                                ],
+                                "description": t.description[:80] if t.description else "",
+                            }
+                            for t in excel_tasks
+                        ]
+                        cls_counts: dict[str, int] = {}
+                        for et in et_list:
+                            cls_counts[et["label"]] = cls_counts.get(et["label"], 0) + 1
                         l4_list.append({
                             "task_id": l4n.task_id,
                             "label": l4n.label,
                             "level": "L4",
-                            "excel_tasks": [
-                                {
-                                    "id": t.id,
-                                    "name": t.name,
-                                    "label": _wf_classification.get(t.id, {}).get("label", "미분류"),
-                                    "pain_points": [
-                                        p for p, v in [
-                                            ("시간/속도", t.pain_time),
-                                            ("정확성", t.pain_accuracy),
-                                            ("반복/수작업", t.pain_repetition),
-                                            ("정보/데이터", t.pain_data),
-                                            ("시스템/도구", t.pain_system),
-                                        ] if v
-                                    ],
-                                    "description": t.description[:80] if t.description else "",
-                                }
-                                for t in excel_tasks
-                            ],
+                            "excel_tasks": et_list,
+                            "cls_summary": cls_counts,
                             "l5_nodes": [
                                 {"task_id": n.task_id, "label": n.label}
                                 for n in l5_children
@@ -2688,28 +2693,33 @@ async def get_mapping_check():
                     excel_tasks = by_l4.get(l4n.task_id, [])
                     for t in excel_tasks:
                         matched_excel_ids.add(t.id)
+                    et_list2 = [
+                        {
+                            "id": t.id,
+                            "name": t.name,
+                            "label": _wf_classification.get(t.id, {}).get("label", "미분류"),
+                            "pain_points": [
+                                p for p, v in [
+                                    ("시간/속도", t.pain_time),
+                                    ("정확성", t.pain_accuracy),
+                                    ("반복/수작업", t.pain_repetition),
+                                    ("정보/데이터", t.pain_data),
+                                    ("시스템/도구", t.pain_system),
+                                ] if v
+                            ],
+                            "description": t.description[:80] if t.description else "",
+                        }
+                        for t in excel_tasks
+                    ]
+                    cls_counts2: dict[str, int] = {}
+                    for et in et_list2:
+                        cls_counts2[et["label"]] = cls_counts2.get(et["label"], 0) + 1
                     l4_list.append({
                         "task_id": l4n.task_id,
                         "label": l4n.label,
                         "level": "L4",
-                        "excel_tasks": [
-                            {
-                                "id": t.id,
-                                "name": t.name,
-                                "label": _wf_classification.get(t.id, {}).get("label", "미분류"),
-                                "pain_points": [
-                                    p for p, v in [
-                                        ("시간/속도", t.pain_time),
-                                        ("정확성", t.pain_accuracy),
-                                        ("반복/수작업", t.pain_repetition),
-                                        ("정보/데이터", t.pain_data),
-                                        ("시스템/도구", t.pain_system),
-                                    ] if v
-                                ],
-                                "description": t.description[:80] if t.description else "",
-                            }
-                            for t in excel_tasks
-                        ],
+                        "excel_tasks": et_list2,
+                        "cls_summary": cls_counts2,
                         "l5_nodes": [],
                         "matched": len(excel_tasks) > 0,
                     })
@@ -2755,6 +2765,30 @@ async def get_mapping_check():
         for g in s["l3_groups"]
     )
 
+    # 매핑된 Task의 분류별 집계
+    cls_matched: dict[str, int] = {}
+    for sid in matched_excel_ids:
+        lbl = _wf_classification.get(sid, {}).get("label", "미분류")
+        cls_matched[lbl] = cls_matched.get(lbl, 0) + 1
+
+    # 전체 엑셀 분류별 집계
+    cls_total: dict[str, int] = {}
+    for t in _wf_excel_tasks:
+        lbl = _wf_classification.get(t.id, {}).get("label", "미분류")
+        cls_total[lbl] = cls_total.get(lbl, 0) + 1
+
+    # L4 노드별 분류 집계 (매핑된 Task 기준)
+    l4_cls_stats = []
+    for s in sheets_result:
+        for g in s["l3_groups"]:
+            for n in g["l4_nodes"]:
+                if n["matched"]:
+                    l4_cls_stats.append({
+                        "task_id": n["task_id"],
+                        "label": n["label"],
+                        "cls_summary": n.get("cls_summary", {}),
+                    })
+
     return {
         "ok": True,
         "has_excel": has_excel,
@@ -2767,9 +2801,13 @@ async def get_mapping_check():
             "matched_l4_nodes": matched_l4,
             "unmatched_l4_nodes": total_l4 - matched_l4,
             "match_rate": round(total_matched / total_excel * 100, 1) if total_excel > 0 else 0,
+            # 분류별 집계
+            "cls_matched": cls_matched,   # 매핑된 Task 중 AI/Human 현황
+            "cls_total": cls_total,        # 전체 엑셀 AI/Human 현황
         },
         "sheets": sheets_result,
         "excel_only": excel_only,
+        "l4_cls_stats": l4_cls_stats,
     }
 
 

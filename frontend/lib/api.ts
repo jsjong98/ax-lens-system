@@ -1002,6 +1002,7 @@ export interface MappingL4Node {
   label: string;
   level: string;
   excel_tasks: MappingExcelTask[];
+  cls_summary?: Record<string, number>;
   l5_nodes: { task_id: string; label: string }[];
   matched: boolean;
 }
@@ -1042,9 +1043,12 @@ export interface MappingCheckResult {
     matched_l4_nodes: number;
     unmatched_l4_nodes: number;
     match_rate: number;
+    cls_matched: Record<string, number>;
+    cls_total: Record<string, number>;
   };
   sheets: MappingSheet[];
   excel_only: MappingExcelOnly[];
+  l4_cls_stats: Array<{ task_id: string; label: string; cls_summary: Record<string, number> }>;
 }
 
 export async function getMappingCheck(): Promise<MappingCheckResult> {
