@@ -164,6 +164,24 @@ export default function AdminPage() {
             <Stat label="데이터 활동" value={dataActivity.length} />
           </div>
 
+          {/* 진단 카드 */}
+          <div className="bg-blue-50 border border-blue-200 rounded-xl px-5 py-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm font-bold text-blue-800 mb-1">🔍 매핑 진단 (연결률 0% 문제 확인)</div>
+                <div className="text-xs text-blue-600">엑셀 Task ID와 As-Is L5 task_id 포맷을 직접 비교합니다. Railway Volume 경로도 확인 가능.</div>
+              </div>
+              <a
+                href={`${process.env.NEXT_PUBLIC_BACKEND_URL || ""}/api/workflow/debug-ids`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700 transition whitespace-nowrap"
+              >
+                진단 JSON 열기 →
+              </a>
+            </div>
+          </div>
+
           {/* 사용자 목록 */}
           <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
             <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 text-sm font-bold text-gray-700">사용자 목록</div>

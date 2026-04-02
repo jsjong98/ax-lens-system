@@ -2828,6 +2828,54 @@ async def get_mapping_check():
     }
 
 
+@app.get("/api/workflow/debug-ids", tags=["Workflow"])
+async def debug_id_mapping():
+    """엑셀 Task ID와 As-Is L5 task_id 샘플을 비교하여 매핑 문제를 진단합니다."""
+    excel_samples = [
+        {"id": t.id, "l4_id": t.l4_id, "name": t.name[:30]}
+        for t in _wf_excel_tasks[:10]
+    ]
+    asis_l5_samples = []
+    persist_root = str(_PERSIST_ROOT)
+    wf_dir = str(_WF_DIR)
+    if "parsed" in _workflow_cache:
+        parsed = _workflow_cache["parsed"]
+        for s in parsed.sheets:
+            for n in list(s.nodes.values()):
+                if n.level == "L5":
+                    asis_l5_samples.append({
+                        "node_id": n.id,
+                        "task_id": n.task_id,
+                        "label": n.label[:30],
+                        "sheet": s.name,
+                    })
+                    if len(asis_l5_samples) >= 10:
+                        break
+            if len(asis_l5_samples) >= 10:
+                break
+
+    by_id, _, _, _ = _build_excel_index()
+    match_test = []
+    for s in asis_l5_samples[:5]:
+        match_test.append({
+            "l5_task_id": s["task_id"],
+            "found_in_excel": s["task_id"] in by_id,
+            "excel_id_sample": s["task_id"],
+        })
+
+    return {
+        "persist_root": persist_root,
+        "wf_dir": wf_dir,
+        "persist_exists": Path(persist_root).exists(),
+        "wf_dir_files": [f.name for f in Path(wf_dir).iterdir() if f.is_file()] if Path(wf_dir).exists() else [],
+        "excel_task_count": len(_wf_excel_tasks),
+        "asis_loaded": "parsed" in _workflow_cache,
+        "excel_samples": excel_samples,
+        "asis_l5_samples": asis_l5_samples,
+        "match_test": match_test,
+    }
+
+
 @app.post("/api/workflow/generate-tobe", tags=["Workflow"])
 async def generate_tobe_workflow(
     sheet_id: str = Query("default", description="As-Is 워크플로우 시트 ID"),
