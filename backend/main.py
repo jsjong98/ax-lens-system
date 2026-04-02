@@ -1493,6 +1493,117 @@ _wf_benchmark_results: list = []   # 벤치마킹 검색 결과 (raw)
 _wf_benchmark_table: list = []     # 벤치마킹 결과 테이블 (LLM 분석 후)
 
 
+def _build_excel_index() -> tuple[dict, dict, dict]:
+    """엑셀 Task를 l4_id / l3_id / l2_id 기준으로 인덱싱."""
+    by_l4: dict[str, list] = {}
+    by_l3: dict[str, list] = {}
+    by_l2: dict[str, list] = {}
+    for t in _wf_excel_tasks:
+        if t.l4_id:
+            by_l4.setdefault(t.l4_id, []).append(t)
+        if t.l3_id:
+            by_l3.setdefault(t.l3_id, []).append(t)
+        if t.l2_id:
+            by_l2.setdefault(t.l2_id, []).append(t)
+    return by_l4, by_l3, by_l2
+
+
+def _format_task_line(t, show_pain: bool = True) -> str:
+    """단일 Task를 한 줄 요약."""
+    cls = _wf_classification.get(t.id, {})
+    label = cls.get("label", "미분류")
+    pain_parts = []
+    if t.pain_time: pain_parts.append("시간/속도")
+    if t.pain_accuracy: pain_parts.append("정확성")
+    if t.pain_repetition: pain_parts.append("반복/수작업")
+    if t.pain_data: pain_parts.append("정보/데이터")
+    if t.pain_system: pain_parts.append("시스템/도구")
+    if t.pain_communication: pain_parts.append("의사소통")
+    pain_str = f" | Pain: {', '.join(pain_parts)}" if pain_parts and show_pain else ""
+    desc_str = f" | 설명: {t.description[:60]}" if t.description else ""
+    return f"      [{t.id}] {t.name} (분류: {label}){pain_str}{desc_str}"
+
+
+def _build_mapped_asis_context(sheet_id: str = "") -> str:
+    """As-Is 워크플로우 노드를 엑셀 Task와 task_id 기준으로 매핑하여 풍부한 컨텍스트 문자열 생성.
+    벤치마킹·Step1·Step2에서 공통 사용."""
+    if "parsed" not in _workflow_cache:
+        # As-Is 없으면 엑셀만으로 L3/L4 기반 컨텍스트 구성
+        if not _wf_excel_tasks:
+            return ""
+        by_l4, by_l3, _ = _build_excel_index()
+        lines = ["## As-Is 프로세스 (엑셀 기반)\n"]
+        cur_l3 = None
+        for t in _wf_excel_tasks:
+            if t.l3 != cur_l3:
+                cur_l3 = t.l3
+                lines.append(f"\n### L3: {t.l3} [{t.l3_id}]")
+            if t.l4:
+                tasks_in_l4 = by_l4.get(t.l4_id, [])
+                if tasks_in_l4 and tasks_in_l4[0].id == t.id:  # L4 첫 등장 시 헤더
+                    lines.append(f"  - L4 [{t.l4_id}] {t.l4}")
+            lines.append(_format_task_line(t))
+        return "\n".join(lines)
+
+    parsed = _workflow_cache["parsed"]
+    target_sheets = (
+        [s for s in parsed.sheets if s.sheet_id == sheet_id] or parsed.sheets[:1]
+    ) if sheet_id else parsed.sheets
+
+    by_l4, by_l3, by_l2 = _build_excel_index()
+    lines = ["## As-Is 워크플로우 + 엑셀 매핑\n"]
+
+    for s in target_sheets:
+        lines.append(f"### 시트: {s.name}")
+        # L2/L3 노드를 상위 구조로, L4/L5를 세부 내용으로 표시
+        l2_nodes = [n for n in s.nodes.values() if n.level == "L2"]
+        l3_nodes = [n for n in s.nodes.values() if n.level == "L3"]
+        l4_nodes = s.l4_nodes
+        l5_nodes = [n for n in s.nodes.values() if n.level == "L5"]
+
+        # L4를 부모 L3 기준으로 그룹핑 (task_id prefix로 추정)
+        l4_by_l3_tid: dict[str, list] = {}
+        for n in l4_nodes:
+            # task_id "1.2.3" → L3 tid "1.2"
+            parts = n.task_id.rsplit(".", 1)
+            parent_tid = parts[0] if len(parts) > 1 else n.task_id
+            l4_by_l3_tid.setdefault(parent_tid, []).append(n)
+
+        # L3 노드 순회
+        if l3_nodes:
+            for l3n in sorted(l3_nodes, key=lambda x: x.task_id):
+                l3_excel = by_l3.get(l3n.task_id, [])
+                l3_pain = set()
+                for t in l3_excel:
+                    if t.pain_time: l3_pain.add("시간/속도")
+                    if t.pain_repetition: l3_pain.add("반복/수작업")
+                    if t.pain_accuracy: l3_pain.add("정확성")
+                    if t.pain_data: l3_pain.add("정보/데이터")
+                pain_tag = f" | Pain: {', '.join(sorted(l3_pain))}" if l3_pain else ""
+                lines.append(f"\n  [L3 {l3n.task_id}] {l3n.label}{pain_tag}")
+
+                # 이 L3 아래 L4 노드들
+                children = l4_by_l3_tid.get(l3n.task_id, [])
+                for l4n in sorted(children, key=lambda x: x.task_id):
+                    excel_tasks = by_l4.get(l4n.task_id, [])
+                    lines.append(f"    - L4 [{l4n.task_id}] {l4n.label}")
+                    for t in excel_tasks[:5]:
+                        lines.append(_format_task_line(t))
+                    # L5 자식
+                    l5_children = [n for n in l5_nodes if n.task_id.startswith(l4n.task_id + ".")]
+                    for l5n in sorted(l5_children, key=lambda x: x.task_id)[:5]:
+                        lines.append(f"      └ L5 [{l5n.task_id}] {l5n.label}")
+        else:
+            # L3 노드가 없으면 L4 직접 표시
+            for l4n in sorted(l4_nodes, key=lambda x: x.task_id):
+                excel_tasks = by_l4.get(l4n.task_id, [])
+                lines.append(f"\n  - L4 [{l4n.task_id}] {l4n.label}")
+                for t in excel_tasks[:5]:
+                    lines.append(_format_task_line(t))
+
+    return "\n".join(lines)
+
+
 def _build_task_and_pain_summary() -> tuple[str, str, str]:
     """엑셀 Task 데이터로 task_summary, pain_summary, process_name을 만든다."""
     l2_names = list({t.l2 for t in _wf_excel_tasks if t.l2})
@@ -1669,39 +1780,26 @@ async def benchmark_workflow_step1(request: Request):
 
     process_name, task_summary, pain_summary = _build_task_and_pain_summary()
 
-    # ── 엑셀 Task 인덱스 구축 (task_id 기준 매핑용) ──────────────────────────
-    # l4_id → Task 목록, l3_id → Task 목록, l2_id → Task 목록
-    excel_by_l4: dict[str, list] = {}
-    excel_by_l3: dict[str, list] = {}
-    excel_by_l2: dict[str, list] = {}
-    for t in _wf_excel_tasks:
-        if t.l4_id:
-            excel_by_l4.setdefault(t.l4_id, []).append(t)
-        if t.l3_id:
-            excel_by_l3.setdefault(t.l3_id, []).append(t)
-        if t.l2_id:
-            excel_by_l2.setdefault(t.l2_id, []).append(t)
+    # ── 공통 인덱스 + L4/L3/L2 세부 정보 구축 ───────────────────────────────
+    excel_by_l4, excel_by_l3, excel_by_l2 = _build_excel_index()
+
+    _PAIN_MAP = [
+        ("pain_time", "시간/속도"), ("pain_accuracy", "정확성"),
+        ("pain_repetition", "반복/수작업"), ("pain_data", "정보/데이터"),
+        ("pain_system", "시스템/도구"), ("pain_communication", "의사소통/협업"),
+    ]
 
     def _get_pain_points(tasks: list) -> list[str]:
-        """Task 목록에서 체크된 Pain Point 항목명을 추출."""
-        pain_map = [
-            ("pain_time", "시간/속도"), ("pain_accuracy", "정확성"),
-            ("pain_repetition", "반복/수작업"), ("pain_data", "정보/데이터"),
-            ("pain_system", "시스템/도구"), ("pain_communication", "의사소통/협업"),
-        ]
         found = set()
         for t in tasks:
-            for field, label in pain_map:
+            for field, label in _PAIN_MAP:
                 if getattr(t, field, ""):
                     found.add(label)
         return list(found)
 
-    # ── As-Is 노드 → 엑셀 Task 매핑 + 계층 정보 수집 ────────────────────────
-    # node_details: L4/L3/L2 단위로 {label, pain_points, description, task_names} 수집
     l4_details: list[dict] = []
     l3_details: list[dict] = []
     l2_details: list[dict] = []
-
     seen_l4: set[str] = set()
     seen_l3: set[str] = set()
     seen_l2: set[str] = set()
@@ -1711,65 +1809,46 @@ async def benchmark_workflow_step1(request: Request):
         target_sheets = (
             [s for s in parsed.sheets if s.sheet_id == sheet_id_bm] or parsed.sheets
         ) if sheet_id_bm else parsed.sheets
-
         for s in target_sheets:
             for node in s.nodes.values():
-                lv = node.level
-                lbl = node.label.strip()
-                tid = node.task_id.strip()
+                lv, lbl, tid = node.level, node.label.strip(), node.task_id.strip()
                 if not lbl:
                     continue
-
                 if lv == "L4" and lbl not in seen_l4:
                     seen_l4.add(lbl)
                     matched = excel_by_l4.get(tid, [])
-                    l4_details.append({
-                        "name": lbl,
-                        "task_id": tid,
+                    l4_details.append({"name": lbl, "task_id": tid,
                         "pain_points": _get_pain_points(matched),
                         "description": "; ".join(t.description for t in matched[:3] if t.description),
-                        "task_names": [t.name for t in matched[:5]],
-                    })
+                        "task_names": [t.name for t in matched[:5]]})
                 elif lv == "L3" and lbl not in seen_l3:
                     seen_l3.add(lbl)
                     matched = excel_by_l3.get(tid, [])
-                    l3_details.append({
-                        "name": lbl,
-                        "task_id": tid,
+                    l3_details.append({"name": lbl, "task_id": tid,
                         "pain_points": _get_pain_points(matched),
-                        "description": "; ".join(t.description for t in matched[:3] if t.description),
-                    })
+                        "description": "; ".join(t.description for t in matched[:3] if t.description)})
                 elif lv == "L2" and lbl not in seen_l2:
                     seen_l2.add(lbl)
-                    matched = excel_by_l2.get(tid, [])
-                    l2_details.append({
-                        "name": lbl,
-                        "task_id": tid,
-                        "pain_points": _get_pain_points(matched),
-                    })
+                    l2_details.append({"name": lbl, "task_id": tid,
+                        "pain_points": _get_pain_points(excel_by_l2.get(tid, []))})
 
-    # ── 엑셀만 있을 때 (As-Is 없는 경우) fallback ────────────────────────────
+    # As-Is 없을 때 엑셀만으로 구성
     if not l4_details:
         for l4_id, tasks in excel_by_l4.items():
             name = tasks[0].l4 if tasks else ""
             if name and name not in seen_l4:
                 seen_l4.add(name)
-                l4_details.append({
-                    "name": name, "task_id": l4_id,
+                l4_details.append({"name": name, "task_id": l4_id,
                     "pain_points": _get_pain_points(tasks),
                     "description": "; ".join(t.description for t in tasks[:3] if t.description),
-                    "task_names": [t.name for t in tasks[:5]],
-                })
+                    "task_names": [t.name for t in tasks[:5]]})
     if not l3_details:
         for l3_id, tasks in excel_by_l3.items():
             name = tasks[0].l3 if tasks else ""
             if name and name not in seen_l3:
                 seen_l3.add(name)
-                l3_details.append({
-                    "name": name, "task_id": l3_id,
-                    "pain_points": _get_pain_points(tasks),
-                    "description": "",
-                })
+                l3_details.append({"name": name, "task_id": l3_id,
+                    "pain_points": _get_pain_points(tasks), "description": ""})
     if not l2_details:
         for l2_id, tasks in excel_by_l2.items():
             name = tasks[0].l2 if tasks else ""
@@ -1777,11 +1856,7 @@ async def benchmark_workflow_step1(request: Request):
                 seen_l2.add(name)
                 l2_details.append({"name": name, "task_id": l2_id, "pain_points": _get_pain_points(tasks)})
 
-    l4_details = l4_details[:8]
-    l3_details = l3_details[:6]
-    l2_details = l2_details[:3]
-
-    # flat name 리스트 (LLM 프롬프트용)
+    l4_details, l3_details, l2_details = l4_details[:8], l3_details[:6], l2_details[:3]
     l2_names = [d["name"] for d in l2_details]
     l3_names = [d["name"] for d in l3_details]
     l4_names = [d["name"] for d in l4_details]
@@ -1958,22 +2033,10 @@ async def generate_workflow_step1(request: Request):
                 content = r.get("content", r.get("snippet", ""))
                 benchmark_text += f"- **{r['title']}**: {content[:200]}\n"
 
-    # As-Is 워크플로우 컨텍스트 (sheet_id 지정 시 해당 시트만)
-    asis_context = ""
-    if "parsed" in _workflow_cache:
-        parsed = _workflow_cache["parsed"]
-        if sheet_id:
-            target_sheets = [s for s in parsed.sheets if s.sheet_id == sheet_id]
-            if not target_sheets:
-                target_sheets = parsed.sheets[:1]
-        else:
-            target_sheets = parsed.sheets
-        for s in target_sheets:
-            asis_context += f"\n## As-Is 워크플로우: {s.name}\n"
-            for node in s.l4_nodes:
-                asis_context += f"- L4 [{node.task_id}] {node.label}\n"
+    # As-Is + 엑셀 매핑 컨텍스트
+    asis_context = _build_mapped_asis_context(sheet_id)
 
-    system = _step1_system_prompt(process_name, task_summary, pain_summary, benchmark_text + asis_context)
+    system = _step1_system_prompt(process_name, task_summary, pain_summary, benchmark_text + "\n\n" + asis_context)
 
     global _wf_chat_history
     actual_prompt = user_prompt or "선도사례를 분석하여 To-Be Workflow 기본 설계를 수행해주세요."
@@ -2158,22 +2221,8 @@ async def generate_workflow_step2(request: Request):
 
     pain_detail = "\n".join(pain_detail_lines) if pain_detail_lines else "상세 Pain Point 정보 없음"
 
-    # As-Is 워크플로우 정보 (있으면 포함 — sheet_id 지정 시 해당 시트만 사용)
-    asis_info = ""
-    if "parsed" in _workflow_cache:
-        parsed = _workflow_cache["parsed"]
-        if sheet_id:
-            target_sheets = [s for s in parsed.sheets if s.sheet_id == sheet_id]
-            if not target_sheets:
-                target_sheets = parsed.sheets[:1]  # fallback: 첫 번째 시트
-        else:
-            target_sheets = parsed.sheets
-        for sheet in target_sheets:
-            asis_info += f"\n### 시트: {sheet.name}\n"
-            for node in sheet.l4_nodes:
-                asis_info += f"- L4 [{node.task_id}] {node.label}\n"
-                for l5 in sheet.l5_nodes:
-                    asis_info += f"  - L5 [{l5.task_id}] {l5.label}\n"
+    # As-Is + 엑셀 매핑 컨텍스트 (Step 1과 동일한 함수 사용)
+    asis_info = _build_mapped_asis_context(sheet_id)
 
     step2_system = f"""당신은 AI 기반 업무 혁신 설계 전문가입니다.
 Step 1에서 도출된 기본 설계를 기반으로, 두산에 최적화된 **AI 기반 To-Be Workflow 상세 설계**를 수행합니다.
@@ -2188,10 +2237,10 @@ Step 1에서 도출된 기본 설계를 기반으로, 두산에 최적화된 **A
 ## Step 1 기본 설계 결과
 {json.dumps(_wf_step1_cache, ensure_ascii=False, indent=2)[:4000]}
 
-## As-Is 워크플로우 구조
+## As-Is 워크플로우 + 엑셀 매핑 (L3→L4→Task 계층, Pain Point 포함)
 {asis_info or "As-Is 워크플로우 정보 없음 (JSON/PPT 미업로드)"}
 
-## 상세 Pain Point Deep-dive
+## 상세 Pain Point Deep-dive (엑셀 기준)
 {pain_detail}
 
 {f"## 추가 컨텍스트{chr(10)}{additional_context}" if additional_context else ""}
