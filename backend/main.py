@@ -2785,7 +2785,7 @@ def _run_mapping_check() -> dict:
     for s in sheets_result:
         for g in s["l3_groups"]:
             for n in g["l4_nodes"]:
-                if n["matched"]:
+                if n["matched_l5"] > 0:
                     l4_cls_stats.append({
                         "task_id": n["task_id"],
                         "label": n["label"],
