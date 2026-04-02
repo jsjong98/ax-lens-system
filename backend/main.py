@@ -2763,7 +2763,7 @@ def _run_mapping_check() -> dict:
         for s in sheets_result
     )
     matched_l4 = sum(
-        sum(1 for n in g["l4_nodes"] if n["matched"])
+        sum(1 for n in g["l4_nodes"] if n["matched_l5"] > 0)
         for s in sheets_result
         for g in s["l3_groups"]
     )
