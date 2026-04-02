@@ -951,7 +951,7 @@ async def get_current_file():
 
 
 @app.post("/api/upload", tags=["Upload"])
-async def upload_excel(file: UploadFile = File(...)):
+async def upload_excel(request: Request, file: UploadFile = File(...)):
     """엑셀 파일 업로드 — 시트 목록을 반환합니다. 시트 선택은 /api/upload/select-sheet로."""
     global _tasks_cache, _current_excel_path
     from excel_reader import list_sheets
