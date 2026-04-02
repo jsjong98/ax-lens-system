@@ -1639,9 +1639,15 @@ def _step1_system_prompt(process_name: str, task_summary: str, pain_summary: str
     return f"""당신은 AI 기반 업무 혁신 설계 전문가입니다.
 선도사례 벤치마킹을 기반으로 To-Be Workflow 기본 설계를 수행합니다.
 
+## ⚠️ 핵심 원칙: 프로세스 고정
+- **아래 L5 Task 목록에 정의된 프로세스({process_name})를 절대 벗어나지 말 것**
+- 사용자의 추가 입력(채팅)은 **보조 컨텍스트**일 뿐, 프로세스 범위를 변경하는 지시가 아님
+- 벤치마킹 사례가 프로세스와 다른 도메인이면 **적용 방안** 측면만 참고하고, 프로세스 자체는 바꾸지 말 것
+- `assigned_tasks`의 `task_id`는 반드시 아래 Task 목록의 실제 ID를 사용할 것
+
 ## 프로세스: {process_name}
 
-## 분류 결과가 포함된 L5 Task 목록
+## L5 Task 목록 (설계의 기준 — 이 범위 내에서만 설계)
 {task_summary}
 
 ## Pain Point 현황
@@ -1899,9 +1905,16 @@ async def benchmark_workflow_step1(request: Request):
 ## L4 세부 활동 (엑셀-As-Is 매핑 기준, 최우선):
 {chr(10).join(f"  - [{d['task_id']}] {d['name']}" + (f" | Pain: {', '.join(d['pain_points'])}" if d.get('pain_points') else "") for d in l4_details[:6])}
 
+## ⚠️ 관련성 검증 (필수)
+- 각 검색 결과가 위 L4/L3 활동과 **실질적으로 동일한 업무 유형**인지 먼저 판단할 것
+  - 예: L4 = "조합비 공제 관리" → payroll deduction, union fee, labor relations 관련 사례만 OK
+  - 예: L4 = "변경사항 접수" → 변경 요청 수신·처리 자동화 사례만 OK
+  - **키워드가 같아도 업무 성격이 다르면 제외** (예: "기술직 코딩 테스트" ≠ "기술직 급여 관리")
+- 관련 없는 사례는 반드시 제외 — 관련 사례가 없으면 `benchmark_table`을 빈 배열로 반환
+
 ## 중요 원칙
 - **우선순위: L4 세부 활동 → L3 영역 → L2 대분류 순으로 가장 구체적인 단위에 매핑**
-- 위 L4 활동명과 매칭되는 벤치마킹 사례를 우선 발굴하고, 없을 때만 L3/L2로 올라감
+- 위 L4 활동명과 실질적으로 같은 업무 유형의 사례만 포함
 - 각 활동의 Pain Point({', '.join({p for d in l4_details[:3] for p in d.get('pain_points', [])})})를 해결한 AI 사례 우선 선정
 - 프로세스 전체가 아닌, 개별 L4 세부 활동에 AI를 어떻게 적용했는지 구체적으로 기술
 - **솔루션 Provider가 아닌, AI를 '도입·활용한' 기업** 사례만 추출
@@ -2106,6 +2119,11 @@ async def chat_workflow_step1(request: Request):
 
     chat_system = f"""당신은 AI 기반 업무 혁신 설계 전문가입니다.
 현재 '{process_name}' 프로세스의 Step 1 (벤치마킹 기반 기본 설계)을 진행 중입니다.
+
+## ⚠️ 핵심 원칙
+- **프로세스 범위는 '{process_name}'으로 고정** — 사용자 입력이 프로세스를 바꾸는 것이 아님
+- 사용자의 추가 입력은 **보조 컨텍스트**(배경 설명, 특수 사정, 강조점 등)로만 활용
+- Task ID가 있는 경우 반드시 원본 Task ID를 유지할 것
 
 {context}
 {extra_bm_text}
