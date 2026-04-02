@@ -109,31 +109,38 @@ def _search_duckduckgo(query: str, max_results: int = 8) -> list[dict]:
 # ── 검색 쿼리 생성 ───────────────────────────────────────────────────────────
 
 def _generate_search_queries(workflow_cache: dict) -> list[str]:
-    """Big Tech·Industry 선도 기업의 AI 활용 사례를 찾기 위한 검색 쿼리 생성.
-    L4(가장 구체적) → L3 → L2 순으로 fallback하며 쿼리를 생성합니다.
-    엑셀 + As-Is 워크플로우에서 추출한 L2/L3/L4 이름을 모두 활용합니다."""
+    """엑셀-As-Is 매핑 결과(l4_details/l3_details/l2_details)를 활용한 벤치마킹 쿼리 생성.
+    L4(가장 구체적) → L3 → L2 순으로 fallback하며, Pain Point를 쿼리에 반영합니다."""
     process_name = workflow_cache.get("process_name", "")
     l2_names: list[str] = workflow_cache.get("l2_names", [])
     l3_names: list[str] = workflow_cache.get("l3_names", [])
     l4_names: list[str] = workflow_cache.get("l4_names", [])
+    l4_details: list[dict] = workflow_cache.get("l4_details", [])
+    l3_details: list[dict] = workflow_cache.get("l3_details", [])
+    l2_details: list[dict] = workflow_cache.get("l2_details", [])
     agents = workflow_cache.get("agents", [])
 
     queries = []
 
-    # ── 1순위: L4 세부 활동 기반 구체적 쿼리 (최대 3개) ─────────────────────
-    for l4 in l4_names[:3]:
+    # ── 1순위: L4 세부 활동 × Pain Point 조합 쿼리 (최대 3개) ──────────────
+    for detail in l4_details[:3]:
+        name = detail["name"]
+        pains = detail.get("pain_points", [])
+        pain_kw = " ".join(pains[:2]) if pains else "automation"
         queries.append(
-            f"enterprise company AI automation '{l4}' case study results 2024 2025 ROI"
+            f"enterprise AI '{name}' {pain_kw} case study results 2024 2025"
         )
 
-    # ── 2순위: L3 영역 기반 쿼리 (L4가 부족한 경우 보완) ─────────────────────
-    # L4 결과가 충분하지 않을 수 있으므로 L3도 함께 수집
-    for l3 in l3_names[:3]:
+    # ── 2순위: L3 영역 × Pain Point 쿼리 ────────────────────────────────────
+    for detail in l3_details[:3]:
+        name = detail["name"]
+        pains = detail.get("pain_points", [])
+        pain_kw = " ".join(pains[:2]) if pains else "automation"
         queries.append(
-            f"enterprise '{l3}' AI automation adoption case study outcome 2024 2025"
+            f"enterprise '{name}' AI {pain_kw} adoption outcome 2024 2025"
         )
 
-    # ── 3순위: L2 대분류 fallback (L3도 없는 경우) ───────────────────────────
+    # ── 3순위: L2 대분류 fallback (L3/L4 모두 없는 경우) ────────────────────
     if not l3_names and not l4_names:
         fallback = l2_names[0] if l2_names else process_name
         queries.append(
@@ -144,13 +151,17 @@ def _generate_search_queries(workflow_cache: dict) -> list[str]:
             f"Fortune 500 enterprise '{fallback}' AI agent deployment case study ROI"
         )
 
-    # ── 한국 대기업 + 가장 구체적인 레벨 ────────────────────────────────────
+    # ── 한국 대기업 — L4 우선, 없으면 L3, L2 순 ─────────────────────────────
     kr_focus = l4_names[0] if l4_names else (l3_names[0] if l3_names else (l2_names[0] if l2_names else process_name))
+    kr_pains = l4_details[0].get("pain_points", []) if l4_details else (
+        l3_details[0].get("pain_points", []) if l3_details else []
+    )
+    kr_pain_kw = " ".join(kr_pains[:2]) if kr_pains else "AI 자동화"
     queries.append(
-        f"삼성 현대 SK LG 두산 '{kr_focus}' AI 자동화 도입 사례 성과 2024 2025"
+        f"삼성 현대 SK LG 두산 '{kr_focus}' {kr_pain_kw} 도입 사례 성과 2024 2025"
     )
 
-    # ── 에이전트 기술 × L4/L3 조합 ──────────────────────────────────────────
+    # ── 에이전트 기술 × 가장 구체적인 레벨 ──────────────────────────────────
     techniques = set()
     for agent in agents[:3]:
         tech = agent.get("ai_technique", "")
@@ -159,11 +170,9 @@ def _generate_search_queries(workflow_cache: dict) -> list[str]:
     if techniques:
         tech_str = " ".join(list(techniques)[:2])
         focus = l4_names[0] if l4_names else (l3_names[0] if l3_names else process_name)
-        queries.append(
-            f"enterprise {tech_str} '{focus}' real world deployment outcome"
-        )
+        queries.append(f"enterprise {tech_str} '{focus}' real world deployment outcome")
 
-    # ── 글로벌 제조·중공업 기업 — 가장 구체적인 레벨 기준 ───────────────────
+    # ── 글로벌 제조·중공업 — L4 → L3 → L2 순 ───────────────────────────────
     industry_focus = l4_names[0] if l4_names else (l3_names[0] if l3_names else process_name)
     queries.append(
         f"Siemens GE Honeywell Caterpillar Doosan '{industry_focus}' "

@@ -1669,32 +1669,122 @@ async def benchmark_workflow_step1(request: Request):
 
     process_name, task_summary, pain_summary = _build_task_and_pain_summary()
 
-    # ── 엑셀 기반 L2/L3/L4 추출 ──────────────────────────────────────────────
-    l2_names = list({t.l2 for t in _wf_excel_tasks if t.l2})[:3]
-    l3_names = list({t.l3 for t in _wf_excel_tasks if t.l3})[:8]
-    l4_names = list({t.l4 for t in _wf_excel_tasks if t.l4})[:10]
+    # ── 엑셀 Task 인덱스 구축 (task_id 기준 매핑용) ──────────────────────────
+    # l4_id → Task 목록, l3_id → Task 목록, l2_id → Task 목록
+    excel_by_l4: dict[str, list] = {}
+    excel_by_l3: dict[str, list] = {}
+    excel_by_l2: dict[str, list] = {}
+    for t in _wf_excel_tasks:
+        if t.l4_id:
+            excel_by_l4.setdefault(t.l4_id, []).append(t)
+        if t.l3_id:
+            excel_by_l3.setdefault(t.l3_id, []).append(t)
+        if t.l2_id:
+            excel_by_l2.setdefault(t.l2_id, []).append(t)
 
-    # ── As-Is 워크플로우 노드에서 L2/L3/L4 보완 ─────────────────────────────
+    def _get_pain_points(tasks: list) -> list[str]:
+        """Task 목록에서 체크된 Pain Point 항목명을 추출."""
+        pain_map = [
+            ("pain_time", "시간/속도"), ("pain_accuracy", "정확성"),
+            ("pain_repetition", "반복/수작업"), ("pain_data", "정보/데이터"),
+            ("pain_system", "시스템/도구"), ("pain_communication", "의사소통/협업"),
+        ]
+        found = set()
+        for t in tasks:
+            for field, label in pain_map:
+                if getattr(t, field, ""):
+                    found.add(label)
+        return list(found)
+
+    # ── As-Is 노드 → 엑셀 Task 매핑 + 계층 정보 수집 ────────────────────────
+    # node_details: L4/L3/L2 단위로 {label, pain_points, description, task_names} 수집
+    l4_details: list[dict] = []
+    l3_details: list[dict] = []
+    l2_details: list[dict] = []
+
+    seen_l4: set[str] = set()
+    seen_l3: set[str] = set()
+    seen_l2: set[str] = set()
+
     if "parsed" in _workflow_cache:
         parsed = _workflow_cache["parsed"]
         target_sheets = (
             [s for s in parsed.sheets if s.sheet_id == sheet_id_bm] or parsed.sheets
         ) if sheet_id_bm else parsed.sheets
+
         for s in target_sheets:
             for node in s.nodes.values():
                 lv = node.level
                 lbl = node.label.strip()
+                tid = node.task_id.strip()
                 if not lbl:
                     continue
-                if lv == "L2" and lbl not in l2_names:
-                    l2_names.append(lbl)
-                elif lv == "L3" and lbl not in l3_names:
-                    l3_names.append(lbl)
-                elif lv == "L4" and lbl not in l4_names:
-                    l4_names.append(lbl)
-        l2_names = l2_names[:3]
-        l3_names = l3_names[:8]
-        l4_names = l4_names[:10]
+
+                if lv == "L4" and lbl not in seen_l4:
+                    seen_l4.add(lbl)
+                    matched = excel_by_l4.get(tid, [])
+                    l4_details.append({
+                        "name": lbl,
+                        "task_id": tid,
+                        "pain_points": _get_pain_points(matched),
+                        "description": "; ".join(t.description for t in matched[:3] if t.description),
+                        "task_names": [t.name for t in matched[:5]],
+                    })
+                elif lv == "L3" and lbl not in seen_l3:
+                    seen_l3.add(lbl)
+                    matched = excel_by_l3.get(tid, [])
+                    l3_details.append({
+                        "name": lbl,
+                        "task_id": tid,
+                        "pain_points": _get_pain_points(matched),
+                        "description": "; ".join(t.description for t in matched[:3] if t.description),
+                    })
+                elif lv == "L2" and lbl not in seen_l2:
+                    seen_l2.add(lbl)
+                    matched = excel_by_l2.get(tid, [])
+                    l2_details.append({
+                        "name": lbl,
+                        "task_id": tid,
+                        "pain_points": _get_pain_points(matched),
+                    })
+
+    # ── 엑셀만 있을 때 (As-Is 없는 경우) fallback ────────────────────────────
+    if not l4_details:
+        for l4_id, tasks in excel_by_l4.items():
+            name = tasks[0].l4 if tasks else ""
+            if name and name not in seen_l4:
+                seen_l4.add(name)
+                l4_details.append({
+                    "name": name, "task_id": l4_id,
+                    "pain_points": _get_pain_points(tasks),
+                    "description": "; ".join(t.description for t in tasks[:3] if t.description),
+                    "task_names": [t.name for t in tasks[:5]],
+                })
+    if not l3_details:
+        for l3_id, tasks in excel_by_l3.items():
+            name = tasks[0].l3 if tasks else ""
+            if name and name not in seen_l3:
+                seen_l3.add(name)
+                l3_details.append({
+                    "name": name, "task_id": l3_id,
+                    "pain_points": _get_pain_points(tasks),
+                    "description": "",
+                })
+    if not l2_details:
+        for l2_id, tasks in excel_by_l2.items():
+            name = tasks[0].l2 if tasks else ""
+            if name and name not in seen_l2:
+                seen_l2.add(name)
+                l2_details.append({"name": name, "task_id": l2_id, "pain_points": _get_pain_points(tasks)})
+
+    l4_details = l4_details[:8]
+    l3_details = l3_details[:6]
+    l2_details = l2_details[:3]
+
+    # flat name 리스트 (LLM 프롬프트용)
+    l2_names = [d["name"] for d in l2_details]
+    l3_names = [d["name"] for d in l3_details]
+    l4_names = [d["name"] for d in l4_details]
 
     bm_data = {
         "process_name": process_name,
@@ -1702,8 +1792,11 @@ async def benchmark_workflow_step1(request: Request):
         "l2_names": l2_names,
         "l3_names": l3_names,
         "l4_names": l4_names,
+        "l4_details": l4_details,
+        "l3_details": l3_details,
+        "l2_details": l2_details,
         "blueprint_summary": (
-            f"{process_name} 프로세스 (L3: {', '.join(l3_names)}, L4: {', '.join(l4_names)}) "
+            f"{process_name} 프로세스 (L3: {', '.join(l3_names[:3])}, L4: {', '.join(l4_names[:3])}) "
             f"AI 적용 벤치마킹"
         ),
     }
@@ -1727,14 +1820,15 @@ async def benchmark_workflow_step1(request: Request):
 
 ## 프로세스: {process_name}
 ## L2 대분류: {', '.join(l2_names)}
-## L3 영역 (분석 핵심 단위): {', '.join(l3_names)}
-## L4 세부 활동 (최우선 매핑 기준): {', '.join(l4_names)}
+## L3 영역: {', '.join(l3_names)}
+## L4 세부 활동 (엑셀-As-Is 매핑 기준, 최우선):
+{chr(10).join(f"  - [{d['task_id']}] {d['name']}" + (f" | Pain: {', '.join(d['pain_points'])}" if d.get('pain_points') else "") for d in l4_details[:6])}
 
 ## 중요 원칙
 - **우선순위: L4 세부 활동 → L3 영역 → L2 대분류 순으로 가장 구체적인 단위에 매핑**
-- L4 수준 활동명과 매칭되는 사례가 있으면 반드시 L4 기준으로 기술
-- L4 사례가 없을 때만 L3, L3도 없을 때 L2 수준으로 기술
-- 프로세스 전체가 아닌, 개별 세부 활동에 AI를 어떻게 적용했는지 구체적으로 기술
+- 위 L4 활동명과 매칭되는 벤치마킹 사례를 우선 발굴하고, 없을 때만 L3/L2로 올라감
+- 각 활동의 Pain Point({', '.join({p for d in l4_details[:3] for p in d.get('pain_points', [])})})를 해결한 AI 사례 우선 선정
+- 프로세스 전체가 아닌, 개별 L4 세부 활동에 AI를 어떻게 적용했는지 구체적으로 기술
 - **솔루션 Provider가 아닌, AI를 '도입·활용한' 기업** 사례만 추출
 - Big Tech(Google, Amazon, Meta 등)의 **내부** AI 활용 사례는 OK
 - Industry 선도사(Fortune 500, 한국 대기업)의 AI 도입 성과 우선
@@ -1747,15 +1841,15 @@ async def benchmark_workflow_step1(request: Request):
     {{
       "source": "기업명 (고유 기업명 1개만)",
       "industry": "산업군",
-      "process_area": "적용 L3 활동명 (위 L3 영역 중 해당하는 것 선택)",
+      "process_area": "매핑된 L4 활동명 (위 L4 목록 중 해당하는 것, 없으면 L3명)",
       "ai_technology": "적용 AI 기술",
-      "use_case": "구체적 적용 사례 (1~2문장, L3 활동 기준)",
+      "use_case": "구체적 적용 사례 (1~2문장, L4 활동 기준)",
       "outcome": "성과/효과 (수치 포함)",
-      "implication": "두산 향 시사점",
+      "implication": "두산 향 시사점 (해당 L4 활동의 Pain Point 해결 관점)",
       "url": "출처 URL"
     }}
   ],
-  "summary": "벤치마킹 종합 요약 — L3 활동별 핵심 시사점 중심 (3~5문장)"
+  "summary": "벤치마킹 종합 요약 — L4 활동별 핵심 시사점 중심 (3~5문장)"
 }}
 """
 
