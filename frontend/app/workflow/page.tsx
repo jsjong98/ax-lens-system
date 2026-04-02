@@ -557,6 +557,9 @@ export default function WorkflowPage() {
                         <>
                           <StatCard label="L4" value={currentSheet.l4_count} />
                           <StatCard label="L5" value={currentSheet.l5_count} accent />
+                          {(currentSheet.decision_count ?? 0) > 0 && (
+                            <StatCard label="Decision" value={currentSheet.decision_count ?? 0} />
+                          )}
                           <StatCard label="총 스텝" value={currentSheet.total_steps} />
                         </>
                       )}
@@ -588,28 +591,111 @@ export default function WorkflowPage() {
                   )}
 
                   {currentSheet && (
-                    <div className="max-h-[400px] overflow-y-auto space-y-3">
-                      {currentSheet.l4_details.map((l4) => (
-                        <div key={l4.node_id} className="bg-white rounded-lg border border-gray-200 p-4">
-                          <div className="flex items-center gap-2 mb-2">
-                            <span className="text-xs font-mono px-2 py-0.5 rounded" style={{ backgroundColor: PWC.bg, color: PWC.primary }}>
-                              {l4.task_id}
-                            </span>
-                            <span className="font-semibold text-sm">{l4.label}</span>
-                          </div>
-                          {l4.child_l5s.length > 0 && (
-                            <div className="ml-4 space-y-1">
-                              {l4.child_l5s.map((l5, i) => (
-                                <div key={l5.node_id || i} className="flex items-center gap-2 text-xs text-gray-600">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-gray-300" />
-                                  <span className="font-mono text-gray-400">{l5.task_id}</span>
-                                  <span>{l5.label}</span>
-                                </div>
-                              ))}
-                            </div>
-                          )}
+                    <div className="space-y-3">
+                      {/* Decision 노드 요약 배너 */}
+                      {currentSheet.decision_count != null && currentSheet.decision_count > 0 && (
+                        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-700">
+                          <span className="text-base">◇</span>
+                          <span className="font-semibold">Decision 노드 {currentSheet.decision_count}개</span>
+                          <span className="text-amber-500">— 분기 조건이 아래 L4 노드에 표시됩니다</span>
                         </div>
-                      ))}
+                      )}
+
+                      <div className="max-h-[420px] overflow-y-auto space-y-3 pr-1">
+                        {currentSheet.l4_details.map((l4) => (
+                          <div key={l4.node_id} className="bg-white rounded-lg border border-gray-200 p-4">
+                            <div className="flex items-center gap-2 mb-2">
+                              <span className="text-xs font-mono px-2 py-0.5 rounded" style={{ backgroundColor: PWC.bg, color: PWC.primary }}>
+                                {l4.task_id}
+                              </span>
+                              <span className="font-semibold text-sm">{l4.label}</span>
+                            </div>
+
+                            {/* L5 자식 */}
+                            {l4.child_l5s.length > 0 && (
+                              <div className="ml-4 space-y-1 mb-2">
+                                {l4.child_l5s.map((l5, i) => (
+                                  <div key={l5.node_id || i} className="flex items-center gap-2 text-xs text-gray-600">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-gray-300" />
+                                    <span className="font-mono text-gray-400">{l5.task_id}</span>
+                                    <span>{l5.label}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+
+                            {/* Decision 분기 */}
+                            {l4.branches && l4.branches.length > 0 && (
+                              <div className="ml-2 mt-2 space-y-1.5">
+                                {l4.branches.map((b, bi) => (
+                                  <div key={bi}>
+                                    {b.type === "decision" ? (
+                                      <div>
+                                        <div className="flex items-center gap-1.5 text-xs text-amber-700 font-medium mb-1">
+                                          <span className="text-base leading-none">◇</span>
+                                          <span>{b.decision_label || "분기 조건"}</span>
+                                        </div>
+                                        <div className="ml-4 space-y-1">
+                                          {b.branches?.map((br, bri) => (
+                                            <div key={bri} className="flex items-center gap-1.5 text-xs">
+                                              <span className="text-gray-400">├─</span>
+                                              <span className="px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 font-medium">
+                                                {br.condition}
+                                              </span>
+                                              <span className="text-gray-400">→</span>
+                                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono ${
+                                                br.target_level === "L4" ? "bg-red-50 text-red-600" :
+                                                br.target_level === "L5" ? "bg-blue-50 text-blue-600" :
+                                                "bg-gray-100 text-gray-500"
+                                              }`}>{br.target_level}</span>
+                                              <span className="text-gray-600">{br.target_label}</span>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <div className="flex items-center gap-1.5 text-xs">
+                                        <span className="text-gray-400">→</span>
+                                        <span className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 border border-blue-200 font-medium">
+                                          {b.condition}
+                                        </span>
+                                        <span className="text-gray-400">→</span>
+                                        <span className="text-gray-600">{b.target_label}</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Decision 노드 전체 목록 */}
+                      {currentSheet.decision_nodes && currentSheet.decision_nodes.length > 0 && (
+                        <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-4">
+                          <div className="text-xs font-bold text-amber-700 mb-2 flex items-center gap-1.5">
+                            <span>◇</span> Decision 노드 목록
+                          </div>
+                          <div className="space-y-2">
+                            {currentSheet.decision_nodes.map((dn) => (
+                              <div key={dn.node_id} className="bg-white rounded border border-amber-200 px-3 py-2">
+                                <div className="text-xs font-semibold text-gray-700 mb-1">{dn.label || "(분기)"}</div>
+                                <div className="space-y-0.5">
+                                  {dn.outgoing.map((o, oi) => (
+                                    <div key={oi} className="flex items-center gap-1.5 text-xs text-gray-600">
+                                      <span className="text-amber-500 shrink-0">•</span>
+                                      <span className="px-1 py-0.5 rounded bg-amber-100 text-amber-700 text-[10px] font-medium">{o.condition}</span>
+                                      <span className="text-gray-400">→</span>
+                                      <span>{o.to_label}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </>

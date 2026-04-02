@@ -614,12 +614,39 @@ export interface WorkflowStep {
   nodes?: WorkflowStepTask[];
 }
 
+export interface WorkflowBranch {
+  type: "decision" | "edge";
+  // decision type
+  decision_node_id?: string;
+  decision_label?: string;
+  branches?: Array<{
+    condition: string;
+    target_node_id: string;
+    target_label: string;
+    target_level: string;
+  }>;
+  // edge type
+  condition?: string;
+  target_node_id?: string;
+  target_label?: string;
+  target_level?: string;
+}
+
+export interface WorkflowDecisionNode {
+  node_id: string;
+  label: string;
+  description: string;
+  incoming: Array<{ from_node_id: string; from_label: string; condition: string }>;
+  outgoing: Array<{ condition: string; to_node_id: string; to_label: string }>;
+}
+
 export interface WorkflowSheetSummary {
   sheet_id: string;
   sheet_name: string;
   lanes: string[];
   l4_count: number;
   l5_count: number;
+  decision_count?: number;
   total_steps: number;
   parallel_steps: number;
   sequential_steps: number;
@@ -631,7 +658,9 @@ export interface WorkflowSheetSummary {
     description: string;
     child_l5_count: number;
     child_l5s: WorkflowStepTask[];
+    branches?: WorkflowBranch[];
   }>;
+  decision_nodes?: WorkflowDecisionNode[];
 }
 
 export interface WorkflowSummary {

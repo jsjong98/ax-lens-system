@@ -87,6 +87,18 @@ class WorkflowSheet:
             key=lambda n: n.y,
         )
 
+    @property
+    def decision_nodes(self) -> list[WorkflowNode]:
+        return [n for n in self.nodes.values() if n.level == "DECISION"]
+
+    def outgoing_edges(self, node_id: str) -> list[WorkflowEdge]:
+        """특정 노드에서 나가는 엣지 목록을 반환합니다."""
+        return [e for e in self.edges if e.source == node_id]
+
+    def incoming_edges(self, node_id: str) -> list[WorkflowEdge]:
+        """특정 노드로 들어오는 엣지 목록을 반환합니다."""
+        return [e for e in self.edges if e.target == node_id]
+
 
 @dataclass
 class ParsedWorkflow:
@@ -329,6 +341,7 @@ def get_workflow_summary(parsed: ParsedWorkflow) -> dict[str, Any]:
     for sheet in parsed.sheets:
         l4_nodes = sheet.l4_nodes
         l5_nodes = sheet.l5_nodes
+        decision_nodes = sheet.decision_nodes
 
         # L4→L5 매핑 (엣지 기반)
         l4_to_l5: dict[str, list[str]] = defaultdict(list)
@@ -341,6 +354,47 @@ def get_workflow_summary(parsed: ParsedWorkflow) -> dict[str, Any]:
         # 병렬 스텝 수
         parallel_steps = [s for s in sheet.execution_order if s.is_parallel]
 
+        # L4별 분기(Decision) 정보 구성
+        def _get_branches(node_id: str, visited: set | None = None) -> list[dict]:
+            """노드 → Decision 노드 → 분기 조건 + 다음 노드를 재귀적으로 수집."""
+            if visited is None:
+                visited = set()
+            if node_id in visited:
+                return []
+            visited.add(node_id)
+            branches = []
+            for e in sheet.outgoing_edges(node_id):
+                tgt = sheet.nodes.get(e.target)
+                if not tgt:
+                    continue
+                if tgt.level == "DECISION":
+                    # Decision 노드에서 나가는 엣지 = 분기 조건
+                    decision_branches = []
+                    for de in sheet.outgoing_edges(tgt.id):
+                        dtgt = sheet.nodes.get(de.target)
+                        decision_branches.append({
+                            "condition": de.label or "(조건 없음)",
+                            "target_node_id": de.target,
+                            "target_label": dtgt.label if dtgt else de.target,
+                            "target_level": dtgt.level if dtgt else "",
+                        })
+                    branches.append({
+                        "type": "decision",
+                        "decision_node_id": tgt.id,
+                        "decision_label": tgt.label or "분기",
+                        "branches": decision_branches,
+                    })
+                elif e.label:
+                    # 라벨 있는 일반 엣지
+                    branches.append({
+                        "type": "edge",
+                        "condition": e.label,
+                        "target_node_id": e.target,
+                        "target_label": tgt.label,
+                        "target_level": tgt.level,
+                    })
+            return branches
+
         summaries.append({
             "sheet_id": sheet.sheet_id,
             "sheet_name": sheet.name,
@@ -348,6 +402,7 @@ def get_workflow_summary(parsed: ParsedWorkflow) -> dict[str, Any]:
             "total_nodes": len(sheet.nodes),
             "l4_count": len(l4_nodes),
             "l5_count": len(l5_nodes),
+            "decision_count": len(decision_nodes),
             "edge_count": len(sheet.edges),
             "total_steps": len(sheet.execution_order),
             "parallel_steps": len(parallel_steps),
@@ -382,8 +437,33 @@ def get_workflow_summary(parsed: ParsedWorkflow) -> dict[str, Any]:
                         }
                         for l5id in l4_to_l5.get(n.id, [])
                     ],
+                    "branches": _get_branches(n.id),
                 }
                 for n in l4_nodes
+            ],
+            "decision_nodes": [
+                {
+                    "node_id": n.id,
+                    "label": n.label or "분기",
+                    "description": n.description,
+                    "incoming": [
+                        {
+                            "from_node_id": e.source,
+                            "from_label": sheet.nodes[e.source].label if e.source in sheet.nodes else e.source,
+                            "condition": e.label,
+                        }
+                        for e in sheet.incoming_edges(n.id)
+                    ],
+                    "outgoing": [
+                        {
+                            "condition": e.label or "(조건 없음)",
+                            "to_node_id": e.target,
+                            "to_label": sheet.nodes[e.target].label if e.target in sheet.nodes else e.target,
+                        }
+                        for e in sheet.outgoing_edges(n.id)
+                    ],
+                }
+                for n in decision_nodes
             ],
         })
 

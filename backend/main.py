@@ -1569,6 +1569,33 @@ def _build_mapped_asis_context(sheet_id: str = "") -> str:
             parent_tid = parts[0] if len(parts) > 1 else n.task_id
             l4_by_l3_tid.setdefault(parent_tid, []).append(n)
 
+        # 엣지 맵 (노드 ID → 나가는 엣지 목록)
+        outgoing_map: dict[str, list] = {}
+        for e in s.edges:
+            outgoing_map.setdefault(e.source, []).append(e)
+
+        decision_nodes_map = {n.id: n for n in s.nodes.values() if n.level == "DECISION"}
+
+        def _render_branches(node_id: str, indent: str = "    ") -> list[str]:
+            """노드 → Decision/조건 엣지 분기 구조를 텍스트로 렌더링."""
+            result = []
+            for e in outgoing_map.get(node_id, []):
+                tgt = s.nodes.get(e.target)
+                if not tgt:
+                    continue
+                if tgt.level == "DECISION":
+                    dec_label = tgt.label or "분기 조건"
+                    result.append(f"{indent}→ [Decision] {dec_label}")
+                    for de in outgoing_map.get(tgt.id, []):
+                        dtgt = s.nodes.get(de.target)
+                        cond = de.label or "(조건 없음)"
+                        next_label = dtgt.label if dtgt else de.target
+                        next_level = dtgt.level if dtgt else ""
+                        result.append(f"{indent}   ├─ ({cond}) → [{next_level}] {next_label}")
+                elif e.label:
+                    result.append(f"{indent}→ 조건: \"{e.label}\" → [{tgt.level}] {tgt.label}")
+            return result
+
         # L3 노드 순회
         if l3_nodes:
             for l3n in sorted(l3_nodes, key=lambda x: x.task_id):
@@ -1593,6 +1620,9 @@ def _build_mapped_asis_context(sheet_id: str = "") -> str:
                     l5_children = [n for n in l5_nodes if n.task_id.startswith(l4n.task_id + ".")]
                     for l5n in sorted(l5_children, key=lambda x: x.task_id)[:5]:
                         lines.append(f"      └ L5 [{l5n.task_id}] {l5n.label}")
+                    # Decision 분기
+                    branch_lines = _render_branches(l4n.id)
+                    lines.extend(branch_lines)
         else:
             # L3 노드가 없으면 L4 직접 표시
             for l4n in sorted(l4_nodes, key=lambda x: x.task_id):
@@ -1600,6 +1630,9 @@ def _build_mapped_asis_context(sheet_id: str = "") -> str:
                 lines.append(f"\n  - L4 [{l4n.task_id}] {l4n.label}")
                 for t in excel_tasks[:5]:
                     lines.append(_format_task_line(t))
+                # Decision 분기
+                branch_lines = _render_branches(l4n.id)
+                lines.extend(branch_lines)
 
     return "\n".join(lines)
 
