@@ -2450,6 +2450,87 @@ async def get_workflow_step_results():
 # To-Be Workflow 생성 (기존)
 # ─────────────────────────────────────────────────────────────────────────────
 
+@app.get("/api/workflow/export-tobe-json", tags=["Workflow"])
+async def export_tobe_workflow_json():
+    """
+    Step 1 기본 설계 결과를 hr-workflow-ai 호환 JSON으로 내보냅니다.
+    Step 2 결과가 있으면 Step 2를, 없으면 Step 1을 사용합니다.
+    """
+    from new_workflow_generator import (
+        result_to_hr_workflow_json,
+        NewWorkflowResult,
+        AIAgent,
+        AssignedTask,
+        ExecutionStep as NWExecutionStep,
+    )
+    import io
+
+    cache = _wf_step2_cache if _wf_step2_cache else _wf_step1_cache
+    if not cache:
+        raise HTTPException(404, "Step 1 또는 Step 2를 먼저 실행하세요.")
+
+    agents = []
+    for a in cache.get("agents", []):
+        assigned = [
+            AssignedTask(
+                task_id=t.get("task_id", ""),
+                task_name=t.get("task_name", ""),
+                l4=t.get("l4", ""),
+                l3=t.get("l3", ""),
+                ai_role=t.get("ai_role", ""),
+                human_role=t.get("human_role", ""),
+                input_data=t.get("input_data", []),
+                output_data=t.get("output_data", []),
+                automation_level=t.get("automation_level", "Human-on-the-Loop"),
+            )
+            for t in a.get("assigned_tasks", [])
+        ]
+        agents.append(AIAgent(
+            agent_id=a.get("agent_id", ""),
+            agent_name=a.get("agent_name", ""),
+            agent_type=a.get("agent_type", ""),
+            ai_technique=a.get("ai_technique", ""),
+            description=a.get("description", ""),
+            automation_level=a.get("automation_level", "Human-on-the-Loop"),
+            assigned_tasks=assigned,
+        ))
+
+    flow = [
+        NWExecutionStep(
+            step=s.get("step", i + 1),
+            step_name=s.get("step_name", ""),
+            step_type=s.get("step_type", "sequential"),
+            description=s.get("description", ""),
+            agent_ids=s.get("agent_ids", []),
+            task_ids=s.get("task_ids", []),
+        )
+        for i, s in enumerate(cache.get("execution_flow", []))
+    ]
+
+    result = NewWorkflowResult(
+        blueprint_summary=cache.get("blueprint_summary", ""),
+        process_name=cache.get("process_name", "To-Be Workflow"),
+        total_tasks=sum(len(a.assigned_tasks) for a in agents),
+        full_auto_count=cache.get("full_auto_count", 0),
+        human_in_loop_count=cache.get("human_in_loop_count", 0),
+        human_supervised_count=cache.get("human_supervised_count", 0),
+        agents=agents,
+        execution_flow=flow,
+    )
+
+    hr_json = result_to_hr_workflow_json(result)
+    step_label = "Step2" if _wf_step2_cache else "Step1"
+    filename = f"{result.process_name or 'tobe_workflow'}_{step_label}.json"
+
+    from urllib.parse import quote
+    encoded_fn = quote(filename)
+    return StreamingResponse(
+        io.BytesIO(json.dumps(hr_json, ensure_ascii=False, indent=2).encode("utf-8")),
+        media_type="application/json",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_fn}"},
+    )
+
+
 @app.post("/api/workflow/slide-l4-mapping", tags=["Workflow"])
 async def save_slide_l4_mapping(request: Request):
     """
@@ -2479,6 +2560,184 @@ async def save_slide_l4_mapping(request: Request):
         _workflow_cache["parsed"] = ppt_workflow
 
     return {"ok": True, "mappings": mappings}
+
+
+@app.get("/api/workflow/mapping-check", tags=["Workflow"])
+async def get_mapping_check():
+    """
+    엑셀 Task ↔ As-Is 워크플로우 노드 매핑 현황을 반환합니다.
+    - L4/L3/L2 노드별로 매칭된 엑셀 Task 목록 제공
+    - 미매핑 엑셀 Task (excel_only) 및 미매핑 노드 (asis_only) 식별
+    """
+    has_excel = bool(_wf_excel_tasks)
+    has_asis = "parsed" in _workflow_cache
+
+    if not has_excel and not has_asis:
+        return {"ok": True, "has_excel": False, "has_asis": False, "sheets": [], "excel_only": [], "stats": {}}
+
+    by_l4, by_l3, by_l2 = _build_excel_index()
+
+    # 매핑된 엑셀 task id 추적
+    matched_excel_ids: set[str] = set()
+
+    sheets_result = []
+
+    if has_asis:
+        parsed = _workflow_cache["parsed"]
+        for s in parsed.sheets:
+            l3_nodes = [n for n in s.nodes.values() if n.level == "L3"]
+            l4_nodes = s.l4_nodes
+            l5_nodes = [n for n in s.nodes.values() if n.level == "L5"]
+
+            # L4를 부모 L3 기준으로 그룹핑
+            l4_by_l3_tid: dict[str, list] = {}
+            for n in l4_nodes:
+                parts = n.task_id.rsplit(".", 1)
+                parent_tid = parts[0] if len(parts) > 1 else n.task_id
+                l4_by_l3_tid.setdefault(parent_tid, []).append(n)
+
+            l3_groups = []
+
+            if l3_nodes:
+                for l3n in sorted(l3_nodes, key=lambda x: x.task_id):
+                    children = l4_by_l3_tid.get(l3n.task_id, [])
+                    l4_list = []
+                    for l4n in sorted(children, key=lambda x: x.task_id):
+                        excel_tasks = by_l4.get(l4n.task_id, [])
+                        for t in excel_tasks:
+                            matched_excel_ids.add(t.id)
+
+                        # L5 자식 노드
+                        l5_children = sorted(
+                            [n for n in l5_nodes if n.task_id.startswith(l4n.task_id + ".")],
+                            key=lambda x: x.task_id
+                        )
+
+                        l4_list.append({
+                            "task_id": l4n.task_id,
+                            "label": l4n.label,
+                            "level": "L4",
+                            "excel_tasks": [
+                                {
+                                    "id": t.id,
+                                    "name": t.name,
+                                    "label": _wf_classification.get(t.id, {}).get("label", "미분류"),
+                                    "pain_points": [
+                                        p for p, v in [
+                                            ("시간/속도", t.pain_time),
+                                            ("정확성", t.pain_accuracy),
+                                            ("반복/수작업", t.pain_repetition),
+                                            ("정보/데이터", t.pain_data),
+                                            ("시스템/도구", t.pain_system),
+                                        ] if v
+                                    ],
+                                    "description": t.description[:80] if t.description else "",
+                                }
+                                for t in excel_tasks
+                            ],
+                            "l5_nodes": [
+                                {"task_id": n.task_id, "label": n.label}
+                                for n in l5_children
+                            ],
+                            "matched": len(excel_tasks) > 0,
+                        })
+
+                    l3_groups.append({
+                        "task_id": l3n.task_id,
+                        "label": l3n.label,
+                        "l4_nodes": l4_list,
+                        "total_excel": sum(len(x["excel_tasks"]) for x in l4_list),
+                    })
+            else:
+                # L3 노드 없으면 L4 직접 나열
+                l4_list = []
+                for l4n in sorted(l4_nodes, key=lambda x: x.task_id):
+                    excel_tasks = by_l4.get(l4n.task_id, [])
+                    for t in excel_tasks:
+                        matched_excel_ids.add(t.id)
+                    l4_list.append({
+                        "task_id": l4n.task_id,
+                        "label": l4n.label,
+                        "level": "L4",
+                        "excel_tasks": [
+                            {
+                                "id": t.id,
+                                "name": t.name,
+                                "label": _wf_classification.get(t.id, {}).get("label", "미분류"),
+                                "pain_points": [
+                                    p for p, v in [
+                                        ("시간/속도", t.pain_time),
+                                        ("정확성", t.pain_accuracy),
+                                        ("반복/수작업", t.pain_repetition),
+                                        ("정보/데이터", t.pain_data),
+                                        ("시스템/도구", t.pain_system),
+                                    ] if v
+                                ],
+                                "description": t.description[:80] if t.description else "",
+                            }
+                            for t in excel_tasks
+                        ],
+                        "l5_nodes": [],
+                        "matched": len(excel_tasks) > 0,
+                    })
+                l3_groups.append({
+                    "task_id": "",
+                    "label": "(L3 없음)",
+                    "l4_nodes": l4_list,
+                    "total_excel": sum(len(x["excel_tasks"]) for x in l4_list),
+                })
+
+            sheets_result.append({
+                "sheet_id": s.sheet_id,
+                "sheet_name": s.name,
+                "l3_count": len(l3_nodes),
+                "l4_count": len(l4_nodes),
+                "l3_groups": l3_groups,
+            })
+
+    # 엑셀 전용 (매핑 안 된 Task)
+    excel_only = []
+    if has_excel:
+        for t in _wf_excel_tasks:
+            if t.id not in matched_excel_ids:
+                excel_only.append({
+                    "id": t.id,
+                    "name": t.name,
+                    "l2": t.l2, "l2_id": t.l2_id,
+                    "l3": t.l3, "l3_id": t.l3_id,
+                    "l4": t.l4, "l4_id": t.l4_id,
+                    "label": _wf_classification.get(t.id, {}).get("label", "미분류"),
+                })
+
+    # 통계
+    total_excel = len(_wf_excel_tasks)
+    total_matched = len(matched_excel_ids)
+    total_l4 = sum(
+        sum(len(g["l4_nodes"]) for g in s["l3_groups"])
+        for s in sheets_result
+    )
+    matched_l4 = sum(
+        sum(1 for n in g["l4_nodes"] if n["matched"])
+        for s in sheets_result
+        for g in s["l3_groups"]
+    )
+
+    return {
+        "ok": True,
+        "has_excel": has_excel,
+        "has_asis": has_asis,
+        "stats": {
+            "total_excel_tasks": total_excel,
+            "matched_excel_tasks": total_matched,
+            "unmatched_excel_tasks": total_excel - total_matched,
+            "total_l4_nodes": total_l4,
+            "matched_l4_nodes": matched_l4,
+            "unmatched_l4_nodes": total_l4 - matched_l4,
+            "match_rate": round(total_matched / total_excel * 100, 1) if total_excel > 0 else 0,
+        },
+        "sheets": sheets_result,
+        "excel_only": excel_only,
+    }
 
 
 @app.post("/api/workflow/generate-tobe", tags=["Workflow"])

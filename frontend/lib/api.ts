@@ -958,6 +958,136 @@ export async function getWorkflowStepResults(): Promise<{
   return apiFetch("/workflow/step-results");
 }
 
+// ── Mapping Check ────────────────────────────────────────────────────────────
+
+export interface MappingExcelTask {
+  id: string;
+  name: string;
+  label: string;
+  pain_points: string[];
+  description: string;
+}
+
+export interface MappingL4Node {
+  task_id: string;
+  label: string;
+  level: string;
+  excel_tasks: MappingExcelTask[];
+  l5_nodes: { task_id: string; label: string }[];
+  matched: boolean;
+}
+
+export interface MappingL3Group {
+  task_id: string;
+  label: string;
+  l4_nodes: MappingL4Node[];
+  total_excel: number;
+}
+
+export interface MappingSheet {
+  sheet_id: string;
+  sheet_name: string;
+  l3_count: number;
+  l4_count: number;
+  l3_groups: MappingL3Group[];
+}
+
+export interface MappingExcelOnly {
+  id: string;
+  name: string;
+  l2: string; l2_id: string;
+  l3: string; l3_id: string;
+  l4: string; l4_id: string;
+  label: string;
+}
+
+export interface MappingCheckResult {
+  ok: boolean;
+  has_excel: boolean;
+  has_asis: boolean;
+  stats: {
+    total_excel_tasks: number;
+    matched_excel_tasks: number;
+    unmatched_excel_tasks: number;
+    total_l4_nodes: number;
+    matched_l4_nodes: number;
+    unmatched_l4_nodes: number;
+    match_rate: number;
+  };
+  sheets: MappingSheet[];
+  excel_only: MappingExcelOnly[];
+}
+
+export async function getMappingCheck(): Promise<MappingCheckResult> {
+  return apiFetch<MappingCheckResult>("/workflow/mapping-check");
+}
+
+export interface HrWorkflowNode {
+  id: string;
+  type: string;
+  position: { x: number; y: number };
+  data: {
+    id: string;
+    label: string;
+    level: string;
+    description?: string;
+    role?: string;
+    automationLevel?: string;
+    aiTechnique?: string;
+    inputs?: Record<string, boolean>;
+    outputs?: Record<string, boolean>;
+    nodeColor?: string;
+  };
+}
+
+export interface HrWorkflowEdge {
+  id: string;
+  source: string;
+  target: string;
+  type?: string;
+  animated?: boolean;
+  label?: string;
+  style?: Record<string, unknown>;
+  markerEnd?: Record<string, unknown>;
+}
+
+export interface HrWorkflowSheet {
+  id: string;
+  name: string;
+  type: string;
+  lanes: string[];
+  nodes: HrWorkflowNode[];
+  edges: HrWorkflowEdge[];
+  agentColors?: Record<string, string>;
+}
+
+export interface HrWorkflowJson {
+  version: string;
+  exportedAt: string;
+  sheets: HrWorkflowSheet[];
+}
+
+export async function fetchToBeWorkflowJson(): Promise<HrWorkflowJson> {
+  return apiFetch<HrWorkflowJson>("/workflow/export-tobe-json");
+}
+
+export async function downloadToBeWorkflowJson(): Promise<void> {
+  const token = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null;
+  const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+  const res = await fetch(`${BACKEND_DIRECT}/api/workflow/export-tobe-json`, { headers });
+  if (!res.ok) throw new Error("다운로드 실패");
+  const blob = await res.blob();
+  const cd = res.headers.get("content-disposition") || "";
+  const fnMatch = cd.match(/filename\*?=(?:UTF-8'')?(.+)/i);
+  const filename = fnMatch ? decodeURIComponent(fnMatch[1].replace(/"/g, "")) : "tobe_workflow.json";
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 // ── New Workflow ──────────────────────────────────────────────────────────────
 
 export interface ExcelSheet {

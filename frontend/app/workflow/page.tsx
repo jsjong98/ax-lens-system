@@ -20,6 +20,8 @@ import {
   type BenchmarkTableRow,
 } from "@/lib/api";
 import WorkflowEditor from "@/components/WorkflowEditor";
+import ToBeWorkflowModal from "@/components/ToBeWorkflowModal";
+import MappingCheckPanel from "@/components/MappingCheckPanel";
 
 /* ── 색상 ─────────────────────────────────────────────────── */
 const PWC = {
@@ -67,6 +69,7 @@ export default function WorkflowPage() {
 
   // Step 3: Step 2 상세 설계
   const [step2Result, setStep2Result] = useState<WorkflowStepResult | null>(null);
+  const [showToBeModal, setShowToBeModal] = useState(false);
 
   // 공통
   const [loading, setLoading] = useState(false);
@@ -637,6 +640,9 @@ export default function WorkflowPage() {
                 </div>
               )}
 
+              {/* 매핑 확인 패널 */}
+              <MappingCheckPanel hasExcel={!!excelResult} hasAsIs={!!hasAsIs} />
+
               {/* 다음 단계 */}
               <div className="flex justify-end gap-2">
                 <button
@@ -902,7 +908,14 @@ export default function WorkflowPage() {
               </div>
 
               {/* 다음 단계 */}
-              <div className="flex justify-end">
+              <div className="flex justify-between items-center">
+                <button
+                  onClick={() => setShowToBeModal(true)}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-bold border-2 transition"
+                  style={{ borderColor: PWC.primary, color: PWC.primary, backgroundColor: PWC.bg }}
+                >
+                  &#9741; 워크플로우 보기 / 편집
+                </button>
                 <button
                   onClick={() => setCurrentStep(3)}
                   className="px-6 py-2.5 rounded-lg text-sm font-bold text-white transition"
@@ -915,6 +928,9 @@ export default function WorkflowPage() {
           )}
         </div>
       )}
+
+      {/* To-Be Workflow 모달 */}
+      <ToBeWorkflowModal open={showToBeModal} onClose={() => setShowToBeModal(false)} />
 
       {/* ═══ Step 3: Step 2 상세 설계 (Bottom-Up) ═══ */}
       {currentStep === 3 && (
