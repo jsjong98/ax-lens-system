@@ -12,7 +12,9 @@ import json
 import os
 import secrets
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
+_KST = timezone(timedelta(hours=9))
 
 _PERSIST_ROOT = Path("/app/persist") if Path("/app/persist").exists() else Path(__file__).parent
 _USERS_FILE = _PERSIST_ROOT / "users.json"
@@ -174,7 +176,7 @@ def request_transfer(email: str, target_project: str, reason: str = "") -> dict:
         "target_project": target_project,
         "reason": reason,
         "status": "pending",
-        "created_at": datetime.now().isoformat(),
+        "created_at": datetime.now(_KST).isoformat(),
         "resolved_at": None,
         "resolved_by": None,
     }
@@ -219,7 +221,7 @@ def approve_transfer(request_id: str, approver_email: str) -> dict:
         _save_users(users)
 
     req["status"] = "approved"
-    req["resolved_at"] = datetime.now().isoformat()
+    req["resolved_at"] = datetime.now(_KST).isoformat()
     req["resolved_by"] = approver_email
     _save_transfers()
     return req
@@ -234,7 +236,7 @@ def reject_transfer(request_id: str, approver_email: str) -> dict:
         return {"error": "이미 처리된 요청입니다."}
 
     req["status"] = "rejected"
-    req["resolved_at"] = datetime.now().isoformat()
+    req["resolved_at"] = datetime.now(_KST).isoformat()
     req["resolved_by"] = approver_email
     _save_transfers()
     return req
@@ -345,7 +347,7 @@ def init_default_users() -> None:
                 "name": d["name"],
                 "password_hash": _hash_password(d["password"]),
                 "must_change_password": True,
-                "created_at": datetime.now().isoformat(),
+                "created_at": datetime.now(_KST).isoformat(),
             }
             changed = True
     if changed:
@@ -385,7 +387,7 @@ def authenticate(email: str, password: str, ip: str = "", user_agent: str = "") 
         "email": email,
         "ip": ip,
         "user_agent": user_agent,
-        "login_at": datetime.now().isoformat(),
+        "login_at": datetime.now(_KST).isoformat(),
     }
     _save_sessions()
 
@@ -510,7 +512,7 @@ def generate_reset_code(email: str) -> str | None:
     code = f"{secrets.randbelow(1_000_000):06d}"
     _reset_codes[email] = {
         "code": code,
-        "expires_at": (datetime.now() + timedelta(minutes=10)).isoformat(),
+        "expires_at": (datetime.now(_KST) + timedelta(minutes=10)).isoformat(),
     }
     return code
 
@@ -519,7 +521,7 @@ def verify_reset_code(email: str, code: str) -> bool:
     entry = _reset_codes.get(email)
     if not entry:
         return False
-    if datetime.now() > datetime.fromisoformat(entry["expires_at"]):
+    if datetime.now(_KST) > datetime.fromisoformat(entry["expires_at"]).replace(tzinfo=_KST):
         _reset_codes.pop(email, None)
         return False
     return entry["code"] == code
