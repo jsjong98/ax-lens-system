@@ -14,7 +14,7 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError("");
     setLoading(true);
@@ -62,7 +62,7 @@ export default function LoginPage() {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="example@pwc.com"
+                placeholder="이메일 주소 입력"
                 required
                 autoFocus
                 className="w-full rounded-lg border border-gray-300 px-4 py-3 text-sm focus:border-[#A62121] focus:ring-1 focus:ring-[#A62121] outline-none transition-colors"

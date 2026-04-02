@@ -5,6 +5,7 @@ LLM 생성 Workflow 결과 → 스윔레인 HTML 변환
 (Input → Senior AI → Junior AI → HR 담당자)
 """
 from __future__ import annotations
+import html as _html
 from typing import Any
 
 
@@ -175,8 +176,8 @@ def export_workflow_html(workflow: dict) -> str:
         owner_name = agents[owner_idx].get("agent_name", f"Agent {owner_idx+1}") if owner_idx < len(agents) else ""
         input_boxes += (
             f'<div class="ibox" style="border-color:{color};">'
-            f'<div class="ibox-t">{inp}</div>'
-            f'<div class="ibox-lbl" style="color:{color};">→ {owner_name}</div>'
+            f'<div class="ibox-t">{_html.escape(inp)}</div>'
+            f'<div class="ibox-lbl" style="color:{color};">→ {_html.escape(owner_name)}</div>'
             f'</div>\n'
         )
 
@@ -209,12 +210,12 @@ def export_workflow_html(workflow: dict) -> str:
         connectors_html += f"""
           <div class="conn">
             <div class="cs">
-              <span class="lbl-down" style="color:#8B1A1A;">{num} {agent.get('agent_name', '')}<br>지시{parallel}{sequential}</span>
+              <span class="lbl-down" style="color:#8B1A1A;">{num} {_html.escape(agent.get('agent_name', ''))}<br>지시{parallel}{sequential}</span>
               <div class="ard"><div class="ln" style="background:#8B1A1A;"></div><div class="hd" style="border-top-color:#8B1A1A;"></div></div>
             </div>
             <div class="cs">
               <div class="aru"><div class="ln"></div><div class="hd"></div></div>
-              <span class="lbl-up">{agent.get('agent_name', '')}<br>결과 반환</span>
+              <span class="lbl-up">{_html.escape(agent.get('agent_name', ''))}<br>결과 반환</span>
             </div>
           </div>"""
 
@@ -235,7 +236,7 @@ def export_workflow_html(workflow: dict) -> str:
             badges = _badge_html(technique)
             if is_human:
                 human_role = task.get("human_role", "Human 확인")
-                badges += f' <span class="badge bh">{human_role[:15]}</span>'
+                badges += f' <span class="badge bh">{_html.escape(human_role[:15])}</span>'
 
             task_name = task.get("task_name", "")
             ai_role = task.get("ai_role", "")
@@ -247,13 +248,13 @@ def export_workflow_html(workflow: dict) -> str:
                 tasks_html += f"""
                 <div class="task-arrow">
                   <div class="ln"></div><div class="hd"></div>
-                  {f'<div class="task-arrow-lbl">{lbl}</div>' if lbl else ''}
+                  {f'<div class="task-arrow-lbl">{_html.escape(lbl)}</div>' if lbl else ''}
                 </div>"""
 
             tasks_html += f"""
                 <div class="b{hf_cls}">
-                  <div class="bt">{task_name}</div>
-                  <div class="bs">{ai_role}</div>
+                  <div class="bt">{_html.escape(task_name)}</div>
+                  <div class="bs">{_html.escape(ai_role)}</div>
                   <div class="bbr">{badges}</div>
                 </div>"""
 
@@ -262,7 +263,7 @@ def export_workflow_html(workflow: dict) -> str:
         first_task = (agent.get("assigned_tasks") or [{}])[0] if agent.get("assigned_tasks") else {}
         l4_val = first_task.get("l4", "")
         if l4_val:
-            l4_sub = f'<div class="ah-sub">L4: {l4_val}</div>'
+            l4_sub = f'<div class="ah-sub">L4: {_html.escape(l4_val)}</div>'
 
         # Junior→HR 화살표 + output 데이터 라벨
         arrow_html = ""
@@ -271,7 +272,7 @@ def export_workflow_html(workflow: dict) -> str:
             out_label = last_outputs[0][:15] if last_outputs else "결과물"
             arrow_html = f"""
             <div class="bot-arr">
-              <span class="bot-lbl">{out_label}</span>
+              <span class="bot-lbl">{_html.escape(out_label)}</span>
               <div class="ardb"><div class="ln"></div><div class="hd"></div></div>
             </div>"""
 
@@ -281,7 +282,7 @@ def export_workflow_html(workflow: dict) -> str:
               <div class="ah">
                 <div class="an">{i+1}</div>
                 <div>
-                  <div class="aname">{agent.get('agent_name', '')}</div>
+                  <div class="aname">{_html.escape(agent.get('agent_name', ''))}</div>
                   {l4_sub}
                 </div>
               </div>
@@ -295,8 +296,8 @@ def export_workflow_html(workflow: dict) -> str:
     for i in range(agent_count):
         agent_humans = [h for h in human_tasks if h["agent_idx"] == i]
         if agent_humans:
-            names = ", ".join(h["name"] for h in agent_humans)
-            descs = ", ".join(h["desc"] for h in agent_humans)
+            names = ", ".join(_html.escape(h["name"]) for h in agent_humans)
+            descs = ", ".join(_html.escape(h["desc"]) for h in agent_humans)
             hr_html += f"""
           <div class="hr-box">
             <div class="hr-m">{names}</div>
@@ -310,13 +311,13 @@ def export_workflow_html(workflow: dict) -> str:
     for i, a in enumerate(agents):
         color = _agent_color(i)
         name = a.get("agent_name", f"Agent {i+1}")
-        legend_agents += f'<div class="leg-btn" style="border-color:{color};color:{color};">{name}</div>'
+        legend_agents += f'<div class="leg-btn" style="border-color:{color};color:{color};">{_html.escape(name)}</div>'
 
     return f"""<!DOCTYPE html>
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<title>AI Service Flow — {process_name}</title>
+<title>AI Service Flow — {_html.escape(process_name)}</title>
 <style>{_CSS}</style>
 </head>
 <body>

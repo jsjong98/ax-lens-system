@@ -643,9 +643,12 @@ export interface WorkflowSummary {
 export async function uploadWorkflow(file: File): Promise<WorkflowSummary & { ok: boolean; filename: string }> {
   const formData = new FormData();
   formData.append("file", file);
+  const token = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null;
+  const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
 
-  const res = await fetch("/api/workflow/upload", {
+  const res = await fetch(`${BACKEND_DIRECT}/api/workflow/upload`, {
     method: "POST",
+    headers,
     body: formData,
   });
 
@@ -696,8 +699,11 @@ export async function uploadPptWorkflow(file: File): Promise<{
 }> {
   const formData = new FormData();
   formData.append("file", file);
-  const res = await fetch("/api/workflow/upload-ppt", {
+  const token = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null;
+  const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+  const res = await fetch(`${BACKEND_DIRECT}/api/workflow/upload-ppt`, {
     method: "POST",
+    headers,
     body: formData,
   });
   if (!res.ok) {
@@ -907,6 +913,7 @@ export async function benchmarkWorkflowStep1(params?: {
 export async function generateWorkflowStep1(params: {
   prompt?: string;
   process_name?: string;
+  sheet_id?: string;
 }): Promise<{ ok: boolean } & WorkflowStepResult> {
   return apiFetch("/workflow/generate-step1", {
     method: "POST",
@@ -923,6 +930,7 @@ export async function chatWorkflowStep1(message: string): Promise<WorkflowChatRe
 
 export async function generateWorkflowStep2(params?: {
   additional_context?: string;
+  sheet_id?: string;
 }): Promise<{ ok: boolean } & WorkflowStepResult> {
   return apiFetch("/workflow/generate-step2", {
     method: "POST",

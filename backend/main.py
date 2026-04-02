@@ -1787,6 +1787,7 @@ async def generate_workflow_step1(request: Request):
     body = await request.json()
     user_prompt = body.get("prompt", "")
     process_name_override = body.get("process_name", "")
+    sheet_id = body.get("sheet_id", "")
 
     process_name, task_summary, pain_summary = _build_task_and_pain_summary()
     if process_name_override:
@@ -1827,7 +1828,22 @@ async def generate_workflow_step1(request: Request):
                 content = r.get("content", r.get("snippet", ""))
                 benchmark_text += f"- **{r['title']}**: {content[:200]}\n"
 
-    system = _step1_system_prompt(process_name, task_summary, pain_summary, benchmark_text)
+    # As-Is 워크플로우 컨텍스트 (sheet_id 지정 시 해당 시트만)
+    asis_context = ""
+    if "parsed" in _workflow_cache:
+        parsed = _workflow_cache["parsed"]
+        if sheet_id:
+            target_sheets = [s for s in parsed.sheets if s.sheet_id == sheet_id]
+            if not target_sheets:
+                target_sheets = parsed.sheets[:1]
+        else:
+            target_sheets = parsed.sheets
+        for s in target_sheets:
+            asis_context += f"\n## As-Is 워크플로우: {s.name}\n"
+            for node in s.l4_nodes:
+                asis_context += f"- L4 [{node.task_id}] {node.label}\n"
+
+    system = _step1_system_prompt(process_name, task_summary, pain_summary, benchmark_text + asis_context)
 
     global _wf_chat_history
     actual_prompt = user_prompt or "선도사례를 분석하여 To-Be Workflow 기본 설계를 수행해주세요."
@@ -1988,6 +2004,7 @@ async def generate_workflow_step2(request: Request):
 
     body = await request.json() if True else {}
     additional_context = body.get("additional_context", "") if body else ""
+    sheet_id = body.get("sheet_id", "") if body else ""
 
     process_name = _wf_step1_cache.get("process_name", "HR 프로세스")
 
@@ -2011,11 +2028,17 @@ async def generate_workflow_step2(request: Request):
 
     pain_detail = "\n".join(pain_detail_lines) if pain_detail_lines else "상세 Pain Point 정보 없음"
 
-    # As-Is 워크플로우 정보 (있으면 포함)
+    # As-Is 워크플로우 정보 (있으면 포함 — sheet_id 지정 시 해당 시트만 사용)
     asis_info = ""
     if "parsed" in _workflow_cache:
         parsed = _workflow_cache["parsed"]
-        for sheet in parsed.sheets:
+        if sheet_id:
+            target_sheets = [s for s in parsed.sheets if s.sheet_id == sheet_id]
+            if not target_sheets:
+                target_sheets = parsed.sheets[:1]  # fallback: 첫 번째 시트
+        else:
+            target_sheets = parsed.sheets
+        for sheet in target_sheets:
             asis_info += f"\n### 시트: {sheet.name}\n"
             for node in sheet.l4_nodes:
                 asis_info += f"- L4 [{node.task_id}] {node.label}\n"

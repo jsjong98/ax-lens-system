@@ -22,7 +22,7 @@ _SESSIONS_FILE = _PERSIST_ROOT / "sessions.json"
 MAX_SESSIONS_PER_USER = 2
 
 # Admin 이메일
-ADMIN_EMAIL = "jong-hwan.oh@pwc.com"
+ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "")
 
 # ── 프로젝트 배정 ────────────────────────────────────────────────────────────
 # 사용자 이름 → 프로젝트 매핑 (이름 기반, 이메일 매핑은 users.json의 name 필드 사용)

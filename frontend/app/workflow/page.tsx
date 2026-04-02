@@ -205,6 +205,7 @@ export default function WorkflowPage() {
     try {
       const result = await generateWorkflowStep1({
         prompt: prompt || "선도사례를 분석하여 To-Be Workflow 기본 설계를 수행해주세요.",
+        ...(activeSheet ? { sheet_id: activeSheet } : {}),
       });
       setStep1Result(result);
       setChatMessages((prev) => [
@@ -243,7 +244,9 @@ export default function WorkflowPage() {
     setLoading(true);
     setError(null);
     try {
-      const result = await generateWorkflowStep2();
+      const result = await generateWorkflowStep2({
+        ...(activeSheet ? { sheet_id: activeSheet } : {}),
+      });
       setStep2Result(result);
     } catch (e) {
       setError((e as Error).message);
