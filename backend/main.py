@@ -2672,16 +2672,22 @@ def _run_mapping_check() -> dict:
             l4_nodes = s.l4_nodes
             l5_nodes = [n for n in s.nodes.values() if n.level == "L5"]
 
-            # L5 → 부모 L4 prefix 그룹핑
+            # L5 → 부모 L4 그룹핑: 엑셀 매칭 시 엑셀의 l4_id 사용, 미매칭은 prefix fallback
             l5_by_l4: dict[str, list] = {}
             for l5n in l5_nodes:
                 if not l5n.task_id:
                     continue
-                parts = l5n.task_id.rsplit(".", 1)
-                parent = parts[0] if len(parts) > 1 else l5n.task_id
-                l5_by_l4.setdefault(parent, []).append(l5n)
+                et = by_id.get(l5n.task_id)
+                if et and et.l4_id:
+                    # 엑셀 계층 정보 사용 (정확한 L4 배정)
+                    l5_by_l4.setdefault(et.l4_id, []).append(l5n)
+                else:
+                    # 엑셀 매칭 없으면 task_id prefix fallback
+                    parts = l5n.task_id.rsplit(".", 1)
+                    parent = parts[0] if len(parts) > 1 else l5n.task_id
+                    l5_by_l4.setdefault(parent, []).append(l5n)
 
-            # L4 유효 맵: 명시 L4 노드 + L5 prefix 파생
+            # L4 유효 맵: 명시 L4 노드 + 엑셀 l4_id 기반 파생
             eff_l4: dict[str, str] = {}
             for l4n in l4_nodes:
                 if l4n.task_id:
@@ -2691,12 +2697,20 @@ def _run_mapping_check() -> dict:
                     xl = by_l4.get(l4_tid, [])
                     eff_l4[l4_tid] = xl[0].l4 if xl else l4_tid
 
-            # L3 유효 맵
+            # L3 유효 맵: 엑셀 l3_id 기반으로 L4 → L3 배정
             l3_node_map: dict[str, str] = {n.task_id: n.label for n in l3_nodes if n.task_id}
             eff_l3: dict[str, list] = {}  # l3_tid → [l4_tid, ...]
+            # 엑셀에서 l4_id → l3_id 매핑 구성
+            l4_to_l3_id: dict[str, str] = {}
+            for t in _wf_excel_tasks:
+                if t.l4_id and t.l3_id and t.l4_id not in l4_to_l3_id:
+                    l4_to_l3_id[t.l4_id] = t.l3_id
             for l4_tid in sorted(eff_l4):
-                parts = l4_tid.rsplit(".", 1)
-                l3_tid = parts[0] if len(parts) > 1 else l4_tid
+                l3_tid = l4_to_l3_id.get(l4_tid)
+                if not l3_tid:
+                    # 엑셀에 없는 L4면 prefix fallback
+                    parts = l4_tid.rsplit(".", 1)
+                    l3_tid = parts[0] if len(parts) > 1 else l4_tid
                 eff_l3.setdefault(l3_tid, []).append(l4_tid)
 
             # L4 엔트리 생성 (closure 피하고 인자로 전달)
