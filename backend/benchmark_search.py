@@ -214,7 +214,8 @@ async def _plan_search_queries(workflow_cache: dict) -> list[str]:
     focus_kr = l4_names[0] if l4_names else process_name
     focus_en = _translate_to_en(focus_kr)
 
-    prompt = f"""당신은 글로벌 HR 벤치마킹 리서치 전문가입니다.
+    prompt = f"""당신은 글로벌 HR AI 벤치마킹 리서치 전문가입니다.
+당신은 어떤 기업이 어떤 HR AI 도구를 사용하는지 학습 지식을 갖고 있습니다.
 
 ## 조사 대상
 - 프로세스: {process_name}
@@ -223,40 +224,34 @@ async def _plan_search_queries(workflow_cache: dict) -> list[str]:
 - L4 활동: {', '.join(l4_names[:6])}
 - 주요 Pain Point: {', '.join(pain_points[:4]) if pain_points else '없음'}
 
-## 목표
-위 HR 프로세스에서 AI를 도입한 실제 사례가 담긴 **케이스 스터디·공식 문서·학술 논문** 페이지를 찾습니다.
+## 목표 & 핵심 전략: 가설 기반 검색 (Hypothesis-driven Search)
 
-## ⚠️ 검색 쿼리 타입을 반드시 다음 3가지로 구분하여 각 2~3개씩 생성
+Perplexity Deep Research처럼, 막연한 일반 쿼리 대신 **이미 알고 있는 사실을 검증하는 구체적 쿼리**를 생성하세요.
 
-### 타입 A: HR AI 벤더 케이스 스터디 페이지 (2개)
-- HR AI SaaS 벤더(Paradox, Eightfold, Phenom, Beamery, HireVue, Leena AI, ServiceNow, Workday, SAP SuccessFactors)의
-  고객 케이스 스터디 / 성공 사례 페이지를 타겟
-- 예시 패턴: `Paradox AI case study {focus_en} customer results`
-- 예시 패턴: `Eightfold talent intelligence case study manufacturing ROI`
-- 예시 패턴: `SAP SuccessFactors {focus_en} AI feature customer story`
+### 방법
+1. **당신의 학습 지식을 활용하세요** — 이 HR 프로세스({focus_en})에서 AI를 도입한 것으로 알려진 구체적 기업·도구 조합을 떠올리세요.
+   예: "GM이 Paradox를 써서 채용 자동화를 했다", "Siemens가 SAP SuccessFactors로 채용 시간을 단축했다"
 
-### 타입 B: 공식 제품 문서·기능 페이지 (2개)
-- SAP, Workday, Oracle HCM, ServiceNow HR, Microsoft Viva의 공식 docs / help / feature 페이지 타겟
-- 예시 패턴: `SAP SuccessFactors {focus_en} AI features site:help.sap.com OR site:sap.com`
-- 예시 패턴: `Workday {focus_en} generative AI features documentation`
-- 예시 패턴: `Oracle HCM {focus_en} AI automation official`
+2. **[기업명] + [도구/플랫폼] + [프로세스] + [기대 성과]** 형식으로 쿼리를 만드세요.
+   좋은 예: `Siemens SAP SuccessFactors AI recruiting time to hire reduction`
+   좋은 예: `General Motors Paradox chatbot recruiting 2 million savings`
+   좋은 예: `IBM Watson HR recruitment AI use case data sheet`
+   나쁜 예: `AI HR automation enterprise 2024` (너무 일반적)
 
-### 타입 C: 학술 논문 / 연구 보고서 (2개)
-- AI + HR 프로세스 자동화에 관한 학술 논문(PDF), 연구 보고서 타겟
-- 예시 패턴: `{focus_en} AI automation HR process research paper PDF 2023 2024`
-- 예시 패턴: `artificial intelligence {focus_en} workforce management academic study filetype:pdf`
+3. **다양한 검색 대상 유형**을 포함하세요:
+   - 벤더 케이스 스터디: `[벤더] [고객기업] case study [결과]`
+   - 공식 제품 문서: `[제품명] [기능] documentation OR features OR help`
+   - 학술/연구: `[프로세스] AI research paper PDF [연도]`
+   - 한국어: `[한국기업] {focus_kr} AI 도입 사례 OR 케이스스터디`
 
-### 타입 D: 한국어 공식 사례 (2개)
-- 한국 대기업(삼성, 현대, SK, LG, 두산) 또는 HR 솔루션 공식 사례 페이지
-- 예시 패턴: `삼성SDS 현대차 '{focus_kr}' AI 도입 공식 사례 케이스스터디`
-- 예시 패턴: `두산 SK {focus_kr} AI 자동화 백서 보고서 성과`
-
-## 절대 금지
-- 뉴스 기사 타겟 쿼리 (chosun, naver news, zdnet, techcrunch 등)
-- 너무 일반적인 쿼리 ("AI HR automation 2024" 단독)
+## 생성 규칙
+- 총 10개의 쿼리 생성 (기업명 있는 구체적 쿼리 6개 + 문서/연구 쿼리 4개)
+- 당신이 실제로 알고 있는 기업·도구 조합 우선 사용
+- 모르는 것은 지어내지 말고, 알려진 사례를 정확히 타겟
+- 뉴스 기사 타겟 쿼리 절대 금지
 
 JSON만 출력:
-{{"queries": ["query1", "query2", "query3", "query4", "query5", "query6", "query7", "query8"]}}"""
+{{"queries": ["q1","q2","q3","q4","q5","q6","q7","q8","q9","q10"], "hypotheses": ["어떤 기업·도구 조합을 타겟했는지 1줄 설명 (3개)"]}}"""
 
     try:
         from anthropic import AsyncAnthropic
@@ -270,9 +265,12 @@ JSON만 출력:
         m = re.search(r'\{.*\}', raw, re.DOTALL)
         if m:
             data = json.loads(m.group())
-            queries = data.get("queries", [])[:8]
+            queries = data.get("queries", [])[:10]
+            hypotheses = data.get("hypotheses", [])
+            if hypotheses:
+                print(f"[benchmark] 가설: {' / '.join(hypotheses[:3])}")
             if queries:
-                print(f"[benchmark] LLM 쿼리 플래닝 완료 — {len(queries)}개")
+                print(f"[benchmark] LLM 쿼리 플래닝 완료 — {len(queries)}개 (가설 기반)")
                 return queries
     except Exception as e:
         print(f"[benchmark] LLM 쿼리 플래닝 실패, fallback 사용: {e}")
@@ -281,25 +279,27 @@ JSON만 출력:
 
 
 def _fallback_queries(workflow_cache: dict) -> list[str]:
-    """LLM 쿼리 플래닝 실패 시 사용하는 기본 쿼리 (케이스 스터디·문서·논문 타겟)."""
+    """LLM 쿼리 플래닝 실패 시 사용하는 기본 쿼리 (가설 기반 패턴)."""
     process_name = workflow_cache.get("process_name", "HR process")
     _, _, l4_names, _ = _extract_names_from_cache(workflow_cache)
     focus_kr = l4_names[0] if l4_names else process_name
     focus_en = _translate_to_en(focus_kr)
 
     return [
-        # 타입 A: 벤더 케이스 스터디
-        f"Paradox Eightfold Phenom HireVue {focus_en} AI case study customer results",
-        f"SAP SuccessFactors Workday {focus_en} AI automation customer story ROI",
-        # 타입 B: 공식 문서
-        f"SAP SuccessFactors {focus_en} AI features site:help.sap.com OR site:sap.com",
-        f"Workday {focus_en} generative AI documentation official",
-        # 타입 C: 학술 논문
-        f"{focus_en} artificial intelligence HR automation research paper PDF 2023 2024",
-        f"AI {focus_en} workforce management academic study filetype:pdf",
-        # 타입 D: 한국어 공식 사례
-        f"삼성SDS 현대차 SK LG '{focus_kr}' AI 도입 공식 케이스스터디 사례",
-        f"두산 '{focus_kr}' AI 자동화 백서 공식 사례 성과",
+        # 가설 기반: 알려진 기업+도구 조합 타겟
+        f"General Motors Paradox AI {focus_en} chatbot case study savings results",
+        f"Siemens SAP SuccessFactors AI {focus_en} time reduction ROI",
+        f"Unilever HireVue AI {focus_en} screening automation case study",
+        f"IBM Watson {focus_en} AI HR use cases implementation",
+        # 공식 문서
+        f"SAP SuccessFactors {focus_en} AI premium features help documentation",
+        f"Workday {focus_en} generative AI product features official",
+        # 학술 논문
+        f"{focus_en} AI automation HR process research paper PDF 2023 2024",
+        f"artificial intelligence {focus_en} enterprise workforce academic study",
+        # 한국어
+        f"삼성SDS 현대차 '{focus_kr}' AI 자동화 케이스스터디 공식 사례",
+        f"SK LG '{focus_kr}' AI HR 도입 성과 백서",
     ]
 
 
