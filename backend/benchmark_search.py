@@ -1,12 +1,15 @@
 """
 benchmark_search.py — 웹 벤치마킹 검색 + LLM 기반 Workflow 개선
 
-1단계에서 생성된 To-Be Workflow를 기반으로:
-1. Tavily API로 유사 AI 자동화 사례를 검색 (본문 요약 포함)
-2. 벤치마킹 결과를 LLM에 전달하여 Workflow를 가다듬음
+Perplexity Deep Research 방식:
+1. Round 1: 8개 쿼리 병렬 검색 (전문 읽기)
+2. LLM이 부족한 부분 분석 → 후속 쿼리 4개 자동 생성
+3. Round 2: 후속 쿼리 병렬 검색
+4. 전체 결과를 LLM에 전달하여 벤치마킹 테이블 생성
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -18,7 +21,7 @@ from typing import Any
 # ── Tavily API 검색 ──────────────────────────────────────────────────────────
 
 def _search_tavily(query: str, max_results: int = 5) -> list[dict]:
-    """Tavily API로 AI 특화 검색을 수행합니다. 본문 요약 포함."""
+    """Tavily API로 AI 특화 검색을 수행합니다. 전문(raw_content) 포함."""
     api_key = os.getenv("TAVILY_API_KEY", "")
     if not api_key:
         return []
@@ -28,7 +31,7 @@ def _search_tavily(query: str, max_results: int = 5) -> list[dict]:
         "max_results": max_results,
         "search_depth": "advanced",       # 심층 검색
         "include_answer": True,            # AI 요약 답변 포함
-        "include_raw_content": False,
+        "include_raw_content": True,       # 전문 포함 (핵심: snippet이 아닌 실제 기사 본문)
     }).encode("utf-8")
 
     req = urllib.request.Request(
@@ -43,7 +46,7 @@ def _search_tavily(query: str, max_results: int = 5) -> list[dict]:
 
     results = []
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with urllib.request.urlopen(req, timeout=20) as resp:
             data = json.loads(resp.read().decode("utf-8"))
 
         # Tavily AI 요약 답변
@@ -56,17 +59,22 @@ def _search_tavily(query: str, max_results: int = 5) -> list[dict]:
                 "content": answer,
             })
 
-        # 개별 검색 결과
+        # 개별 검색 결과 — raw_content 우선, 없으면 content
         for r in data.get("results", []):
+            raw = r.get("raw_content", "") or ""
+            content = r.get("content", "") or ""
+            # raw_content가 있으면 더 긴 버전(최대 2500자)을 사용
+            full_content = (raw[:2500] if raw else content[:2500])
             results.append({
                 "title": r.get("title", ""),
-                "snippet": r.get("content", "")[:500],  # 본문 요약 (최대 500자)
+                "snippet": content[:300],
                 "url": r.get("url", ""),
-                "content": r.get("content", ""),
+                "content": full_content,
+                "score": r.get("score", 0),
             })
 
     except Exception as e:
-        print(f"[benchmark] Tavily 검색 실패: {e}")
+        print(f"[benchmark] Tavily 검색 실패 ({query[:40]}): {e}")
 
     return results
 
@@ -97,7 +105,7 @@ def _search_duckduckgo(query: str, max_results: int = 8) -> list[dict]:
             title = re.sub(r"<[^>]+>", "", title).strip()
             snippet = re.sub(r"<[^>]+>", "", snippet).strip()
             if title and snippet:
-                results.append({"title": title, "snippet": snippet, "url": link})
+                results.append({"title": title, "snippet": snippet, "url": link, "content": snippet})
             if len(results) >= max_results:
                 break
     except Exception as e:
@@ -147,125 +155,69 @@ def _translate_to_en(korean_term: str) -> str:
     return korean_term
 
 
-# ── 검색 쿼리 생성 ───────────────────────────────────────────────────────────
+# ── Round 1: 초기 검색 쿼리 생성 ────────────────────────────────────────────
 
 def _generate_search_queries(workflow_cache: dict) -> list[str]:
-    """엑셀-As-Is 매핑 결과(l4_details/l3_details/l2_details)를 활용한 벤치마킹 쿼리 생성.
-    McKinsey/BCG/Bain 컨설팅 리서치 방식으로 다각도 검색합니다.
-    L4(가장 구체적) → L3 → L2 순으로 fallback하며, Pain Point를 쿼리에 반영합니다."""
+    """Round 1 검색 쿼리 생성. L4(구체적) → L3 → L2 순으로 fallback."""
     process_name = workflow_cache.get("process_name", "")
     l2_names: list[str] = workflow_cache.get("l2_names", [])
     l3_names: list[str] = workflow_cache.get("l3_names", [])
     l4_names: list[str] = workflow_cache.get("l4_names", [])
     l4_details: list[dict] = workflow_cache.get("l4_details", [])
     l3_details: list[dict] = workflow_cache.get("l3_details", [])
-    l2_details: list[dict] = workflow_cache.get("l2_details", [])
 
     queries = []
 
-    # 핵심 포커스 결정 (L4 > L3 > L2 > process_name)
     focus_kr = l4_names[0] if l4_names else (l3_names[0] if l3_names else (l2_names[0] if l2_names else process_name))
     focus_en = _translate_to_en(focus_kr)
     l3_focus_en = _translate_to_en(l3_names[0] if l3_names else focus_kr)
     l2_focus_en = _translate_to_en(l2_names[0] if l2_names else focus_kr)
 
-    # ── 1. 컨설팅 펌 리서치 쿼리 (McKinsey/BCG/Bain/Oliver Wyman/Accenture) ──
-    # 실제 컨설팅 펌들이 수행하는 리서치 방식: 글로벌 벤치마크 + 산업 보고서
+    # ── 1. 글로벌 기업 AI 도입 사례 (수치 성과 포함) ──────────────────────────
     queries.append(
-        f"McKinsey BCG Bain {focus_en} AI automation HR transformation "
-        f"benchmark report 2023 2024 2025"
+        f"{focus_en} AI automation enterprise case study measurable outcomes "
+        f"efficiency ROI 2023 2024 2025"
     )
     queries.append(
-        f"Accenture Oliver Wyman {l3_focus_en} AI digital transformation "
-        f"enterprise implementation results"
-    )
-    # 컨설팅 방식: Thought Leadership + Industry Insight
-    queries.append(
-        f"McKinsey Global Institute OR Deloitte Insights OR BCG Henderson Institute "
-        f"{focus_en} future of work AI automation"
+        f"Workday SAP SuccessFactors Oracle HCM {focus_en} generative AI "
+        f"automation workflow real implementation results"
     )
 
-    # ── 2. 시장 조사·애널리스트 리포트 쿼리 ──────────────────────────────────
-    # Gartner/Forrester/IDC/SHRM 방식: 데이터 기반 벤치마크
+    # ── 2. 시장 조사 리포트 (Gartner/Forrester/McKinsey 리포트 내 기업 사례) ──
     queries.append(
-        f"Gartner Forrester IDC {focus_en} AI automation adoption rate "
-        f"enterprise benchmark 2024 2025"
+        f"Gartner Forrester {focus_en} AI adoption enterprise benchmark "
+        f"2024 2025 company case study"
     )
     queries.append(
-        f"SHRM HBR MIT Sloan {l2_focus_en} AI workforce transformation "
-        f"case study ROI measurement"
+        f"McKinsey Deloitte {l2_focus_en} AI transformation "
+        f"company implementation results measurable"
     )
 
-    # ── 3. L4 세부 활동 — 기업 사례 중심 쿼리 ──────────────────────────────
-    for detail in l4_details[:3]:
-        name = detail["name"]
-        en_kw = _translate_to_en(name)
-        pains = detail.get("pain_points", [])
-        pain_kw = " ".join(pains[:2]) if pains else "efficiency"
-
-        if en_kw != name:
-            # 영어 번역 → 구체적 기업 사례 검색
+    # ── 3. L4 세부 활동 기업 사례 ────────────────────────────────────────────
+    for detail in l4_details[:2]:
+        en_kw = _translate_to_en(detail["name"])
+        if en_kw != detail["name"]:
             queries.append(
-                f'"{en_kw}" AI automation enterprise case study '
-                f"measurable outcomes 2023 2024 2025"
-            )
-            # HR 시스템 + AI 통합 사례
-            queries.append(
-                f"Workday SAP SuccessFactors Oracle HCM {en_kw} "
-                f"generative AI automation workflow results"
-            )
-        else:
-            queries.append(
-                f"enterprise AI '{name}' {pain_kw} real-world implementation 2024"
+                f'"{en_kw}" AI automation enterprise Fortune 500 '
+                f"implementation case study 2024"
             )
 
-    # ── 4. L3 영역 — 업종별 AI 전환 쿼리 ────────────────────────────────────
-    for detail in l3_details[:2]:
-        name = detail["name"]
-        en_kw = _translate_to_en(name)
-        if en_kw != name:
-            queries.append(
-                f"Fortune 500 {en_kw} AI automation productivity gains "
-                f"implementation 2024 site:hbr.org OR site:mckinsey.com OR site:bcg.com"
-            )
-
-    # ── 5. 글로벌 선도 기업 직접 사례 ────────────────────────────────────────
-    # Big Tech 내부 HR AI 활용 + 글로벌 제조업
+    # ── 4. 글로벌 선도 기업 직접 사례 ────────────────────────────────────────
     queries.append(
         f"Google Microsoft Amazon Meta IBM {focus_en} internal HR "
-        f"AI automation workforce management case study"
+        f"AI automation workforce management"
     )
     queries.append(
-        f"Siemens GE Honeywell Caterpillar Doosan Hyundai Kia "
-        f"{focus_en} AI HR automation manufacturing"
+        f"Siemens GE Unilever JPMorgan {focus_en} HR AI automation "
+        f"digital transformation results"
     )
 
-    # ── 6. 한국 대기업 — 한국어 쿼리 ────────────────────────────────────────
-    kr_pains = l4_details[0].get("pain_points", []) if l4_details else (
-        l3_details[0].get("pain_points", []) if l3_details else []
-    )
-    kr_pain_kw = " ".join(kr_pains[:2]) if kr_pains else "AI 자동화"
+    # ── 5. 한국 대기업 ────────────────────────────────────────────────────────
+    kr_pain_kw = " ".join(
+        l4_details[0].get("pain_points", [])[:2]
+    ) if l4_details else "AI 자동화"
     queries.append(
-        f"삼성 현대차 SK LG 두산 '{focus_kr}' AI 디지털 전환 {kr_pain_kw} "
-        f"사례 성과 2023 2024 2025"
-    )
-    # 한국 HR 전문 미디어/연구기관
-    queries.append(
-        f"한국경영자총협회 HR인사이트 '{focus_kr}' AI 자동화 도입 사례 성과"
-    )
-
-    # ── 7. L2 대분류 fallback (L3/L4 없을 때) ────────────────────────────────
-    if not l3_names and not l4_names:
-        queries.append(
-            f"enterprise {l2_focus_en} AI transformation ROI "
-            f"benchmark global companies 2024 2025"
-        )
-
-    # ── 8. PwC 자체 리서치 스타일 쿼리 ──────────────────────────────────────
-    # PwC가 실제 고객 제안서 작성 시 활용하는 검색 방식
-    queries.append(
-        f"PwC EY KPMG Deloitte {focus_en} AI HR transformation "
-        f"client case study results site:pwc.com OR site:ey.com OR site:kpmg.com"
+        f"삼성 현대 SK LG '{focus_kr}' AI 도입 사례 성과 2023 2024 2025"
     )
 
     # 중복 제거
@@ -276,38 +228,146 @@ def _generate_search_queries(workflow_cache: dict) -> list[str]:
             seen.add(q)
             deduped.append(q)
 
-    return deduped[:14]
+    return deduped[:8]  # Round 1은 8개로 집중
 
 
-# ── 통합 검색 ────────────────────────────────────────────────────────────────
+# ── Round 2: LLM이 부족한 부분 파악 → 후속 쿼리 자동 생성 ──────────────────
+
+async def _generate_followup_queries(
+    workflow_cache: dict,
+    round1_results: list[dict],
+) -> list[str]:
+    """Perplexity Deep Research 핵심 — Round 1 결과를 보고 아직 부족한 부분을
+    LLM이 직접 파악하여 후속 검색 쿼리를 생성합니다."""
+    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        return []
+
+    process_name = workflow_cache.get("process_name", "")
+    l4_names = workflow_cache.get("l4_names", [])
+
+    # Round 1에서 찾은 내용 요약 (제목 + URL 유무)
+    found_summary_lines = []
+    for r in round1_results[:20]:
+        has_url = "✓ URL있음" if r.get("url") else "✗ URL없음"
+        found_summary_lines.append(f"- {has_url} | {r.get('title', '')[:80]}")
+
+    found_summary = "\n".join(found_summary_lines)
+
+    prompt = f"""당신은 딥 리서치 전문가입니다.
+
+## 조사 대상 프로세스
+- 프로세스명: {process_name}
+- 핵심 활동(L4): {', '.join(l4_names[:6])}
+
+## Round 1 검색에서 찾은 결과 ({len(round1_results)}건)
+{found_summary}
+
+## 지시
+Round 1 결과를 보고 아직 찾지 못한 것을 파악하세요:
+- 구체적 기업명 + 수치 성과가 없는 경우
+- 비Tech 대기업(제조·금융·유통) HR AI 사례가 부족한 경우
+- 특정 L4 활동에 대한 사례가 없는 경우
+
+이를 보완할 후속 검색 쿼리 4개를 생성하세요.
+가급적 구체적 회사명, 수치 성과, 실제 구현 사례를 찾을 수 있는 쿼리로 만드세요.
+
+JSON만 출력: {{"queries": ["query1", "query2", "query3", "query4"], "gap_analysis": "부족한 부분 한 줄 요약"}}"""
+
+    try:
+        from anthropic import AsyncAnthropic
+        client = AsyncAnthropic(api_key=api_key)
+        resp = await client.messages.create(
+            model="claude-haiku-4-5-20251001",  # 빠른 모델로 쿼리만 생성
+            max_tokens=512,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = resp.content[0].text.strip()
+        # JSON 추출
+        m = re.search(r'\{.*\}', raw, re.DOTALL)
+        if m:
+            data = json.loads(m.group())
+            queries = data.get("queries", [])[:4]
+            gap = data.get("gap_analysis", "")
+            if gap:
+                print(f"[benchmark] Round 2 gap: {gap}")
+            return queries
+    except Exception as e:
+        print(f"[benchmark] follow-up 쿼리 생성 실패: {e}")
+
+    return []
+
+
+# ── 통합 검색 (Perplexity Deep Research 방식) ────────────────────────────────
 
 async def search_benchmarks(workflow_cache: dict) -> list[dict]:
     """
-    Workflow 기반 벤치마킹 검색.
-    Tavily API 우선 사용, 없으면 DuckDuckGo fallback.
+    Perplexity Deep Research 방식 벤치마킹 검색.
+
+    Round 1: 초기 쿼리 8개 → 병렬 검색 (전문 포함)
+    Round 2: LLM이 부족한 부분 분석 → 후속 쿼리 4개 자동 생성 → 병렬 검색
     """
-    queries = _generate_search_queries(workflow_cache)
+    use_tavily = bool(os.getenv("TAVILY_API_KEY", ""))
+    search_fn = _search_tavily if use_tavily else _search_duckduckgo
+
+    # ── Round 1: 병렬 검색 ────────────────────────────────────────────────────
+    queries_r1 = _generate_search_queries(workflow_cache)
+    print(f"[benchmark] Round 1 시작 — {len(queries_r1)}개 쿼리 병렬 검색")
+
+    tasks_r1 = [asyncio.to_thread(search_fn, q, 5) for q in queries_r1]
+    raw_batches_r1 = await asyncio.gather(*tasks_r1, return_exceptions=True)
+
     all_results: list[dict] = []
+    seen_urls: set[str] = set()
     seen_titles: set[str] = set()
 
-    use_tavily = bool(os.getenv("TAVILY_API_KEY", ""))
-
-    for query in queries:
-        if use_tavily:
-            results = _search_tavily(query, max_results=4)
-        else:
-            results = _search_duckduckgo(query, max_results=4)
-
-        for r in results:
-            if r["title"] not in seen_titles:
-                seen_titles.add(r["title"])
+    for query, batch in zip(queries_r1, raw_batches_r1):
+        if isinstance(batch, Exception):
+            print(f"[benchmark] Round 1 오류: {batch}")
+            continue
+        for r in batch:
+            key = r.get("url") or r.get("title", "")
+            if key and key not in seen_urls and r.get("title") not in seen_titles:
+                seen_urls.add(key)
+                seen_titles.add(r.get("title", ""))
                 r["query"] = query
+                r["round"] = 1
                 all_results.append(r)
 
-    search_engine = "Tavily (심층 검색)" if use_tavily else "DuckDuckGo (기본)"
-    print(f"[benchmark] {search_engine} — {len(all_results)}개 결과 수집 ({len(queries)}개 쿼리)")
+    print(f"[benchmark] Round 1 완료 — {len(all_results)}건 수집")
 
-    return all_results[:30]
+    # ── Round 2: LLM이 부족한 부분 파악 → 후속 쿼리 생성 → 병렬 검색 ─────────
+    if use_tavily:  # Tavily가 있을 때만 Round 2 수행 (DuckDuckGo는 round 2 생략)
+        queries_r2 = await _generate_followup_queries(workflow_cache, all_results)
+
+        if queries_r2:
+            print(f"[benchmark] Round 2 시작 — {len(queries_r2)}개 후속 쿼리 병렬 검색")
+            tasks_r2 = [asyncio.to_thread(_search_tavily, q, 5) for q in queries_r2]
+            raw_batches_r2 = await asyncio.gather(*tasks_r2, return_exceptions=True)
+
+            r2_added = 0
+            for query, batch in zip(queries_r2, raw_batches_r2):
+                if isinstance(batch, Exception):
+                    continue
+                for r in batch:
+                    key = r.get("url") or r.get("title", "")
+                    if key and key not in seen_urls and r.get("title") not in seen_titles:
+                        seen_urls.add(key)
+                        seen_titles.add(r.get("title", ""))
+                        r["query"] = query
+                        r["round"] = 2
+                        all_results.append(r)
+                        r2_added += 1
+
+            print(f"[benchmark] Round 2 완료 — 신규 {r2_added}건 추가")
+
+    engine = "Tavily (전문 + 2라운드)" if use_tavily else "DuckDuckGo (기본)"
+    print(f"[benchmark] {engine} — 총 {len(all_results)}건 ({len(queries_r1 + (queries_r2 if use_tavily else []))}개 쿼리)")
+
+    # URL 있는 결과를 앞으로 정렬 (LLM에게 더 유용한 것 먼저)
+    all_results.sort(key=lambda r: (0 if r.get("url") else 1, r.get("round", 1)))
+
+    return all_results[:40]
 
 
 # ── LLM 벤치마킹 기반 Workflow 개선 ─────────────────────────────────────────
@@ -350,7 +410,7 @@ _BENCHMARK_SYSTEM_PROMPT = """
 
 **source 필드 핵심 규칙**
 `source`는 반드시 **AI를 실제로 도입하여 운영한 기업**이어야 합니다.
-- ✅ 허용: Google, Amazon, Meta, Microsoft, Siemens, DHL, 삼성전자, Unilever, JPMorgan 등 (Tech 선도사 또는 비Tech 실제 구현 기업)
+- ✅ 허용: Google, Amazon, Meta, Microsoft, Siemens, DHL, 삼성전자, Unilever, JPMorgan 등
 - ❌ 절대 금지: McKinsey, BCG, Bain, Deloitte, PwC, EY, KPMG, Accenture, Gartner, Forrester
   → 이들은 보고서 **작성자**일 뿐, AI를 직접 도입한 기업이 아님
   → 보고서에 구체적 기업 사례가 있으면 그 기업명을 source로, 없으면 해당 인사이트 제외
@@ -360,18 +420,12 @@ _BENCHMARK_SYSTEM_PROMPT = """
 
 **Step 1: 검색 결과 원문 확인 → 실제 언급 여부 검증**
 검색 결과에 기업명이 명시되어 있는지 확인합니다.
-명시되지 않은 경우 해당 사례는 제외합니다.
 
 **Step 2: 영어+한국어 사례 번역·해석**
-영어 사례가 한국 HR 프로세스에 적용 가능한지 검토하고, 한국어로 설명합니다.
-예: "Oracle HCM을 활용한 position change workflow 자동화" → "발령 워크플로우 자동화"
+영어 사례를 한국어로 번역·설명합니다.
 
 **Step 3: L4~L5 단위로 AI 적용 방안 도출**
-각 L4 Activity별로 선도 사례에서 학습한 AI 기법을 적용합니다:
-- 데이터 입력·처리 → RPA, 문서 OCR
-- 검토·승인 → LLM 기반 조건 검사, Workflow Automation
-- 분석·예측 → ML 모델, HR Analytics
-- 공지·커뮤니케이션 → 자동화된 알림, Chatbot
+각 L4 Activity별 AI 기법을 적용합니다.
 
 **Step 4: 사례가 없을 때 솔직하게 명시**
 관련 사례가 없으면: `"no_cases_note": "검색 결과에서 해당 프로세스 관련 구체적 기업 사례를 확인할 수 없었습니다. [이유]"`
@@ -387,7 +441,7 @@ _BENCHMARK_SYSTEM_PROMPT = """
     }
   ],
   "no_cases_note": "관련 사례가 없을 때만 이유 기재 (사례가 있으면 빈 문자열)",
-  "improvement_summary": "전체 개선 방향 2~3문장 (한국어, 사례 없으면 '검색 결과에서 직접 관련 사례 확인 불가'로 명시)",
+  "improvement_summary": "전체 개선 방향 2~3문장 (한국어)",
   "blueprint_summary": "벤치마킹 기반 To-Be 기본 설계 요약 2~3문장 (한국어)",
   "process_name": "프로세스명",
   "redesigned_process": [
@@ -395,7 +449,7 @@ _BENCHMARK_SYSTEM_PROMPT = """
       "l3_id": "L3 ID",
       "l3_name": "L3 프로세스명",
       "change_type": "유지|통합|세분화|추가|삭제",
-      "change_reason": "변경 이유 (벤치마킹 사례 기반, 사례 없으면 '사례 부재 — 현 구조 유지')",
+      "change_reason": "변경 이유 (벤치마킹 사례 기반)",
       "l4_list": [
         {
           "l4_id": "L4 ID",
@@ -438,7 +492,7 @@ def _build_benchmark_prompt(
     lines.append(f"**프로세스명**: {workflow_cache.get('process_name', '')}\n")
     lines.append(f"**설계 요약**: {workflow_cache.get('blueprint_summary', '')}\n")
 
-    # 현재 redesigned_process 구조 (Step1 결과가 있는 경우)
+    # 현재 redesigned_process 구조
     redesigned = workflow_cache.get("redesigned_process", [])
     if redesigned:
         lines.append("**현재 기본 설계 (L3~L5 트리):**\n")
@@ -453,7 +507,6 @@ def _build_benchmark_prompt(
                     )
             lines.append("")
     else:
-        # 이전 agents 형식 fallback
         lines.append("**현재 AI 에이전트 및 Task 상세:**\n")
         for agent in workflow_cache.get("agents", []):
             lines.append(f"### {agent['agent_name']} ({agent.get('ai_technique', '')})")
@@ -462,21 +515,20 @@ def _build_benchmark_prompt(
                 lines.append(f"  - [{t.get('task_id','')}] {t.get('task_name','')} | ai_role: {t.get('ai_role','')} | level: {t.get('automation_level','')}")
             lines.append("")
 
-    # 벤치마킹 결과 (쿼리 출처 포함)
-    lines.append("\n## 웹 벤치마킹 검색 결과\n")
+    # 벤치마킹 결과 (Round 표시 + 쿼리 출처 포함)
+    lines.append(f"\n## 웹 벤치마킹 검색 결과 (총 {len(benchmark_results)}건)\n")
     for i, r in enumerate(benchmark_results, 1):
-        lines.append(f"### [{i}] {r['title']}")
-        if r.get("query"):
-            lines.append(f"- 검색 쿼리: {r['query']}")
+        round_label = f" [R{r.get('round', 1)}]" if r.get("round") else ""
+        lines.append(f"### [{i}]{round_label} {r['title']}")
         if r.get("url"):
             lines.append(f"- 출처 URL: {r['url']}")
         content = r.get("content", r.get("snippet", ""))
-        lines.append(f"- 내용: {content[:800]}")
+        lines.append(f"- 내용: {content[:1200]}")  # 기존 800자 → 1200자
         lines.append("")
 
     lines.append("\n## 요청")
     lines.append("위 벤치마킹 사례를 분석하여 현재 To-Be Workflow를 개선해주세요.")
-    lines.append("각 benchmark_insight의 url 필드에는 위 검색 결과에 실제로 나온 URL만 기재하세요 (임의 생성 금지).")
+    lines.append("각 benchmark_insight의 url 필드에는 위 검색 결과에 실제로 나온 URL만 기재하세요.")
     lines.append("관련 사례가 없으면 솔직하게 no_cases_note에 이유를 명시하고 benchmark_insights는 빈 배열로 반환하세요.")
 
     return "\n".join(lines)
@@ -488,7 +540,7 @@ async def refine_workflow_with_benchmarks(
     api_key: str = "",
     model: str = "claude-sonnet-4-6",
     openai_api_key: str = "",
-    openai_model: str = "gpt-5.4",
+    openai_model: str = "gpt-4o",
 ) -> dict:
     """벤치마킹 결과를 반영하여 Workflow를 개선합니다."""
     from new_workflow_generator import _extract_json
