@@ -807,43 +807,67 @@ export default function WorkflowPage() {
       {/* ═══ Step 2: Step 1 기본 설계 (Top-Down) ═══ */}
       {currentStep === 2 && (
         <div className="space-y-6">
-          {/* 헤더 + 액션 버튼 */}
+          {/* 헤더 카드 */}
           <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <div className="flex items-center justify-between mb-4">
+            {/* 타이틀 + 액션 버튼 행 */}
+            <div className="flex items-start justify-between mb-5">
               <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold" style={{ backgroundColor: PWC.primary }}>1</div>
+                <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0" style={{ backgroundColor: PWC.primary }}>1</div>
                 <div>
                   <div className="font-bold text-gray-800">선도사례 벤치마킹 기반 Workflow 기본 설계</div>
-                  <div className="text-xs text-gray-500">Top-Down: 벤치마킹과 프롬프트를 자유 순서로 실행할 수 있습니다.</div>
+                  <div className="text-xs text-gray-500 mt-0.5">
+                    ① 벤치마킹으로 사례를 수집하고 &nbsp;② 채팅으로 내용을 검토한 뒤 &nbsp;③ 충분하면 기본 설계 생성
+                  </div>
                 </div>
               </div>
-              {/* 벤치마킹 버튼 — 순서 무관 독립 실행 */}
-              <button
-                onClick={() => handleBenchmark()}
-                disabled={bmLoading}
-                className="px-4 py-2 rounded-lg text-sm font-bold border-2 transition disabled:opacity-50"
-                style={{
-                  borderColor: benchmarkTable.length > 0 ? "#16A34A" : "#3B82F6",
-                  color: benchmarkTable.length > 0 ? "#16A34A" : "#3B82F6",
-                  backgroundColor: benchmarkTable.length > 0 ? "#F0FDF4" : "#EFF6FF",
-                }}
-              >
-                {bmLoading ? (
-                  <span className="flex items-center gap-2">
-                    <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-blue-300 border-t-blue-600" />
-                    검색 중...
-                  </span>
-                ) : benchmarkTable.length > 0 ? (
-                  `\u2713 벤치마킹 완료 (${benchmarkTable.length}건)`
-                ) : (
-                  "\uD83D\uDD0D 벤치마킹 수행"
-                )}
-              </button>
+              {/* 버튼 그룹 — 벤치마킹 · 기본 설계 생성 */}
+              <div className="flex items-center gap-2 flex-shrink-0 ml-4">
+                {/* 벤치마킹 버튼 */}
+                <button
+                  onClick={() => handleBenchmark()}
+                  disabled={bmLoading || loading}
+                  className="px-4 py-2 rounded-lg text-sm font-bold border-2 transition disabled:opacity-50 whitespace-nowrap"
+                  style={{
+                    borderColor: benchmarkTable.length > 0 ? "#16A34A" : "#3B82F6",
+                    color: benchmarkTable.length > 0 ? "#16A34A" : "#3B82F6",
+                    backgroundColor: benchmarkTable.length > 0 ? "#F0FDF4" : "#EFF6FF",
+                  }}
+                >
+                  {bmLoading ? (
+                    <span className="flex items-center gap-2">
+                      <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-blue-300 border-t-blue-600" />
+                      검색 중...
+                    </span>
+                  ) : benchmarkTable.length > 0 ? (
+                    `\u2713 벤치마킹 완료 (${benchmarkTable.length}건)`
+                  ) : (
+                    "\uD83D\uDD0D 벤치마킹 수행"
+                  )}
+                </button>
+                {/* 기본 설계 생성 버튼 — 항상 독립 */}
+                <button
+                  onClick={() => handleGenerateStep1()}
+                  disabled={loading || bmLoading}
+                  className="px-4 py-2 rounded-lg text-sm font-bold text-white transition disabled:opacity-50 whitespace-nowrap"
+                  style={{ backgroundColor: step1Result ? "#15803D" : PWC.primary }}
+                >
+                  {loading ? (
+                    <span className="flex items-center gap-2">
+                      <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-red-300 border-t-white" />
+                      설계 중...
+                    </span>
+                  ) : step1Result ? (
+                    "\u21BA 기본 설계 재생성"
+                  ) : (
+                    "\u270F\uFE0F 기본 설계 생성"
+                  )}
+                </button>
+              </div>
             </div>
 
             {/* 벤치마킹 결과 테이블 */}
             {benchmarkTable.length > 0 && (
-              <div className="mb-4">
+              <div className="mb-5">
                 <div className="flex items-center justify-between mb-2">
                   <div className="text-xs font-bold text-gray-700">벤치마킹 결과표</div>
                   {benchmarkSummary && (
@@ -903,16 +927,21 @@ export default function WorkflowPage() {
               </div>
             )}
 
-            {/* 채팅 영역 */}
-            <div className="border border-gray-200 rounded-lg bg-gray-50" style={{ height: "380px", display: "flex", flexDirection: "column" }}>
+            {/* 채팅 영역 — 항상 리서치·질문 전용 */}
+            <div className="border border-gray-200 rounded-lg bg-gray-50" style={{ height: "340px", display: "flex", flexDirection: "column" }}>
+              {/* 채팅 헤더 레이블 */}
+              <div className="flex items-center gap-2 px-4 py-2 border-b border-gray-200 bg-white rounded-t-lg">
+                <span className="text-xs font-semibold text-gray-500">리서치 채팅</span>
+                <span className="text-[10px] text-gray-400">— 벤치마킹 결과 질문, 추가 기업 사례 요청, 내용 확인 등</span>
+              </div>
               {/* 메시지 목록 */}
               <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                {chatMessages.length === 0 && !step1Result && (
-                  <div className="text-center py-8 text-gray-400 text-sm">
-                    <div className="text-3xl mb-3">&#128172;</div>
-                    <p>프롬프트를 입력하여 Workflow 기본 설계를 생성하세요.</p>
-                    <p className="text-xs mt-1">특정 기업명을 언급하면 해당 기업의 적용 사례도 자동 벤치마킹합니다.</p>
-                    <p className="text-xs mt-1 text-gray-300">벤치마킹을 먼저 하거나, 프롬프트를 먼저 하거나 — 순서는 자유입니다.</p>
+                {chatMessages.length === 0 && (
+                  <div className="text-center py-6 text-gray-400 text-sm">
+                    <div className="text-2xl mb-2">&#128269;</div>
+                    <p className="text-xs">벤치마킹 결과에 대해 질문하거나, 추가 기업 사례를 요청하세요.</p>
+                    <p className="text-xs mt-1 text-gray-300">예: "발령관리 관련 제조업 사례 더 찾아줘" / "Siemens 사례 자세히 설명해줘"</p>
+                    <p className="text-xs mt-2 text-gray-300">충분히 검토한 뒤 오른쪽 위 <strong className="text-gray-400">기본 설계 생성</strong> 버튼을 누르세요.</p>
                   </div>
                 )}
                 {chatMessages.map((msg, i) => (
@@ -933,7 +962,7 @@ export default function WorkflowPage() {
                     <div className="bg-white border border-gray-200 rounded-lg px-4 py-3">
                       <div className="flex items-center gap-2 text-sm text-gray-500">
                         <div className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-red-600" />
-                        {bmLoading ? "벤치마킹 검색 중..." : "AI가 설계 중..."}
+                        {bmLoading ? "벤치마킹 검색 중..." : loading ? "AI 처리 중..." : ""}
                       </div>
                     </div>
                   </div>
@@ -941,7 +970,7 @@ export default function WorkflowPage() {
                 <div ref={chatEndRef} />
               </div>
 
-              {/* 입력 영역 */}
+              {/* 입력 영역 — 항상 채팅 전용 */}
               <div className="border-t border-gray-200 p-3 bg-white rounded-b-lg">
                 <div className="flex gap-2">
                   <input
@@ -951,37 +980,21 @@ export default function WorkflowPage() {
                     onKeyDown={(e) => {
                       if (e.key === "Enter" && !e.shiftKey) {
                         e.preventDefault();
-                        if (step1Result) handleChat();
-                        else handleGenerateStep1(chatInput || undefined);
+                        handleChat();
                       }
                     }}
-                    placeholder={
-                      step1Result
-                        ? "추가 질문이나 수정 요청... (예: Google처럼 People Analytics 적용해줘)"
-                        : "프롬프트 입력... (예: Siemens, GE의 HR AI 적용 사례를 기반으로 설계해줘)"
-                    }
+                    placeholder="벤치마킹 결과 질문, 추가 사례 요청... (예: 제조업 발령관리 AI 사례 더 찾아줘)"
                     className="flex-1 border border-gray-300 rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-red-300"
                     disabled={loading || bmLoading}
                   />
-                  {!step1Result ? (
-                    <button
-                      onClick={() => handleGenerateStep1(chatInput || undefined)}
-                      disabled={loading || bmLoading}
-                      className="px-4 py-2 rounded-lg text-sm font-bold text-white transition disabled:opacity-50 whitespace-nowrap"
-                      style={{ backgroundColor: PWC.primary }}
-                    >
-                      {loading ? "생성 중..." : "기본 설계 생성"}
-                    </button>
-                  ) : (
-                    <button
-                      onClick={handleChat}
-                      disabled={loading || bmLoading || !chatInput.trim()}
-                      className="px-4 py-2 rounded-lg text-sm font-bold text-white transition disabled:opacity-50"
-                      style={{ backgroundColor: PWC.primary }}
-                    >
-                      전송
-                    </button>
-                  )}
+                  <button
+                    onClick={handleChat}
+                    disabled={loading || bmLoading || !chatInput.trim()}
+                    className="px-4 py-2 rounded-lg text-sm font-bold text-white transition disabled:opacity-50"
+                    style={{ backgroundColor: PWC.primary }}
+                  >
+                    전송
+                  </button>
                 </div>
               </div>
             </div>
