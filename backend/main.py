@@ -2010,7 +2010,7 @@ async def benchmark_workflow_step1(request: Request):
         for d in l4_details[:6]
     )
 
-    bm_analysis_system = f"""당신은 McKinsey, BCG, Bain 수준의 글로벌 AI 업무 혁신 벤치마킹 분석 전문가입니다.
+    bm_analysis_system = f"""당신은 글로벌 AI 업무 혁신 벤치마킹 분석 전문가입니다.
 영어·한국어 검색 결과를 엄격하게 분석하여 실제 근거가 있는 기업의 AI 적용 사례만 추출합니다.
 
 ## 프로세스: {process_name}
@@ -2053,10 +2053,19 @@ async def benchmark_workflow_step1(request: Request):
 3. **내용**: AI 적용 방법 또는 성과가 구체적으로 언급됨
 - ✗ 제외: 벤더 마케팅 자료, 일반 AI 통계, 기업명 미확인, URL 없음
 
+## source 필드 핵심 규칙
+`source`는 반드시 **AI를 실제로 도입하여 운영한 기업**이어야 합니다.
+- ✅ 허용: Google, Amazon, Meta, Microsoft, Siemens, DHL, 삼성전자, Unilever, JPMorgan 등
+- ✅ 허용: Tech 선도사 또는 비Tech 실제 구현 기업
+- ❌ 절대 금지: McKinsey, BCG, Bain, Deloitte, PwC, EY, KPMG, Accenture, Gartner, Forrester, IDC
+  → 이들은 보고서 **작성자**일 뿐, AI를 직접 도입한 기업이 아님
+  → 만약 McKinsey 보고서에 특정 기업 사례가 언급되면, 그 **기업명**을 source로 사용
+  → 보고서에 구체적 기업명이 없으면 해당 인사이트는 제외
+
 ## 중요 원칙
 - **영어 사례를 한국어로 번역하여 설명** — 영어 원문 그대로 두지 말 것
 - 솔루션 Provider(SAP, Workday 자체)가 아닌 **도입·활용한 기업** 사례 우선
-- Big Tech(Google, Amazon, Meta, Microsoft) 내부 HR AI 활용 사례 포함 OK
+- Big Tech(Google, Amazon, Meta, Microsoft) 또는 비Tech 선도사 중심
 - 구체적 기업명 없는 사례는 제외
 - 수치 성과(%, 시간, 비용) 포함 사례 우선
 
@@ -2064,7 +2073,7 @@ async def benchmark_workflow_step1(request: Request):
 {{
   "benchmark_table": [
     {{
-      "source": "기업명 (고유 기업명 1개만, 벤더명·'미확인' 금지)",
+      "source": "AI를 실제 도입·운영한 기업명 (컨설팅펌·리서치펌 절대 금지)",
       "company_type": "Tech 선도 | 非Tech 실제 구현",
       "industry": "산업군",
       "process_area": "매핑된 L4 활동명 (위 L4 목록 중 해당하는 것, 없으면 L3명)",

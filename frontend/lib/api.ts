@@ -965,6 +965,7 @@ export interface BenchmarkStep1Result {
 
 export async function benchmarkWorkflowStep1(params?: {
   companies?: string;
+  sheet_id?: string;
 }): Promise<BenchmarkStep1Result> {
   return apiFetch("/workflow/benchmark-step1", {
     method: "POST",

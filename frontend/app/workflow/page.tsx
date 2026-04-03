@@ -186,7 +186,7 @@ export default function WorkflowPage() {
       { role: "system", content: `벤치마킹 수행 중...${companies ? ` (기업: ${companies})` : " (Big Tech / Industry 선도사)"}` },
     ]);
     try {
-      const result = await benchmarkWorkflowStep1({ companies });
+      const result = await benchmarkWorkflowStep1({ companies, sheet_id: activeSheet ?? undefined });
       setBenchmarkTable(result.benchmark_table);
       setBenchmarkSummary(result.summary);
       setChatMessages((prev) => [

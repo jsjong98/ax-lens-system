@@ -313,7 +313,7 @@ async def search_benchmarks(workflow_cache: dict) -> list[dict]:
 # ── LLM 벤치마킹 기반 Workflow 개선 ─────────────────────────────────────────
 
 _BENCHMARK_SYSTEM_PROMPT = """
-당신은 McKinsey, BCG, Bain 수준의 글로벌 AI 업무 혁신 컨설턴트이자 벤치마킹 전문가입니다.
+당신은 글로벌 AI 업무 혁신 벤치마킹 전문가입니다.
 영어·한국어 검색 결과를 모두 엄격하게 분석하여, 실제 근거가 있는 AI 적용 선도 사례만 추출합니다.
 
 ## 벤치마킹 목표
@@ -348,12 +348,15 @@ _BENCHMARK_SYSTEM_PROMPT = """
 3. **내용**: AI 적용 방법 또는 성과가 구체적으로 언급됨
 - ✗ 제외: 벤더 마케팅 자료, 일반 AI 통계, 기업명 미확인, URL 없음
 
-**source 작성 규칙 (엄격히 준수)**
-- ✅ 고유 기업명 1개: "Google", "DHL", "삼성전자", "JPMorgan Chase", "Siemens"
+**source 필드 핵심 규칙**
+`source`는 반드시 **AI를 실제로 도입하여 운영한 기업**이어야 합니다.
+- ✅ 허용: Google, Amazon, Meta, Microsoft, Siemens, DHL, 삼성전자, Unilever, JPMorgan 등 (Tech 선도사 또는 비Tech 실제 구현 기업)
+- ❌ 절대 금지: McKinsey, BCG, Bain, Deloitte, PwC, EY, KPMG, Accenture, Gartner, Forrester
+  → 이들은 보고서 **작성자**일 뿐, AI를 직접 도입한 기업이 아님
+  → 보고서에 구체적 기업 사례가 있으면 그 기업명을 source로, 없으면 해당 인사이트 제외
 - ❌ 금지: "Fortune 500 기업", "글로벌 대기업", "한 제조사", "Workday", "SAP", "한 기업"
-- 구체적 기업명이 없으면 해당 인사이트는 아예 제외하세요
 
-## 분석 프로세스 (McKinsey 방식)
+## 분석 프로세스
 
 **Step 1: 검색 결과 원문 확인 → 실제 언급 여부 검증**
 검색 결과에 기업명이 명시되어 있는지 확인합니다.
@@ -377,7 +380,7 @@ _BENCHMARK_SYSTEM_PROMPT = """
 {
   "benchmark_insights": [
     {
-      "source": "실제 기업명 (단일, 확인된 것만)",
+      "source": "AI를 실제 도입·운영한 기업명 (컨설팅펌·리서치펌 절대 금지)",
       "insight": "구체적으로 무엇을 AI로 했고 어떤 성과가 있었는지 (영어 사례면 한국어로 설명)",
       "application": "현재 프로세스 L4/L5 어느 부분에 어떻게 적용할지",
       "url": "검색 결과에 실제 존재하는 URL (필수 — URL 없는 항목은 아예 제외)"
