@@ -1571,24 +1571,60 @@ async def get_workflow_excel_tasks():
 _wf_benchmark_results: list = []   # 벤치마킹 검색 결과 (raw)
 _wf_benchmark_table: list = []     # 벤치마킹 결과 테이블 (LLM 분석 후)
 
-# 익명·금지 source 필터 — LLM 프롬프트만으론 막을 수 없어 백엔드에서 강제 제거
+# ── 벤치마킹 source / URL 검증 필터 ─────────────────────────────────────────
+
+# 익명·컨설팅펌 source 금지 패턴
 _FORBIDDEN_SOURCE_PATTERNS = [
     "fortune 500", "글로벌 대기업", "한 제조사", "한 기업", "한 은행", "한 금융사",
     "한 회사", "한 유통", "한 제조업체", "한 it기업",
     "익명", "anonymous", "undisclosed", "leading company", "major company",
     "large enterprise", "nextant",
-    # 컨설팅·리서치펌 (source로 쓰는 것 방지)
+    # 컨설팅·리서치펌
     "mckinsey", "bcg", "bain", "deloitte", "pwc", "ey", "kpmg", "accenture",
     "gartner", "forrester", "idc", "hbr", "mit sloan",
+    # 뉴스 기사 제목이 source로 들어오는 경우 (대괄호·따옴표·공백 많은 긴 문자열)
 ]
+
+# 뉴스 도메인 — 이런 URL은 벤치마킹 근거로 쓸 수 없음
+_NEWS_DOMAINS = [
+    # 한국 뉴스
+    "news.naver.com", "n.news.naver.com", "news.daum.net",
+    "chosun.com", "joins.com", "joongang.co.kr", "hani.co.kr",
+    "mk.co.kr", "hankyung.com", "etnews.com", "zdnet.co.kr",
+    "itworld.co.kr", "dt.co.kr", "bloter.net", "ddaily.co.kr",
+    "aitimes.com", "aitimes.kr", "boannews.com", "itbiznews.com",
+    "newsis.com", "yonhapnews.co.kr", "yna.co.kr",
+    # 글로벌 뉴스
+    "techcrunch.com", "reuters.com", "bloomberg.com", "cnbc.com",
+    "businessinsider.com", "forbes.com/news", "wsj.com",
+    "venturebeat.com", "zdnet.com",
+]
+
+# URL 경로에서 뉴스 패턴
+_NEWS_URL_PATTERNS = ["/news/", "/article/", "/press/", "/newsroom/press"]
 
 
 def _is_valid_benchmark_source(source: str) -> bool:
-    """source 필드가 실명 기업인지 검사합니다. 익명·컨설팅펌이면 False."""
+    """source 필드가 실명 기업인지 검사합니다. 익명·컨설팅펌·긴 제목이면 False."""
     s = source.strip().lower()
     if not s or len(s) < 2:
         return False
+    # 너무 긴 source는 기사 제목이 들어온 것 (기업명은 보통 30자 이내)
+    if len(source.strip()) > 40:
+        return False
     return not any(pattern in s for pattern in _FORBIDDEN_SOURCE_PATTERNS)
+
+
+def _is_news_url(url: str) -> bool:
+    """URL이 뉴스 기사 URL인지 확인합니다."""
+    if not url:
+        return False
+    url_lower = url.lower()
+    if any(domain in url_lower for domain in _NEWS_DOMAINS):
+        return True
+    if any(pat in url_lower for pat in _NEWS_URL_PATTERNS):
+        return True
+    return False
 
 
 def _build_excel_index() -> tuple[dict, dict, dict, dict]:
@@ -2120,11 +2156,17 @@ async def benchmark_workflow_step1(request: Request):
 - L4 단위 매칭이 안 되면 L3 단위로 매핑
 - L3도 안 되면 L2 단위로 매핑
 
-## 포함 기준 (3가지 모두 충족해야 포함)
-1. **기업명**: 고유 기업명이 검색 결과에 명확히 언급됨
-2. **URL**: 검색 결과에 실제 URL이 있음 — URL 없는 사례는 benchmark_table에서 완전 제외
+## 포함 기준 (4가지 모두 충족해야 포함)
+1. **기업명**: 고유 기업명(실명)이 검색 결과에 명확히 언급됨
+2. **URL**: 검색 결과에 실제 URL이 있음 — URL 없는 사례는 완전 제외
 3. **내용**: AI 적용 방법 또는 성과가 구체적으로 언급됨
-- ✗ 제외: 벤더 마케팅 자료, 일반 AI 통계, 기업명 미확인, URL 없음
+4. **출처 유형**: 아래 허용 유형만 인정
+   - ✅ 공식 기업 블로그 / 기술 블로그 (engineering.fb.com, cloud.google.com 등)
+   - ✅ 공식 케이스 스터디 / 백서 / 연구 보고서
+   - ✅ 학술 논문, LinkedIn 공식 게시물
+   - ❌ **뉴스 기사 절대 금지** — 뉴스 기사(언론사, 포털 뉴스)는 벤치마킹 근거가 아님
+     (chosun.com, mk.co.kr, zdnet, techcrunch, reuters, bloomberg 등 뉴스 URL 포함 금지)
+   - ❌ 벤더 마케팅 자료, 일반 AI 통계, 기업명 미확인
 
 ## source 필드 핵심 규칙
 `source`는 반드시 **AI를 실제로 도입하여 운영한 기업의 고유 명칭**이어야 합니다.
@@ -2206,11 +2248,13 @@ async def benchmark_workflow_step1(request: Request):
             if r.get("url")  # URL 없는 항목 제외
         ]
     else:
-        # URL 없는 항목 + 익명·금지 source 항목 후처리 제거
+        # URL 없음 / 뉴스 URL / 익명·금지 source 항목 후처리 제거
         raw_table = result_data.get("benchmark_table", [])
         _wf_benchmark_table = [
             row for row in raw_table
-            if row.get("url") and _is_valid_benchmark_source(row.get("source", ""))
+            if row.get("url")
+            and not _is_news_url(row.get("url", ""))
+            and _is_valid_benchmark_source(row.get("source", ""))
         ]
 
     # 채팅 이력에 기록
@@ -2418,8 +2462,10 @@ L4 활동: {', '.join(bm_data['l4_names'][:4])}
                 existing_sources = {b.get("source","") for b in _wf_benchmark_table}
                 for entry in new_bm_entries:
                     src = entry.get("source", "")
+                    url = entry.get("url", "")
                     if (src not in existing_sources
-                            and entry.get("url")
+                            and url
+                            and not _is_news_url(url)
                             and _is_valid_benchmark_source(src)):
                         _wf_benchmark_table.append(entry)
                 extra_bm_text = f"\n\n[추가 벤치마킹 — {len(new_bm_entries)}건 분석 완료]"

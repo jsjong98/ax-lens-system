@@ -35,6 +35,16 @@ def _search_tavily(query: str, max_results: int = 5) -> list[dict]:
         "search_depth": "advanced",
         "include_answer": True,
         "include_raw_content": True,   # 실제 페이지 본문 수집
+        # 뉴스 사이트 제외 — case study / white paper / 공식 블로그 우선
+        "exclude_domains": [
+            "news.naver.com", "n.news.naver.com", "news.daum.net",
+            "chosun.com", "joins.com", "joongang.co.kr", "hani.co.kr",
+            "mk.co.kr", "hankyung.com", "etnews.com", "zdnet.co.kr",
+            "itworld.co.kr", "dt.co.kr", "bloter.net", "ddaily.co.kr",
+            "aitimes.com", "aitimes.kr", "newsis.com", "yonhapnews.co.kr",
+            "techcrunch.com", "reuters.com", "bloomberg.com", "cnbc.com",
+            "businessinsider.com", "venturebeat.com",
+        ],
     }).encode("utf-8")
 
     req = urllib.request.Request(
