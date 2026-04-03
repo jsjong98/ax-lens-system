@@ -113,6 +113,38 @@ def _search_duckduckgo(query: str, max_results: int = 8) -> list[dict]:
 # ── Phase 1: LLM이 초기 쿼리를 직접 생성 ────────────────────────────────────
 # Perplexity 핵심 기술 #1 — 하드코딩 템플릿이 아닌 LLM이 컨텍스트를 이해하고 쿼리 생성
 
+def _extract_names_from_cache(workflow_cache: dict) -> tuple[list, list, list, list]:
+    """workflow_cache에서 l2/l3/l4 이름과 l4_details를 추출합니다.
+    Workflow 캐시(l4_names 직접 보유)와 New Workflow 캐시(redesigned_process 구조) 모두 지원."""
+    l2_names = workflow_cache.get("l2_names", [])
+    l3_names = workflow_cache.get("l3_names", [])
+    l4_names = workflow_cache.get("l4_names", [])
+    l4_details = workflow_cache.get("l4_details", [])
+
+    # New Workflow 캐시: redesigned_process에서 L3/L4 이름 추출
+    if not l4_names:
+        redesigned = workflow_cache.get("redesigned_process", [])
+        for l3 in redesigned:
+            l3_name = l3.get("l3_name", "")
+            if l3_name and l3_name not in l3_names:
+                l3_names.append(l3_name)
+            for l4 in l3.get("l4_list", []):
+                l4_name = l4.get("l4_name", "")
+                if l4_name and l4_name not in l4_names:
+                    l4_names.append(l4_name)
+                    l4_details.append({"name": l4_name, "pain_points": []})
+
+    # agents 구조 fallback (구형 New Workflow)
+    if not l4_names:
+        for agent in workflow_cache.get("agents", []):
+            for t in agent.get("assigned_tasks", []):
+                name = t.get("task_name", "")
+                if name and name not in l4_names:
+                    l4_names.append(name)
+
+    return l2_names, l3_names, l4_names, l4_details
+
+
 async def _plan_search_queries(workflow_cache: dict) -> list[str]:
     """
     LLM이 프로세스 컨텍스트를 분석하여 다각도 검색 쿼리를 직접 생성합니다.
@@ -127,10 +159,7 @@ async def _plan_search_queries(workflow_cache: dict) -> list[str]:
         return _fallback_queries(workflow_cache)
 
     process_name = workflow_cache.get("process_name", "")
-    l2_names = workflow_cache.get("l2_names", [])
-    l3_names = workflow_cache.get("l3_names", [])
-    l4_names = workflow_cache.get("l4_names", [])
-    l4_details = workflow_cache.get("l4_details", [])
+    l2_names, l3_names, l4_names, l4_details = _extract_names_from_cache(workflow_cache)
 
     pain_points = []
     for d in l4_details[:3]:
@@ -184,7 +213,7 @@ JSON만 출력:
 def _fallback_queries(workflow_cache: dict) -> list[str]:
     """LLM 쿼리 플래닝 실패 시 사용하는 기본 쿼리."""
     process_name = workflow_cache.get("process_name", "HR process")
-    l4_names = workflow_cache.get("l4_names", [])
+    _, _, l4_names, _ = _extract_names_from_cache(workflow_cache)
     focus = l4_names[0] if l4_names else process_name
 
     # 한국어 → 영어 기본 매핑
@@ -296,7 +325,7 @@ async def _generate_followup_queries(
         return []
 
     process_name = workflow_cache.get("process_name", "")
-    l4_names = workflow_cache.get("l4_names", [])
+    _, _, l4_names, _ = _extract_names_from_cache(workflow_cache)
 
     found_lines = []
     for r in round1_results[:20]:
