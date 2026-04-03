@@ -1456,6 +1456,12 @@ async def upload_workflow_excel(file: UploadFile = File(...)):
     global _tasks_cache
     _tasks_cache = tasks
 
+    # 가이드 시트 및 데이터 없는 시트는 선택 목록에서 제외
+    data_sheets = [
+        s for s in sheets
+        if not s.get("is_guide", False) and s.get("task_count", 0) > 0
+    ]
+
     return {
         "ok": True,
         "filename": file.filename,
@@ -1469,7 +1475,7 @@ async def upload_workflow_excel(file: UploadFile = File(...)):
                 "row_count": s.get("task_count", 0),
                 "l5_count": s.get("task_count", 0),
             }
-            for s in sheets
+            for s in data_sheets
         ],
     }
 
