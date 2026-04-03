@@ -1380,6 +1380,7 @@ async def upload_ppt_workflow(file: UploadFile = File(...)):
 # ─────────────────────────────────────────────────────────────────────────────
 
 _wf_excel_tasks: list = []     # Workflow용 엑셀 Task 캐시
+_wf_excel_path: str = ""       # 현재 업로드된 엑셀 파일 경로 (항상 이 경로만 사용)
 _wf_classification: dict = {}  # 엑셀에서 추출한 분류 결과
 _wf_step1_cache: dict = {}     # Step 1 결과 캐시
 _wf_step2_cache: dict = {}     # Step 2 결과 캐시
@@ -1422,9 +1423,10 @@ async def upload_workflow_excel(file: UploadFile = File(...)):
     recommended = next((s["name"] for s in sheets if s.get("recommended")), None)
     tasks = load_tasks(str(save_path), sheet_name=recommended)
 
-    global _wf_excel_tasks, _wf_classification, _wf_chat_history
+    global _wf_excel_tasks, _wf_excel_path, _wf_classification, _wf_chat_history
     global _wf_step1_cache, _wf_step2_cache
     _wf_excel_tasks = tasks
+    _wf_excel_path = str(save_path)   # 현재 파일 경로 고정
     _wf_classification = {}
     _wf_step1_cache = {}
     _wf_step2_cache = {}
@@ -1490,16 +1492,22 @@ async def select_workflow_excel_sheet(request: Request):
     if not sheet_name:
         raise HTTPException(400, "시트 이름이 필요합니다.")
 
-    excel_files = sorted(_WF_DIR.glob("*.xlsx"), key=lambda x: x.stat().st_mtime)
-    if not excel_files:
-        excel_files = sorted(_UPLOAD_DIR.glob("*.xlsx"), key=lambda x: x.stat().st_mtime)
-    if not excel_files:
-        raise HTTPException(404, "업로드된 엑셀 파일이 없습니다.")
+    # 업로드 시 고정된 경로 우선 사용 → 없으면 최신 파일 fallback
+    if _wf_excel_path and Path(_wf_excel_path).exists():
+        excel_path = _wf_excel_path
+    else:
+        excel_files = sorted(_WF_DIR.glob("*.xlsx"), key=lambda x: x.stat().st_mtime)
+        if not excel_files:
+            excel_files = sorted(_UPLOAD_DIR.glob("*.xlsx"), key=lambda x: x.stat().st_mtime)
+        if not excel_files:
+            raise HTTPException(404, "업로드된 엑셀 파일이 없습니다.")
+        excel_path = str(excel_files[-1])
 
-    tasks = load_tasks(str(excel_files[-1]), sheet_name=sheet_name)
+    tasks = load_tasks(excel_path, sheet_name=sheet_name)
 
-    global _wf_excel_tasks, _wf_classification, _tasks_cache
+    global _wf_excel_tasks, _wf_excel_path, _wf_classification, _tasks_cache
     _wf_excel_tasks = tasks
+    _wf_excel_path = excel_path   # 시트 선택해도 경로 유지
     _tasks_cache = tasks
     _wf_classification = {}
 
