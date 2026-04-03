@@ -106,6 +106,47 @@ def _search_duckduckgo(query: str, max_results: int = 8) -> list[dict]:
     return results
 
 
+# ── 한국어 HR/비즈니스 용어 → 영어 키워드 매핑 ─────────────────────────────
+
+_KR_TO_EN: dict[str, str] = {
+    # 인사·발령
+    "발령": "personnel assignment position change job transfer",
+    "입사발령": "employee appointment onboarding personnel action",
+    "조직개편": "organizational restructuring reorg",
+    "전보": "job transfer internal mobility",
+    "승진": "promotion advancement",
+    "퇴직": "retirement offboarding separation",
+    "채용": "recruitment hiring talent acquisition",
+    "면접": "interview candidate screening",
+    # 교육·평가
+    "교육": "employee training L&D learning development",
+    "평가": "performance evaluation appraisal",
+    "역량": "competency skills assessment",
+    # 급여·보상
+    "급여": "payroll salary compensation",
+    "보상": "compensation benefits rewards",
+    # 노사·복리
+    "노사": "labor relations industrial relations",
+    "교섭": "collective bargaining negotiation",
+    "복리후생": "employee benefits welfare",
+    "휴직": "leave of absence absence management",
+    "인사": "HR human resources personnel management",
+    # 업무 프로세스
+    "승인": "approval workflow authorization",
+    "품의": "internal approval document sign-off",
+    "보고": "reporting dashboard",
+    "공지": "notification announcement",
+}
+
+
+def _translate_to_en(korean_term: str) -> str:
+    """한국어 용어를 영어 키워드로 변환. 매핑에 없으면 원문 반환."""
+    for kr, en in _KR_TO_EN.items():
+        if kr in korean_term:
+            return en
+    return korean_term
+
+
 # ── 검색 쿼리 생성 ───────────────────────────────────────────────────────────
 
 def _generate_search_queries(workflow_cache: dict) -> list[str]:
@@ -122,36 +163,56 @@ def _generate_search_queries(workflow_cache: dict) -> list[str]:
 
     queries = []
 
-    # ── 1순위: L4 세부 활동 × Pain Point 조합 쿼리 (최대 3개) ──────────────
+    # ── 1순위: L4 세부 활동 — 영어 번역 쿼리 우선 ───────────────────────────
     for detail in l4_details[:3]:
         name = detail["name"]
+        en_kw = _translate_to_en(name)
         pains = detail.get("pain_points", [])
         pain_kw = " ".join(pains[:2]) if pains else "automation"
-        queries.append(
-            f"enterprise AI '{name}' {pain_kw} case study results 2024 2025"
-        )
 
-    # ── 2순위: L3 영역 × Pain Point 쿼리 ────────────────────────────────────
-    for detail in l3_details[:3]:
+        if en_kw != name:
+            # 한국어 용어 → 영어 번역 쿼리 (검색 효과 높음)
+            queries.append(
+                f"enterprise AI {en_kw} automation case study results 2024 2025"
+            )
+            # HR 시스템 특화 쿼리
+            queries.append(
+                f"Workday SAP SuccessFactors Oracle HCM {en_kw} AI automation workflow"
+            )
+        else:
+            # 번역 없는 경우 원문 그대로
+            queries.append(
+                f"enterprise AI '{name}' {pain_kw} case study results 2024 2025"
+            )
+
+    # ── 2순위: L3 영역 — 영어 번역 포함 ─────────────────────────────────────
+    for detail in l3_details[:2]:
         name = detail["name"]
+        en_kw = _translate_to_en(name)
         pains = detail.get("pain_points", [])
         pain_kw = " ".join(pains[:2]) if pains else "automation"
-        queries.append(
-            f"enterprise '{name}' AI {pain_kw} adoption outcome 2024 2025"
-        )
+        if en_kw != name:
+            queries.append(
+                f"enterprise {en_kw} AI {pain_kw} adoption outcome 2024 2025"
+            )
+        else:
+            queries.append(
+                f"enterprise '{name}' AI {pain_kw} adoption outcome 2024 2025"
+            )
 
-    # ── 3순위: L2 대분류 fallback (L3/L4 모두 없는 경우) ────────────────────
+    # ── 3순위: L2 대분류 fallback ─────────────────────────────────────────────
     if not l3_names and not l4_names:
         fallback = l2_names[0] if l2_names else process_name
+        en_fallback = _translate_to_en(fallback)
         queries.append(
-            f"Google Amazon Meta Microsoft internal '{fallback}' "
+            f"Google Amazon Meta Microsoft internal {en_fallback} "
             f"AI automation implementation results 2024 2025"
         )
         queries.append(
-            f"Fortune 500 enterprise '{fallback}' AI agent deployment case study ROI"
+            f"Fortune 500 enterprise {en_fallback} AI agent deployment case study ROI"
         )
 
-    # ── 한국 대기업 — L4 우선, 없으면 L3, L2 순 ─────────────────────────────
+    # ── 한국 대기업 — 한국어 쿼리 (국내 사례 검색) ───────────────────────────
     kr_focus = l4_names[0] if l4_names else (l3_names[0] if l3_names else (l2_names[0] if l2_names else process_name))
     kr_pains = l4_details[0].get("pain_points", []) if l4_details else (
         l3_details[0].get("pain_points", []) if l3_details else []
@@ -161,32 +222,37 @@ def _generate_search_queries(workflow_cache: dict) -> list[str]:
         f"삼성 현대 SK LG 두산 '{kr_focus}' {kr_pain_kw} 도입 사례 성과 2024 2025"
     )
 
-    # ── 에이전트 기술 × 가장 구체적인 레벨 ──────────────────────────────────
-    techniques = set()
-    for agent in agents[:3]:
-        tech = agent.get("ai_technique", "")
-        if tech:
-            techniques.add(tech.split(",")[0].strip())
-    if techniques:
-        tech_str = " ".join(list(techniques)[:2])
-        focus = l4_names[0] if l4_names else (l3_names[0] if l3_names else process_name)
-        queries.append(f"enterprise {tech_str} '{focus}' real world deployment outcome")
-
-    # ── 글로벌 제조·중공업 — L4 → L3 → L2 순 ───────────────────────────────
-    industry_focus = l4_names[0] if l4_names else (l3_names[0] if l3_names else process_name)
+    # ── HR 전문 시스템 × 가장 구체적 레벨 ────────────────────────────────────
+    focus_en = _translate_to_en(l4_names[0] if l4_names else (l3_names[0] if l3_names else process_name))
     queries.append(
-        f"Siemens GE Honeywell Caterpillar Doosan '{industry_focus}' "
+        f"Workday SAP SuccessFactors Oracle HCM {focus_en} AI RPA automation case study"
+    )
+
+    # ── 글로벌 제조·중공업 ────────────────────────────────────────────────────
+    industry_focus_en = _translate_to_en(l4_names[0] if l4_names else (l3_names[0] if l3_names else process_name))
+    queries.append(
+        f"Siemens GE Honeywell Caterpillar Doosan {industry_focus_en} "
         f"AI automation adoption results"
     )
 
-    # ── 컨설팅 리서치 — L4 → L3 → L2 순 ────────────────────────────────────
-    report_focus = l4_names[0] if l4_names else (l3_names[0] if l3_names else (l2_names[0] if l2_names else process_name))
+    # ── 컨설팅 리서치 ─────────────────────────────────────────────────────────
+    report_focus_en = _translate_to_en(
+        l4_names[0] if l4_names else (l3_names[0] if l3_names else (l2_names[0] if l2_names else process_name))
+    )
     queries.append(
-        f"McKinsey Deloitte PwC Gartner '{report_focus}' "
+        f"McKinsey Deloitte PwC Gartner {report_focus_en} "
         f"AI transformation benchmark industry report 2024 2025"
     )
 
-    return queries[:10]
+    # 중복 제거
+    seen: set[str] = set()
+    deduped = []
+    for q in queries:
+        if q not in seen:
+            seen.add(q)
+            deduped.append(q)
+
+    return deduped[:10]
 
 
 # ── 통합 검색 ────────────────────────────────────────────────────────────────

@@ -419,7 +419,42 @@ def load_tasks(
         values_only=True,
     ):
         l5_id = _cell(row, COL["l5_id"])
+
+        # L5 ID가 없으면 L4/L3/L2 레벨 행으로 인식 (선행 컨텍스트 행)
         if not l5_id:
+            l4_id = _cell(row, COL["l4_id"])
+            l3_id = _cell(row, COL["l3_id"])
+            l2_id = _cell(row, COL["l2_id"])
+            if l4_id:
+                row_id, row_level, row_name = l4_id, "L4", _cell(row, COL["l4_name"]) or l4_id
+            elif l3_id:
+                row_id, row_level, row_name = l3_id, "L3", _cell(row, COL["l3_name"]) or l3_id
+            elif l2_id:
+                row_id, row_level, row_name = l2_id, "L2", _cell(row, COL["l2_name"]) or l2_id
+            else:
+                continue  # 모든 레벨 ID 없으면 빈 행으로 skip
+
+            if not row_name:
+                continue
+            if row_id in seen_ids:
+                continue  # 상위 레벨 중복은 skip (L5 중복과 달리 첫 번째만 유지)
+            seen_ids[row_id] = 1
+
+            tasks.append(
+                Task(
+                    id=row_id,
+                    level=row_level,
+                    l2_id=_cell(row, COL["l2_id"]),
+                    l2=_cell(row, COL["l2_name"]) or "",
+                    l3_id=_cell(row, COL["l3_id"]) or "",
+                    l3=_cell(row, COL["l3_name"]) or "",
+                    l4_id=l4_id or "",
+                    l4=_cell(row, COL["l4_name"]) or "",
+                    l4_description=_cell(row, COL["l4_desc"]) or "",
+                    name=row_name,
+                    description=_cell(row, COL.get("l5_desc", COL["l4_desc"])) or "",
+                )
+            )
             continue
 
         # 중복 ID 처리: 두 번째부터 접미사 붙이기 (예: 1.8.1.2_2)
@@ -434,6 +469,7 @@ def load_tasks(
         tasks.append(
             Task(
                 id=unique_id,
+                level="L5",
                 l2_id=_cell(row, COL["l2_id"]),
                 l2=_cell(row, COL["l2_name"]),
                 l3_id=_cell(row, COL["l3_id"]),

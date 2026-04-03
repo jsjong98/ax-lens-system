@@ -9,7 +9,8 @@ from pydantic import BaseModel, Field
 # ── Task 관련 ────────────────────────────────────────────────────────────────
 
 class Task(BaseModel):
-    id: str = Field(..., description="L5 Task ID (예: 1.1.1.1)")
+    id: str = Field(..., description="Task ID (L5는 1.1.1.1, L4는 1.1.1 등)")
+    level: str = Field("L5", description="계층 레벨: L2/L3/L4/L5")
     l2_id: str = ""
     l2: str = Field(..., description="Major Process (L2) 명")
     l3_id: str = ""
