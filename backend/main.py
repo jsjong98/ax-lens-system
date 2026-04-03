@@ -1700,19 +1700,50 @@ def _build_mapped_asis_context(sheet_id: str = "") -> str:
     return "\n".join(lines)
 
 
-def _build_task_and_pain_summary() -> tuple[str, str, str]:
-    """엑셀 Task 데이터로 task_summary, pain_summary, process_name을 만든다."""
-    l2_names = list({t.l2 for t in _wf_excel_tasks if t.l2})
+def _build_task_and_pain_summary(sheet_id: str = "") -> tuple[str, str, str]:
+    """엑셀 Task 데이터로 task_summary, pain_summary, process_name을 만든다.
+    sheet_id가 주어지면 해당 JSON 시트에 등장하는 task_id 범위로 엑셀 Task를 필터링한다."""
+
+    # JSON 시트 기반 필터링 — 선택된 시트의 task_id 집합 추출
+    relevant_tasks = _wf_excel_tasks
+    if sheet_id and "parsed" in _workflow_cache:
+        parsed = _workflow_cache["parsed"]
+        target_sheets = [s for s in parsed.sheets if s.sheet_id == sheet_id] or parsed.sheets[:1]
+
+        # JSON 노드의 task_id 및 l4_id/l3_id 접두사 수집
+        json_tids: set[str] = set()
+        json_l4_ids: set[str] = set()
+        json_l3_ids: set[str] = set()
+        for s in target_sheets:
+            for n in s.nodes.values():
+                if n.task_id:
+                    json_tids.add(n.task_id)
+                    parts = n.task_id.split(".")
+                    if len(parts) >= 3:
+                        json_l4_ids.add(".".join(parts[:3]))  # x.y.z
+                    if len(parts) >= 2:
+                        json_l3_ids.add(".".join(parts[:2]))  # x.y
+
+        # 1순위: task_id 직접 매칭 → 2순위: l4_id 매칭 → 3순위: l3_id 매칭
+        filtered = [t for t in _wf_excel_tasks if t.id in json_tids]
+        if not filtered:
+            filtered = [t for t in _wf_excel_tasks if t.l4_id in json_l4_ids]
+        if not filtered:
+            filtered = [t for t in _wf_excel_tasks if t.l3_id in json_l3_ids]
+        if filtered:
+            relevant_tasks = filtered
+
+    l2_names = list({t.l2 for t in relevant_tasks if t.l2})
     process_name = l2_names[0] if l2_names else "HR 프로세스"
 
     task_lines = []
-    for t in _wf_excel_tasks:
+    for t in relevant_tasks:
         cls = _wf_classification.get(t.id, {})
         label = cls.get("label", "미분류")
         task_lines.append(f"- [{t.id}] {t.name} (L3: {t.l3}, L4: {t.l4}) — 분류: {label}")
 
     pain_lines = []
-    for t in _wf_excel_tasks:
+    for t in relevant_tasks:
         pains = []
         if t.pain_time: pains.append("시간/속도")
         if t.pain_accuracy: pains.append("정확성")
@@ -1891,7 +1922,7 @@ async def benchmark_workflow_step1(request: Request):
     extra_companies = body.get("companies", "")  # 추가 검색 기업명
     sheet_id_bm = body.get("sheet_id", "")
 
-    process_name, task_summary, pain_summary = _build_task_and_pain_summary()
+    process_name, task_summary, pain_summary = _build_task_and_pain_summary(sheet_id_bm)
 
     # ── 공통 인덱스 + L4/L3/L2 세부 정보 구축 ───────────────────────────────
     _, excel_by_l4, excel_by_l3, excel_by_l2 = _build_excel_index()
@@ -2166,7 +2197,7 @@ async def generate_workflow_step1(request: Request):
     process_name_override = body.get("process_name", "")
     sheet_id = body.get("sheet_id", "")
 
-    process_name, task_summary, pain_summary = _build_task_and_pain_summary()
+    process_name, task_summary, pain_summary = _build_task_and_pain_summary(sheet_id)
     if process_name_override:
         process_name = process_name_override
 
