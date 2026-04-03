@@ -1487,6 +1487,8 @@ async def select_workflow_excel_sheet(request: Request):
     """엑셀 시트 선택 (Workflow용)."""
     from excel_reader import load_tasks
 
+    global _wf_excel_tasks, _wf_excel_path, _wf_classification, _tasks_cache
+
     body = await request.json()
     sheet_name = body.get("sheet_name", "")
     if not sheet_name:
@@ -1505,7 +1507,6 @@ async def select_workflow_excel_sheet(request: Request):
 
     tasks = load_tasks(excel_path, sheet_name=sheet_name)
 
-    global _wf_excel_tasks, _wf_excel_path, _wf_classification, _tasks_cache
     _wf_excel_tasks = tasks
     _wf_excel_path = excel_path   # 시트 선택해도 경로 유지
     _tasks_cache = tasks
