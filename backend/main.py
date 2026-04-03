@@ -2047,11 +2047,11 @@ async def benchmark_workflow_step1(request: Request):
 - L4 단위 매칭이 안 되면 L3 단위로 매핑
 - L3도 안 되면 L2 단위로 매핑
 
-## 사례 신뢰도 등급 (confidence 필드에 표기)
-- ★★★: 기업명 + 구체적 수치 성과 + 출처 URL 모두 있음
-- ★★: 기업명 + AI 적용 방법 있음, 수치 없음
-- ★: 기업명만 있음, 내용 불분명
-- ✗ 제외: 벤더 마케팅 자료, 일반 AI 통계, 기업명 미확인
+## 포함 기준 (3가지 모두 충족해야 포함)
+1. **기업명**: 고유 기업명이 검색 결과에 명확히 언급됨
+2. **URL**: 검색 결과에 실제 URL이 있음 — URL 없는 사례는 benchmark_table에서 완전 제외
+3. **내용**: AI 적용 방법 또는 성과가 구체적으로 언급됨
+- ✗ 제외: 벤더 마케팅 자료, 일반 AI 통계, 기업명 미확인, URL 없음
 
 ## 중요 원칙
 - **영어 사례를 한국어로 번역하여 설명** — 영어 원문 그대로 두지 말 것
@@ -2065,7 +2065,6 @@ async def benchmark_workflow_step1(request: Request):
   "benchmark_table": [
     {{
       "source": "기업명 (고유 기업명 1개만, 벤더명·'미확인' 금지)",
-      "confidence": "★★★|★★|★",
       "company_type": "Tech 선도 | 非Tech 실제 구현",
       "industry": "산업군",
       "process_area": "매핑된 L4 활동명 (위 L4 목록 중 해당하는 것, 없으면 L3명)",
@@ -2102,7 +2101,7 @@ async def benchmark_workflow_step1(request: Request):
     result_data = await _call_llm_step1(bm_analysis_system, [{"role": "user", "content": bm_user}])
 
     if not result_data:
-        # fallback: raw 결과를 그대로 테이블화
+        # fallback: URL 있는 raw 결과만 테이블화
         _wf_benchmark_table = [
             {
                 "source": r.get("title", "")[:30],
@@ -2115,9 +2114,12 @@ async def benchmark_workflow_step1(request: Request):
                 "url": r.get("url", ""),
             }
             for r in raw_results[:10]
+            if r.get("url")  # URL 없는 항목 제외
         ]
     else:
-        _wf_benchmark_table = result_data.get("benchmark_table", [])
+        # URL 없는 항목은 후처리로 제거
+        raw_table = result_data.get("benchmark_table", [])
+        _wf_benchmark_table = [row for row in raw_table if row.get("url")]
 
     # 채팅 이력에 기록
     global _wf_chat_history
