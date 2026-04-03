@@ -35,7 +35,7 @@ def _search_tavily(query: str, max_results: int = 5) -> list[dict]:
         "search_depth": "advanced",
         "include_answer": True,
         "include_raw_content": True,   # 실제 페이지 본문 수집
-        # 뉴스 사이트 제외 — case study / white paper / 공식 블로그 우선
+        # 뉴스 사이트만 제외 — 그 외 도메인은 LLM 품질 채점으로 필터링
         "exclude_domains": [
             "news.naver.com", "n.news.naver.com", "news.daum.net",
             "chosun.com", "joins.com", "joongang.co.kr", "hani.co.kr",
@@ -44,18 +44,6 @@ def _search_tavily(query: str, max_results: int = 5) -> list[dict]:
             "aitimes.com", "aitimes.kr", "newsis.com", "yonhapnews.co.kr",
             "techcrunch.com", "reuters.com", "bloomberg.com", "cnbc.com",
             "businessinsider.com", "venturebeat.com",
-        ],
-        # 케이스 스터디·공식 문서 도메인 우선
-        "include_domains": [
-            # HR AI 벤더 케이스 스터디
-            "paradox.ai", "eightfold.ai", "phenom.com", "beamery.com",
-            "hirevue.com", "leenaai.com", "visier.com", "pymetrics.com",
-            # HR 플랫폼 공식 문서
-            "help.sap.com", "sap.com", "workday.com", "oracle.com",
-            "servicenow.com", "microsoft.com", "successfactors.com",
-            # 학술·리서치
-            "researchgate.net", "scholar.google.com", "acm.org",
-            "ieeexplore.ieee.org", "shrm.org", "hbr.org",
         ],
     }).encode("utf-8")
 
@@ -395,6 +383,107 @@ async def _enrich_top_results(results: list[dict], top_n: int = 8) -> list[dict]
     return results
 
 
+# ── Phase 3.5: LLM 콘텐츠 품질 채점 ────────────────────────────────────────
+# 룰베이스 도메인 필터 대신 LLM이 내용을 읽고 직접 판단
+# IBM.com/think, 좋은 블로그, 학술 논문 등 도메인과 무관하게 유용한 것은 통과
+
+async def _score_results_by_quality(
+    results: list[dict],
+    workflow_cache: dict,
+) -> list[dict]:
+    """
+    LLM이 각 검색 결과의 품질을 1-5점으로 채점합니다.
+    3점 이상만 최종 분석에 사용합니다.
+
+    채점 기준:
+    5점 — AI 구현 방법 + 구체적 기업 사례 + 수치 성과가 모두 있음
+    4점 — AI 구현 방법 + 기업 사례가 있으나 수치 성과 부족
+    3점 — AI 적용 방법론이나 기술적 접근이 구체적으로 있음
+    2점 — 일반적인 AI 소개, 추상적인 내용
+    1점 — 무관하거나 마케팅 자료, 뉴스 요약
+    """
+    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    if not api_key or not results:
+        return results
+
+    process_name = workflow_cache.get("process_name", "")
+    _, _, l4_names, _ = _extract_names_from_cache(workflow_cache)
+
+    # 채점할 결과 목록 (URL 있는 것만, 최대 30개)
+    to_score = [r for r in results if r.get("url")][:30]
+    if not to_score:
+        return results
+
+    # 각 결과의 제목 + URL + 내용 앞부분을 채점용으로 요약
+    items_text = ""
+    for i, r in enumerate(to_score):
+        snippet = (r.get("content") or r.get("snippet", ""))[:300]
+        items_text += f"[{i}] URL: {r.get('url','')}\n제목: {r.get('title','')[:80]}\n내용: {snippet}\n\n"
+
+    prompt = f"""당신은 HR AI 벤치마킹 리서치 품질 평가자입니다.
+
+## 조사 중인 HR 프로세스
+- 프로세스: {process_name}
+- 핵심 활동: {', '.join(l4_names[:5])}
+
+## 평가할 검색 결과 {len(to_score)}개
+{items_text}
+
+## 채점 기준 (1-5점)
+5점 — AI 구현 방법 + 실제 기업명 + 수치 성과(%, 시간, 비용)가 모두 있음
+4점 — AI 구현 방법 + 기업 사례가 있으나 수치 성과 미약
+3점 — AI 적용 방법론·기술 접근이 구체적 (좋은 블로그, 기술 문서, 학술 논문 등)
+2점 — 일반적 AI 소개, 추상적 내용, 과도한 마케팅
+1점 — 무관한 내용, 단순 뉴스 요약
+
+## 규칙
+- 도메인명으로 판단하지 말 것 (IBM 블로그, 중소 마케팅 블로그도 내용이 좋으면 3점 이상)
+- 뉴스 기사여도 구체적 AI 구현 내용이 있으면 3점 가능
+- 위 HR 프로세스와 관련 없으면 1점
+
+각 항목의 인덱스와 점수만 JSON으로 출력:
+{{"scores": [{{"idx": 0, "score": 4}}, {{"idx": 1, "score": 2}}, ...]}}"""
+
+    try:
+        from anthropic import AsyncAnthropic
+        client = AsyncAnthropic(api_key=api_key)
+        resp = await client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=800,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = resp.content[0].text.strip()
+        m = re.search(r'\{.*\}', raw, re.DOTALL)
+        if not m:
+            return results
+
+        score_data = json.loads(m.group())
+        score_map: dict[int, int] = {
+            item["idx"]: item["score"]
+            for item in score_data.get("scores", [])
+        }
+
+        # 채점 결과를 결과에 반영
+        for i, r in enumerate(to_score):
+            r["quality_score"] = score_map.get(i, 2)
+
+        passed = sum(1 for r in to_score if r.get("quality_score", 0) >= 3)
+        print(f"[benchmark] 품질 채점 완료 — {len(to_score)}개 중 {passed}개 통과 (3점+)")
+
+        # URL 없는 결과는 quality_score=2로 설정 (통과 가능하지만 낮은 우선순위)
+        for r in results:
+            if "quality_score" not in r:
+                r["quality_score"] = 2
+
+        # 3점 이상 우선, 그 안에서 점수 내림차순 정렬
+        results.sort(key=lambda r: r.get("quality_score", 0), reverse=True)
+        return results
+
+    except Exception as e:
+        print(f"[benchmark] 품질 채점 실패, 전체 사용: {e}")
+        return results
+
+
 # ── Phase 4: LLM Gap Analysis → Round 2 쿼리 생성 ───────────────────────────
 
 async def _generate_followup_queries(
@@ -498,6 +587,9 @@ async def search_benchmarks(workflow_cache: dict) -> list[dict]:
     if use_tavily:
         all_results = await _enrich_top_results(all_results, top_n=10)
 
+    # ── Phase 3.5: LLM 품질 채점 — 도메인 룰 대신 내용으로 판단 ────────────────
+    all_results = await _score_results_by_quality(all_results, workflow_cache)
+
     # ── Phase 4 & 5: Round 2 (LLM Gap 분석 → 후속 검색) ─────────────────────
     if use_tavily:
         queries_r2 = await _generate_followup_queries(workflow_cache, all_results)
@@ -526,8 +618,8 @@ async def search_benchmarks(workflow_cache: dict) -> list[dict]:
     total_queries = len(queries_r1) + (len(queries_r2) if use_tavily and queries_r2 else 0)
     print(f"[benchmark] 완료 — {engine} | {total_queries}개 쿼리 | 총 {len(all_results)}건")
 
-    # URL 있는 결과를 앞으로 정렬 (LLM에 유용한 것 우선)
-    all_results.sort(key=lambda r: (0 if r.get("url") else 1, r.get("round", 1)))
+    # 품질 점수 내림차순 정렬 (LLM 채점 기반)
+    all_results.sort(key=lambda r: r.get("quality_score", 0), reverse=True)
 
     return all_results[:40]
 
