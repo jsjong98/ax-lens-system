@@ -984,10 +984,10 @@ export async function generateWorkflowStep1(params: {
   });
 }
 
-export async function chatWorkflowStep1(message: string): Promise<WorkflowChatResponse> {
+export async function chatWorkflowStep1(message: string, sheet_id?: string): Promise<WorkflowChatResponse> {
   return apiFetch("/workflow/chat-step1", {
     method: "POST",
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({ message, sheet_id }),
   });
 }
 

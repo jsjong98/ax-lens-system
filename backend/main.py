@@ -1951,8 +1951,8 @@ async def benchmark_workflow_step1(request: Request):
     if "parsed" in _workflow_cache:
         parsed = _workflow_cache["parsed"]
         target_sheets = (
-            [s for s in parsed.sheets if s.sheet_id == sheet_id_bm] or parsed.sheets
-        ) if sheet_id_bm else parsed.sheets
+            [s for s in parsed.sheets if s.sheet_id == sheet_id_bm] or parsed.sheets[:1]
+        ) if sheet_id_bm else parsed.sheets[:1]
         for s in target_sheets:
             for node in s.nodes.values():
                 lv, lbl, tid = node.level, node.label.strip(), node.task_id.strip()
@@ -2269,10 +2269,11 @@ async def chat_workflow_step1(request: Request):
 
     body = await request.json()
     user_message = body.get("message", "")
+    sheet_id = body.get("sheet_id", "")
     if not user_message:
         raise HTTPException(400, "메시지가 필요합니다.")
 
-    process_name, task_summary, pain_summary = _build_task_and_pain_summary()
+    process_name, task_summary, pain_summary = _build_task_and_pain_summary(sheet_id)
 
     # 메시지에서 기업명 감지 → 추가 벤치마킹
     import re as _re
@@ -2291,7 +2292,21 @@ async def chat_workflow_step1(request: Request):
 
     if company_pattern or wants_benchmark:
         companies = list(set(company_pattern)) if company_pattern else []
+
+        # sheet_id 기준으로 필터링된 Task 사용
+        _, task_sum_txt, _ = _build_task_and_pain_summary(sheet_id)
         _, excel_by_l4, excel_by_l3, excel_by_l2 = _build_excel_index()
+
+        # JSON 시트 기준 L4 ID 집합 추출 (같은 방식)
+        scoped_l4_ids: set[str] = set()
+        if sheet_id and "parsed" in _workflow_cache:
+            parsed_tmp = _workflow_cache["parsed"]
+            for s in [ss for ss in parsed_tmp.sheets if ss.sheet_id == sheet_id] or parsed_tmp.sheets[:1]:
+                for n in s.nodes.values():
+                    if n.task_id:
+                        parts = n.task_id.split(".")
+                        if len(parts) >= 3:
+                            scoped_l4_ids.add(".".join(parts[:3]))
 
         _PAIN_MAP_BM = [("pain_time","시간/속도"),("pain_accuracy","정확성"),
                         ("pain_repetition","반복/수작업"),("pain_data","정보/데이터"),
@@ -2305,20 +2320,26 @@ async def chat_workflow_step1(request: Request):
             return list(found)
 
         l4_details_chat = []
-        for l4_id, tasks in list(excel_by_l4.items())[:4]:
+        l4_items = (
+            [(lid, excel_by_l4[lid]) for lid in scoped_l4_ids if lid in excel_by_l4]
+            if scoped_l4_ids else list(excel_by_l4.items())[:4]
+        )
+        for l4_id, tasks in l4_items[:4]:
             name = tasks[0].l4 if tasks else ""
             if name:
                 l4_details_chat.append({"name": name, "task_id": l4_id,
                     "pain_points": _get_pains_bm(tasks),
                     "description": "", "task_names": []})
 
+        # 범위 내 Task만으로 L3/L2 이름 구성
+        scoped_tasks = [t for t in _wf_excel_tasks if not scoped_l4_ids or t.l4_id in scoped_l4_ids]
         bm_data = {
             "process_name": process_name,
             "agents": [],
             "l4_details": l4_details_chat,
             "l4_names": [d["name"] for d in l4_details_chat],
-            "l3_names": list({t.l3 for t in _wf_excel_tasks if t.l3})[:4],
-            "l2_names": list({t.l2 for t in _wf_excel_tasks if t.l2})[:2],
+            "l3_names": list({t.l3 for t in scoped_tasks if t.l3})[:4],
+            "l2_names": list({t.l2 for t in scoped_tasks if t.l2})[:2],
             "l3_details": [], "l2_details": [],
             "blueprint_summary": f"{' '.join(companies) + ' ' if companies else ''}{process_name} AI 적용",
         }

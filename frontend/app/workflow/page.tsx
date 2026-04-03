@@ -230,7 +230,7 @@ export default function WorkflowPage() {
     setChatMessages((prev) => [...prev, { role: "user", content: msg }]);
     setLoading(true);
     try {
-      const result = await chatWorkflowStep1(msg);
+      const result = await chatWorkflowStep1(msg, activeSheet ?? undefined);
       setChatMessages((prev) => [...prev, { role: "assistant", content: result.message }]);
       if (result.updated && result.result) {
         setStep1Result(result.result);
