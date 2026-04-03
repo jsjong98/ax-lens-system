@@ -110,6 +110,42 @@ def _search_duckduckgo(query: str, max_results: int = 8) -> list[dict]:
     return results
 
 
+# ── 한국어 HR 용어 → 영어 키워드 매핑 (main.py에서도 import해서 사용) ──────────
+
+_KR_TO_EN: dict[str, str] = {
+    "발령": "personnel assignment position change job transfer",
+    "입사발령": "employee appointment onboarding personnel action",
+    "조직개편": "organizational restructuring reorg",
+    "전보": "job transfer internal mobility",
+    "승진": "promotion advancement",
+    "퇴직": "retirement offboarding separation",
+    "채용": "recruitment hiring talent acquisition",
+    "면접": "interview candidate screening",
+    "교육": "employee training L&D learning development",
+    "평가": "performance evaluation appraisal",
+    "역량": "competency skills assessment",
+    "급여": "payroll salary compensation",
+    "보상": "compensation benefits rewards",
+    "노사": "labor relations industrial relations",
+    "교섭": "collective bargaining negotiation",
+    "복리후생": "employee benefits welfare",
+    "휴직": "leave of absence absence management",
+    "인사": "HR human resources personnel management",
+    "승인": "approval workflow authorization",
+    "품의": "internal approval document sign-off",
+    "보고": "reporting dashboard",
+    "공지": "notification announcement",
+}
+
+
+def _translate_to_en(korean_term: str) -> str:
+    """한국어 용어를 영어 키워드로 변환. 매핑에 없으면 원문 반환."""
+    for kr, en in _KR_TO_EN.items():
+        if kr in korean_term:
+            return en
+    return korean_term
+
+
 # ── Phase 1: LLM이 초기 쿼리를 직접 생성 ────────────────────────────────────
 # Perplexity 핵심 기술 #1 — 하드코딩 템플릿이 아닌 LLM이 컨텍스트를 이해하고 쿼리 생성
 
