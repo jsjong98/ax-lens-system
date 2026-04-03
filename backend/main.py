@@ -1571,6 +1571,25 @@ async def get_workflow_excel_tasks():
 _wf_benchmark_results: list = []   # 벤치마킹 검색 결과 (raw)
 _wf_benchmark_table: list = []     # 벤치마킹 결과 테이블 (LLM 분석 후)
 
+# 익명·금지 source 필터 — LLM 프롬프트만으론 막을 수 없어 백엔드에서 강제 제거
+_FORBIDDEN_SOURCE_PATTERNS = [
+    "fortune 500", "글로벌 대기업", "한 제조사", "한 기업", "한 은행", "한 금융사",
+    "한 회사", "한 유통", "한 제조업체", "한 it기업",
+    "익명", "anonymous", "undisclosed", "leading company", "major company",
+    "large enterprise", "nextant",
+    # 컨설팅·리서치펌 (source로 쓰는 것 방지)
+    "mckinsey", "bcg", "bain", "deloitte", "pwc", "ey", "kpmg", "accenture",
+    "gartner", "forrester", "idc", "hbr", "mit sloan",
+]
+
+
+def _is_valid_benchmark_source(source: str) -> bool:
+    """source 필드가 실명 기업인지 검사합니다. 익명·컨설팅펌이면 False."""
+    s = source.strip().lower()
+    if not s or len(s) < 2:
+        return False
+    return not any(pattern in s for pattern in _FORBIDDEN_SOURCE_PATTERNS)
+
 
 def _build_excel_index() -> tuple[dict, dict, dict, dict]:
     """엑셀 Task를 id(L5) / l4_id / l3_id / l2_id 기준으로 인덱싱.
@@ -2108,13 +2127,20 @@ async def benchmark_workflow_step1(request: Request):
 - ✗ 제외: 벤더 마케팅 자료, 일반 AI 통계, 기업명 미확인, URL 없음
 
 ## source 필드 핵심 규칙
-`source`는 반드시 **AI를 실제로 도입하여 운영한 기업**이어야 합니다.
+`source`는 반드시 **AI를 실제로 도입하여 운영한 기업의 고유 명칭**이어야 합니다.
 - ✅ 허용: Google, Amazon, Meta, Microsoft, Siemens, DHL, 삼성전자, Unilever, JPMorgan 등
 - ✅ 허용: Tech 선도사 또는 비Tech 실제 구현 기업
 - ❌ 절대 금지: McKinsey, BCG, Bain, Deloitte, PwC, EY, KPMG, Accenture, Gartner, Forrester, IDC
   → 이들은 보고서 **작성자**일 뿐, AI를 직접 도입한 기업이 아님
   → 만약 McKinsey 보고서에 특정 기업 사례가 언급되면, 그 **기업명**을 source로 사용
   → 보고서에 구체적 기업명이 없으면 해당 인사이트는 제외
+
+**⛔ 아래 형식은 source에 절대 사용 금지 — 조건 없이 해당 행 전체 DROP:**
+  - "Fortune 500 기업", "글로벌 대기업", "한 제조사", "한 기업", "한 은행", "한 금융사"
+  - "(익명)", "익명 기업", "undisclosed", "anonymous", "leading company", "major company"
+  - "Nextant", 솔루션 벤더 자체 (Workday, SAP, Oracle 등이 **도입처**로 기재된 경우)
+  - 기업명이 특정되지 않는 모든 표현
+  → **기업 실명이 없으면 그 사례는 존재하지 않는 것. 포함하지 말 것.**
 
 ## 중요 원칙
 - **영어 사례를 한국어로 번역하여 설명** — 영어 원문 그대로 두지 말 것
@@ -2180,9 +2206,12 @@ async def benchmark_workflow_step1(request: Request):
             if r.get("url")  # URL 없는 항목 제외
         ]
     else:
-        # URL 없는 항목은 후처리로 제거
+        # URL 없는 항목 + 익명·금지 source 항목 후처리 제거
         raw_table = result_data.get("benchmark_table", [])
-        _wf_benchmark_table = [row for row in raw_table if row.get("url")]
+        _wf_benchmark_table = [
+            row for row in raw_table
+            if row.get("url") and _is_valid_benchmark_source(row.get("source", ""))
+        ]
 
     # 채팅 이력에 기록
     global _wf_chat_history
@@ -2385,10 +2414,13 @@ L4 활동: {', '.join(bm_data['l4_names'][:4])}
             bm_result = await _call_llm_step1(bm_sys, [{"role":"user","content":bm_user_msg}])
             if bm_result and bm_result.get("benchmark_table"):
                 new_bm_entries = bm_result["benchmark_table"]
-                # 기존 테이블에 없는 기업 사례만 추가
+                # 기존 테이블에 없는 기업 사례만 추가 (URL + 실명 source 검증)
                 existing_sources = {b.get("source","") for b in _wf_benchmark_table}
                 for entry in new_bm_entries:
-                    if entry.get("source","") not in existing_sources:
+                    src = entry.get("source", "")
+                    if (src not in existing_sources
+                            and entry.get("url")
+                            and _is_valid_benchmark_source(src)):
                         _wf_benchmark_table.append(entry)
                 extra_bm_text = f"\n\n[추가 벤치마킹 — {len(new_bm_entries)}건 분석 완료]"
 
