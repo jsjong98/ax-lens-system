@@ -1,15 +1,18 @@
 """
 benchmark_search.py — 웹 벤치마킹 검색 + LLM 기반 Workflow 개선
 
-Perplexity Deep Research 방식:
-1. Round 1: 8개 쿼리 병렬 검색 (전문 읽기)
-2. LLM이 부족한 부분 분석 → 후속 쿼리 4개 자동 생성
-3. Round 2: 후속 쿼리 병렬 검색
-4. 전체 결과를 LLM에 전달하여 벤치마킹 테이블 생성
+Perplexity Deep Research 방식 구현:
+  Phase 1. LLM이 프로세스를 분석 → 다각도 초기 쿼리 직접 생성 (템플릿 탈피)
+  Phase 2. 8개 쿼리 병렬 검색 (Tavily 전문 읽기)
+  Phase 3. 상위 결과 URL에서 실제 페이지 전문 추가 수집
+  Phase 4. LLM이 "아직 부족한 것" 파악 → 후속 쿼리 4개 자동 생성
+  Phase 5. 후속 쿼리 병렬 검색 (Round 2)
+  Phase 6. 전체 결과를 LLM에 전달 → 벤치마킹 테이블 생성
 """
 from __future__ import annotations
 
 import asyncio
+import html as html_module
 import json
 import os
 import re
@@ -29,9 +32,9 @@ def _search_tavily(query: str, max_results: int = 5) -> list[dict]:
     payload = json.dumps({
         "query": query,
         "max_results": max_results,
-        "search_depth": "advanced",       # 심층 검색
-        "include_answer": True,            # AI 요약 답변 포함
-        "include_raw_content": True,       # 전문 포함 (핵심: snippet이 아닌 실제 기사 본문)
+        "search_depth": "advanced",
+        "include_answer": True,
+        "include_raw_content": True,   # 실제 페이지 본문 수집
     }).encode("utf-8")
 
     req = urllib.request.Request(
@@ -49,7 +52,6 @@ def _search_tavily(query: str, max_results: int = 5) -> list[dict]:
         with urllib.request.urlopen(req, timeout=20) as resp:
             data = json.loads(resp.read().decode("utf-8"))
 
-        # Tavily AI 요약 답변
         answer = data.get("answer", "")
         if answer:
             results.append({
@@ -59,12 +61,10 @@ def _search_tavily(query: str, max_results: int = 5) -> list[dict]:
                 "content": answer,
             })
 
-        # 개별 검색 결과 — raw_content 우선, 없으면 content
         for r in data.get("results", []):
             raw = r.get("raw_content", "") or ""
             content = r.get("content", "") or ""
-            # raw_content가 있으면 더 긴 버전(최대 2500자)을 사용
-            full_content = (raw[:2500] if raw else content[:2500])
+            full_content = raw[:2500] if raw else content[:2500]
             results.append({
                 "title": r.get("title", ""),
                 "snippet": content[:300],
@@ -85,22 +85,19 @@ def _search_duckduckgo(query: str, max_results: int = 8) -> list[dict]:
     """DuckDuckGo HTML 검색 (Tavily 사용 불가 시 fallback)."""
     encoded = urllib.parse.quote_plus(query)
     url = f"https://html.duckduckgo.com/html/?q={encoded}"
-
     req = urllib.request.Request(url, headers={
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
     })
-
     results = []
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
-            html = resp.read().decode("utf-8", errors="replace")
-
+            raw_html = resp.read().decode("utf-8", errors="replace")
         snippet_pattern = re.compile(
             r'class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)</a>.*?'
             r'class="result__snippet"[^>]*>(.*?)</(?:td|div)',
             re.DOTALL,
         )
-        for match in snippet_pattern.finditer(html):
+        for match in snippet_pattern.finditer(raw_html):
             link, title, snippet = match.groups()
             title = re.sub(r"<[^>]+>", "", title).strip()
             snippet = re.sub(r"<[^>]+>", "", snippet).strip()
@@ -110,135 +107,190 @@ def _search_duckduckgo(query: str, max_results: int = 8) -> list[dict]:
                 break
     except Exception as e:
         print(f"[benchmark] DuckDuckGo 검색 실패: {e}")
+    return results
+
+
+# ── Phase 1: LLM이 초기 쿼리를 직접 생성 ────────────────────────────────────
+# Perplexity 핵심 기술 #1 — 하드코딩 템플릿이 아닌 LLM이 컨텍스트를 이해하고 쿼리 생성
+
+async def _plan_search_queries(workflow_cache: dict) -> list[str]:
+    """
+    LLM이 프로세스 컨텍스트를 분석하여 다각도 검색 쿼리를 직접 생성합니다.
+
+    Perplexity가 하는 것처럼:
+    - 같은 개념을 다양한 표현으로 검색 (HR → people ops, workforce mgmt 등)
+    - 기술 / 비즈니스 / 업종별 / 지역별로 각도를 다르게
+    - 수치 성과가 있는 사례를 타겟
+    """
+    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        return _fallback_queries(workflow_cache)
+
+    process_name = workflow_cache.get("process_name", "")
+    l2_names = workflow_cache.get("l2_names", [])
+    l3_names = workflow_cache.get("l3_names", [])
+    l4_names = workflow_cache.get("l4_names", [])
+    l4_details = workflow_cache.get("l4_details", [])
+
+    pain_points = []
+    for d in l4_details[:3]:
+        pain_points.extend(d.get("pain_points", [])[:2])
+
+    prompt = f"""당신은 글로벌 HR 벤치마킹 리서치 전문가입니다.
+
+## 조사 대상
+- 프로세스: {process_name}
+- L2 영역: {', '.join(l2_names[:3])}
+- L3 하위: {', '.join(l3_names[:4])}
+- L4 활동: {', '.join(l4_names[:6])}
+- 주요 Pain Point: {', '.join(pain_points[:4]) if pain_points else '없음'}
+
+## 목표
+위 프로세스에서 AI를 실제로 도입해 성과를 낸 글로벌 선도 기업 사례를 찾고 싶습니다.
+**구체적 기업명 + 수치 성과 + 실제 구현 방법**이 담긴 페이지를 찾을 수 있는 검색 쿼리 8개를 생성하세요.
+
+## 쿼리 생성 원칙
+1. **다양한 각도**: 기술 구현 사례 / 비즈니스 성과 / 업종별 (제조·금융·유통) / 한국어 사례 — 각각 1~2개
+2. **한국어 ↔ 영어 혼합**: 영어 쿼리 5개, 한국어 쿼리 3개
+3. **수치 성과 타겟**: "ROI", "efficiency gain", "time saved", "성과" 등 포함
+4. **구체적 기업 타겟**: "Fortune 500", "Samsung", "Siemens", "Google" 등 실명 포함
+5. **마케팅 자료 배제**: site:vendor.com 제외, 실제 사례 중심
+
+JSON만 출력:
+{{"queries": ["query1", "query2", "query3", "query4", "query5", "query6", "query7", "query8"]}}"""
+
+    try:
+        from anthropic import AsyncAnthropic
+        client = AsyncAnthropic(api_key=api_key)
+        resp = await client.messages.create(
+            model="claude-haiku-4-5-20251001",  # 쿼리 생성은 빠른 모델로
+            max_tokens=600,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = resp.content[0].text.strip()
+        m = re.search(r'\{.*\}', raw, re.DOTALL)
+        if m:
+            data = json.loads(m.group())
+            queries = data.get("queries", [])[:8]
+            if queries:
+                print(f"[benchmark] LLM 쿼리 플래닝 완료 — {len(queries)}개")
+                return queries
+    except Exception as e:
+        print(f"[benchmark] LLM 쿼리 플래닝 실패, fallback 사용: {e}")
+
+    return _fallback_queries(workflow_cache)
+
+
+def _fallback_queries(workflow_cache: dict) -> list[str]:
+    """LLM 쿼리 플래닝 실패 시 사용하는 기본 쿼리."""
+    process_name = workflow_cache.get("process_name", "HR process")
+    l4_names = workflow_cache.get("l4_names", [])
+    focus = l4_names[0] if l4_names else process_name
+
+    # 한국어 → 영어 기본 매핑
+    _KR = {"발령": "job transfer", "채용": "recruitment", "평가": "performance appraisal",
+           "급여": "payroll", "교육": "L&D training", "인사": "HR"}
+    focus_en = next((v for k, v in _KR.items() if k in focus), focus)
+
+    return [
+        f"{focus_en} AI automation enterprise case study measurable outcomes 2024 2025",
+        f"Workday SAP SuccessFactors {focus_en} generative AI workflow results",
+        f"Google Microsoft Amazon {focus_en} HR AI automation implementation",
+        f"Gartner Forrester {focus_en} AI adoption enterprise benchmark 2024",
+        f"Fortune 500 {focus_en} AI HR transformation ROI case study",
+        f"Siemens GE Unilever {focus_en} HR digitization results",
+        f"삼성 현대 LG '{focus}' AI 자동화 도입 성과 사례 2024",
+        f"'{focus}' AI 혁신 사례 HR 디지털 전환 성과 지표",
+    ]
+
+
+# ── Phase 3: URL에서 실제 페이지 전문 추가 수집 ──────────────────────────────
+# Perplexity 핵심 기술 #2 — Tavily snippet 외에 실제 URL을 직접 읽어 더 풍부한 내용 확보
+
+def _fetch_url_content(url: str, max_chars: int = 3000) -> str:
+    """URL에서 실제 페이지 내용을 가져와 HTML 태그를 제거합니다."""
+    if not url or not url.startswith("http"):
+        return ""
+    try:
+        req = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+                              "KHTML, like Gecko Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml",
+                "Accept-Language": "en-US,en;q=0.9,ko;q=0.8",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            content_type = resp.headers.get("Content-Type", "")
+            if "text" not in content_type:
+                return ""
+            raw_bytes = resp.read(80_000)  # 최대 80KB만 읽기
+            charset = "utf-8"
+            m = re.search(r'charset=([^\s;]+)', content_type)
+            if m:
+                charset = m.group(1).strip('"\'')
+            html_text = raw_bytes.decode(charset, errors="replace")
+
+        # HTML → 순수 텍스트
+        # script / style 블록 제거
+        html_text = re.sub(r'<(script|style)[^>]*>.*?</\1>', ' ', html_text, flags=re.DOTALL | re.IGNORECASE)
+        # HTML 태그 제거
+        text = re.sub(r'<[^>]+>', ' ', html_text)
+        # HTML 엔티티 디코딩
+        text = html_module.unescape(text)
+        # 연속 공백·빈 줄 정리
+        text = re.sub(r'\s+', ' ', text).strip()
+
+        return text[:max_chars]
+
+    except Exception as e:
+        return ""
+
+
+async def _enrich_top_results(results: list[dict], top_n: int = 8) -> list[dict]:
+    """
+    Tavily raw_content가 짧은 상위 결과들에 대해 실제 URL을 직접 읽어 보강합니다.
+    병렬로 처리하여 속도를 유지합니다.
+    """
+    # URL이 있고 content가 짧은 결과 선택 (이미 충분히 길면 skip)
+    to_enrich = [
+        r for r in results[:top_n]
+        if r.get("url") and len(r.get("content", "")) < 800
+    ]
+
+    if not to_enrich:
+        return results
+
+    print(f"[benchmark] URL 전문 수집 — {len(to_enrich)}개 페이지 병렬 읽기")
+    fetch_tasks = [asyncio.to_thread(_fetch_url_content, r["url"]) for r in to_enrich]
+    fetched = await asyncio.gather(*fetch_tasks, return_exceptions=True)
+
+    enrich_map = {}
+    for r, fetched_text in zip(to_enrich, fetched):
+        if isinstance(fetched_text, str) and len(fetched_text) > 200:
+            enrich_map[r["url"]] = fetched_text
+
+    enriched = 0
+    for r in results:
+        url = r.get("url", "")
+        if url in enrich_map:
+            r["content"] = enrich_map[url]
+            enriched += 1
+
+    if enriched:
+        print(f"[benchmark] URL 전문 수집 완료 — {enriched}개 보강됨")
 
     return results
 
 
-# ── 한국어 HR/비즈니스 용어 → 영어 키워드 매핑 ─────────────────────────────
-
-_KR_TO_EN: dict[str, str] = {
-    # 인사·발령
-    "발령": "personnel assignment position change job transfer",
-    "입사발령": "employee appointment onboarding personnel action",
-    "조직개편": "organizational restructuring reorg",
-    "전보": "job transfer internal mobility",
-    "승진": "promotion advancement",
-    "퇴직": "retirement offboarding separation",
-    "채용": "recruitment hiring talent acquisition",
-    "면접": "interview candidate screening",
-    # 교육·평가
-    "교육": "employee training L&D learning development",
-    "평가": "performance evaluation appraisal",
-    "역량": "competency skills assessment",
-    # 급여·보상
-    "급여": "payroll salary compensation",
-    "보상": "compensation benefits rewards",
-    # 노사·복리
-    "노사": "labor relations industrial relations",
-    "교섭": "collective bargaining negotiation",
-    "복리후생": "employee benefits welfare",
-    "휴직": "leave of absence absence management",
-    "인사": "HR human resources personnel management",
-    # 업무 프로세스
-    "승인": "approval workflow authorization",
-    "품의": "internal approval document sign-off",
-    "보고": "reporting dashboard",
-    "공지": "notification announcement",
-}
-
-
-def _translate_to_en(korean_term: str) -> str:
-    """한국어 용어를 영어 키워드로 변환. 매핑에 없으면 원문 반환."""
-    for kr, en in _KR_TO_EN.items():
-        if kr in korean_term:
-            return en
-    return korean_term
-
-
-# ── Round 1: 초기 검색 쿼리 생성 ────────────────────────────────────────────
-
-def _generate_search_queries(workflow_cache: dict) -> list[str]:
-    """Round 1 검색 쿼리 생성. L4(구체적) → L3 → L2 순으로 fallback."""
-    process_name = workflow_cache.get("process_name", "")
-    l2_names: list[str] = workflow_cache.get("l2_names", [])
-    l3_names: list[str] = workflow_cache.get("l3_names", [])
-    l4_names: list[str] = workflow_cache.get("l4_names", [])
-    l4_details: list[dict] = workflow_cache.get("l4_details", [])
-    l3_details: list[dict] = workflow_cache.get("l3_details", [])
-
-    queries = []
-
-    focus_kr = l4_names[0] if l4_names else (l3_names[0] if l3_names else (l2_names[0] if l2_names else process_name))
-    focus_en = _translate_to_en(focus_kr)
-    l3_focus_en = _translate_to_en(l3_names[0] if l3_names else focus_kr)
-    l2_focus_en = _translate_to_en(l2_names[0] if l2_names else focus_kr)
-
-    # ── 1. 글로벌 기업 AI 도입 사례 (수치 성과 포함) ──────────────────────────
-    queries.append(
-        f"{focus_en} AI automation enterprise case study measurable outcomes "
-        f"efficiency ROI 2023 2024 2025"
-    )
-    queries.append(
-        f"Workday SAP SuccessFactors Oracle HCM {focus_en} generative AI "
-        f"automation workflow real implementation results"
-    )
-
-    # ── 2. 시장 조사 리포트 (Gartner/Forrester/McKinsey 리포트 내 기업 사례) ──
-    queries.append(
-        f"Gartner Forrester {focus_en} AI adoption enterprise benchmark "
-        f"2024 2025 company case study"
-    )
-    queries.append(
-        f"McKinsey Deloitte {l2_focus_en} AI transformation "
-        f"company implementation results measurable"
-    )
-
-    # ── 3. L4 세부 활동 기업 사례 ────────────────────────────────────────────
-    for detail in l4_details[:2]:
-        en_kw = _translate_to_en(detail["name"])
-        if en_kw != detail["name"]:
-            queries.append(
-                f'"{en_kw}" AI automation enterprise Fortune 500 '
-                f"implementation case study 2024"
-            )
-
-    # ── 4. 글로벌 선도 기업 직접 사례 ────────────────────────────────────────
-    queries.append(
-        f"Google Microsoft Amazon Meta IBM {focus_en} internal HR "
-        f"AI automation workforce management"
-    )
-    queries.append(
-        f"Siemens GE Unilever JPMorgan {focus_en} HR AI automation "
-        f"digital transformation results"
-    )
-
-    # ── 5. 한국 대기업 ────────────────────────────────────────────────────────
-    kr_pain_kw = " ".join(
-        l4_details[0].get("pain_points", [])[:2]
-    ) if l4_details else "AI 자동화"
-    queries.append(
-        f"삼성 현대 SK LG '{focus_kr}' AI 도입 사례 성과 2023 2024 2025"
-    )
-
-    # 중복 제거
-    seen: set[str] = set()
-    deduped = []
-    for q in queries:
-        if q not in seen:
-            seen.add(q)
-            deduped.append(q)
-
-    return deduped[:8]  # Round 1은 8개로 집중
-
-
-# ── Round 2: LLM이 부족한 부분 파악 → 후속 쿼리 자동 생성 ──────────────────
+# ── Phase 4: LLM Gap Analysis → Round 2 쿼리 생성 ───────────────────────────
 
 async def _generate_followup_queries(
     workflow_cache: dict,
     round1_results: list[dict],
 ) -> list[str]:
-    """Perplexity Deep Research 핵심 — Round 1 결과를 보고 아직 부족한 부분을
-    LLM이 직접 파악하여 후속 검색 쿼리를 생성합니다."""
+    """Round 1 결과를 보고 아직 부족한 부분을 LLM이 파악하여 후속 쿼리를 생성합니다."""
     api_key = os.getenv("ANTHROPIC_API_KEY", "")
     if not api_key:
         return []
@@ -246,102 +298,101 @@ async def _generate_followup_queries(
     process_name = workflow_cache.get("process_name", "")
     l4_names = workflow_cache.get("l4_names", [])
 
-    # Round 1에서 찾은 내용 요약 (제목 + URL 유무)
-    found_summary_lines = []
+    found_lines = []
     for r in round1_results[:20]:
-        has_url = "✓ URL있음" if r.get("url") else "✗ URL없음"
-        found_summary_lines.append(f"- {has_url} | {r.get('title', '')[:80]}")
+        has_url = "✓" if r.get("url") else "✗"
+        content_len = len(r.get("content", ""))
+        found_lines.append(f"- {has_url}URL | {content_len}자 | {r.get('title', '')[:70]}")
 
-    found_summary = "\n".join(found_summary_lines)
+    prompt = f"""리서치 전문가입니다. Round 1 검색 결과를 분석하고 빈틈을 메울 후속 쿼리를 생성하세요.
 
-    prompt = f"""당신은 딥 리서치 전문가입니다.
+## 조사 프로세스: {process_name}
+## L4 활동: {', '.join(l4_names[:6])}
 
-## 조사 대상 프로세스
-- 프로세스명: {process_name}
-- 핵심 활동(L4): {', '.join(l4_names[:6])}
+## Round 1 수집 결과 ({len(round1_results)}건)
+{chr(10).join(found_lines)}
 
-## Round 1 검색에서 찾은 결과 ({len(round1_results)}건)
-{found_summary}
+## 아직 부족한 것을 파악하여 후속 쿼리 4개 생성
+기준:
+- 구체적 기업명 + 정량 성과(%, 시간, 비용)가 없으면 → 그걸 찾는 쿼리
+- 비Tech 산업(제조·금융·유통) 사례가 부족하면 → 업종 특화 쿼리
+- 한국어 사례가 없으면 → 한국어 쿼리 포함
+- 특정 L4 활동이 아직 커버 안 됐으면 → 그 활동 타겟
 
-## 지시
-Round 1 결과를 보고 아직 찾지 못한 것을 파악하세요:
-- 구체적 기업명 + 수치 성과가 없는 경우
-- 비Tech 대기업(제조·금융·유통) HR AI 사례가 부족한 경우
-- 특정 L4 활동에 대한 사례가 없는 경우
-
-이를 보완할 후속 검색 쿼리 4개를 생성하세요.
-가급적 구체적 회사명, 수치 성과, 실제 구현 사례를 찾을 수 있는 쿼리로 만드세요.
-
-JSON만 출력: {{"queries": ["query1", "query2", "query3", "query4"], "gap_analysis": "부족한 부분 한 줄 요약"}}"""
+JSON만 출력:
+{{"queries": ["q1","q2","q3","q4"], "gap": "한 줄 요약"}}"""
 
     try:
         from anthropic import AsyncAnthropic
         client = AsyncAnthropic(api_key=api_key)
         resp = await client.messages.create(
-            model="claude-haiku-4-5-20251001",  # 빠른 모델로 쿼리만 생성
-            max_tokens=512,
+            model="claude-haiku-4-5-20251001",
+            max_tokens=400,
             messages=[{"role": "user", "content": prompt}],
         )
         raw = resp.content[0].text.strip()
-        # JSON 추출
         m = re.search(r'\{.*\}', raw, re.DOTALL)
         if m:
             data = json.loads(m.group())
             queries = data.get("queries", [])[:4]
-            gap = data.get("gap_analysis", "")
+            gap = data.get("gap", "")
             if gap:
-                print(f"[benchmark] Round 2 gap: {gap}")
+                print(f"[benchmark] Round 2 gap 분석: {gap}")
             return queries
     except Exception as e:
         print(f"[benchmark] follow-up 쿼리 생성 실패: {e}")
-
     return []
 
 
-# ── 통합 검색 (Perplexity Deep Research 방식) ────────────────────────────────
+# ── 통합 검색 파이프라인 ──────────────────────────────────────────────────────
 
 async def search_benchmarks(workflow_cache: dict) -> list[dict]:
     """
-    Perplexity Deep Research 방식 벤치마킹 검색.
+    Perplexity Deep Research 방식 검색 파이프라인.
 
-    Round 1: 초기 쿼리 8개 → 병렬 검색 (전문 포함)
-    Round 2: LLM이 부족한 부분 분석 → 후속 쿼리 4개 자동 생성 → 병렬 검색
+    Phase 1. LLM → 초기 쿼리 8개 직접 생성 (컨텍스트 기반)
+    Phase 2. 8개 병렬 검색 (Tavily 전문 읽기)
+    Phase 3. 상위 URL에서 실제 페이지 전문 추가 수집
+    Phase 4. LLM → Gap 분석 → 후속 쿼리 4개 생성
+    Phase 5. 후속 쿼리 4개 병렬 검색 (Round 2)
     """
     use_tavily = bool(os.getenv("TAVILY_API_KEY", ""))
     search_fn = _search_tavily if use_tavily else _search_duckduckgo
 
-    # ── Round 1: 병렬 검색 ────────────────────────────────────────────────────
-    queries_r1 = _generate_search_queries(workflow_cache)
-    print(f"[benchmark] Round 1 시작 — {len(queries_r1)}개 쿼리 병렬 검색")
+    # ── Phase 1: LLM 쿼리 플래닝 ─────────────────────────────────────────────
+    queries_r1 = await _plan_search_queries(workflow_cache)
 
+    # ── Phase 2: Round 1 병렬 검색 ───────────────────────────────────────────
+    print(f"[benchmark] Phase 2 — {len(queries_r1)}개 쿼리 병렬 검색 시작")
     tasks_r1 = [asyncio.to_thread(search_fn, q, 5) for q in queries_r1]
     raw_batches_r1 = await asyncio.gather(*tasks_r1, return_exceptions=True)
 
     all_results: list[dict] = []
-    seen_urls: set[str] = set()
-    seen_titles: set[str] = set()
+    seen_keys: set[str] = set()
 
     for query, batch in zip(queries_r1, raw_batches_r1):
         if isinstance(batch, Exception):
-            print(f"[benchmark] Round 1 오류: {batch}")
             continue
         for r in batch:
             key = r.get("url") or r.get("title", "")
-            if key and key not in seen_urls and r.get("title") not in seen_titles:
-                seen_urls.add(key)
-                seen_titles.add(r.get("title", ""))
+            if key and key not in seen_keys:
+                seen_keys.add(key)
                 r["query"] = query
                 r["round"] = 1
                 all_results.append(r)
 
-    print(f"[benchmark] Round 1 완료 — {len(all_results)}건 수집")
+    print(f"[benchmark] Phase 2 완료 — {len(all_results)}건")
 
-    # ── Round 2: LLM이 부족한 부분 파악 → 후속 쿼리 생성 → 병렬 검색 ─────────
-    if use_tavily:  # Tavily가 있을 때만 Round 2 수행 (DuckDuckGo는 round 2 생략)
+    # ── Phase 3: 상위 URL 전문 수집 ──────────────────────────────────────────
+    if use_tavily:
+        all_results = await _enrich_top_results(all_results, top_n=10)
+
+    # ── Phase 4 & 5: Round 2 (LLM Gap 분석 → 후속 검색) ─────────────────────
+    if use_tavily:
         queries_r2 = await _generate_followup_queries(workflow_cache, all_results)
 
         if queries_r2:
-            print(f"[benchmark] Round 2 시작 — {len(queries_r2)}개 후속 쿼리 병렬 검색")
+            print(f"[benchmark] Phase 5 — {len(queries_r2)}개 후속 쿼리 병렬 검색")
             tasks_r2 = [asyncio.to_thread(_search_tavily, q, 5) for q in queries_r2]
             raw_batches_r2 = await asyncio.gather(*tasks_r2, return_exceptions=True)
 
@@ -351,20 +402,20 @@ async def search_benchmarks(workflow_cache: dict) -> list[dict]:
                     continue
                 for r in batch:
                     key = r.get("url") or r.get("title", "")
-                    if key and key not in seen_urls and r.get("title") not in seen_titles:
-                        seen_urls.add(key)
-                        seen_titles.add(r.get("title", ""))
+                    if key and key not in seen_keys:
+                        seen_keys.add(key)
                         r["query"] = query
                         r["round"] = 2
                         all_results.append(r)
                         r2_added += 1
 
-            print(f"[benchmark] Round 2 완료 — 신규 {r2_added}건 추가")
+            print(f"[benchmark] Phase 5 완료 — 신규 {r2_added}건 추가")
 
-    engine = "Tavily (전문 + 2라운드)" if use_tavily else "DuckDuckGo (기본)"
-    print(f"[benchmark] {engine} — 총 {len(all_results)}건 ({len(queries_r1 + (queries_r2 if use_tavily else []))}개 쿼리)")
+    engine = "Tavily + URL 전문 + 2라운드" if use_tavily else "DuckDuckGo (기본)"
+    total_queries = len(queries_r1) + (len(queries_r2) if use_tavily and queries_r2 else 0)
+    print(f"[benchmark] 완료 — {engine} | {total_queries}개 쿼리 | 총 {len(all_results)}건")
 
-    # URL 있는 결과를 앞으로 정렬 (LLM에게 더 유용한 것 먼저)
+    # URL 있는 결과를 앞으로 정렬 (LLM에 유용한 것 우선)
     all_results.sort(key=lambda r: (0 if r.get("url") else 1, r.get("round", 1)))
 
     return all_results[:40]
@@ -492,7 +543,6 @@ def _build_benchmark_prompt(
     lines.append(f"**프로세스명**: {workflow_cache.get('process_name', '')}\n")
     lines.append(f"**설계 요약**: {workflow_cache.get('blueprint_summary', '')}\n")
 
-    # 현재 redesigned_process 구조
     redesigned = workflow_cache.get("redesigned_process", [])
     if redesigned:
         lines.append("**현재 기본 설계 (L3~L5 트리):**\n")
@@ -510,12 +560,11 @@ def _build_benchmark_prompt(
         lines.append("**현재 AI 에이전트 및 Task 상세:**\n")
         for agent in workflow_cache.get("agents", []):
             lines.append(f"### {agent['agent_name']} ({agent.get('ai_technique', '')})")
-            lines.append(f"  automation_level: {agent['automation_level']}")
             for t in agent.get("assigned_tasks", []):
-                lines.append(f"  - [{t.get('task_id','')}] {t.get('task_name','')} | ai_role: {t.get('ai_role','')} | level: {t.get('automation_level','')}")
+                lines.append(f"  - [{t.get('task_id','')}] {t.get('task_name','')} | level: {t.get('automation_level','')}")
             lines.append("")
 
-    # 벤치마킹 결과 (Round 표시 + 쿼리 출처 포함)
+    # 검색 결과 — Round 정보 + 풍부한 내용 포함
     lines.append(f"\n## 웹 벤치마킹 검색 결과 (총 {len(benchmark_results)}건)\n")
     for i, r in enumerate(benchmark_results, 1):
         round_label = f" [R{r.get('round', 1)}]" if r.get("round") else ""
@@ -523,7 +572,7 @@ def _build_benchmark_prompt(
         if r.get("url"):
             lines.append(f"- 출처 URL: {r['url']}")
         content = r.get("content", r.get("snippet", ""))
-        lines.append(f"- 내용: {content[:1200]}")  # 기존 800자 → 1200자
+        lines.append(f"- 내용: {content[:1500]}")  # 기존 800자 → 1500자
         lines.append("")
 
     lines.append("\n## 요청")
@@ -547,7 +596,6 @@ async def refine_workflow_with_benchmarks(
 
     user_prompt = _build_benchmark_prompt(workflow_cache, benchmark_results)
 
-    # Anthropic Claude
     anthropic_key = api_key or os.getenv("ANTHROPIC_API_KEY", "")
     if anthropic_key:
         try:
@@ -564,7 +612,6 @@ async def refine_workflow_with_benchmarks(
         except Exception as e:
             print(f"[benchmark] Anthropic 실패: {e}")
 
-    # OpenAI fallback
     openai_key = openai_api_key or os.getenv("OPENAI_API_KEY", "")
     if openai_key:
         try:
