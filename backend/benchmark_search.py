@@ -45,6 +45,18 @@ def _search_tavily(query: str, max_results: int = 5) -> list[dict]:
             "techcrunch.com", "reuters.com", "bloomberg.com", "cnbc.com",
             "businessinsider.com", "venturebeat.com",
         ],
+        # 케이스 스터디·공식 문서 도메인 우선
+        "include_domains": [
+            # HR AI 벤더 케이스 스터디
+            "paradox.ai", "eightfold.ai", "phenom.com", "beamery.com",
+            "hirevue.com", "leenaai.com", "visier.com", "pymetrics.com",
+            # HR 플랫폼 공식 문서
+            "help.sap.com", "sap.com", "workday.com", "oracle.com",
+            "servicenow.com", "microsoft.com", "successfactors.com",
+            # 학술·리서치
+            "researchgate.net", "scholar.google.com", "acm.org",
+            "ieeexplore.ieee.org", "shrm.org", "hbr.org",
+        ],
     }).encode("utf-8")
 
     req = urllib.request.Request(
@@ -211,6 +223,9 @@ async def _plan_search_queries(workflow_cache: dict) -> list[str]:
     for d in l4_details[:3]:
         pain_points.extend(d.get("pain_points", [])[:2])
 
+    focus_kr = l4_names[0] if l4_names else process_name
+    focus_en = _translate_to_en(focus_kr)
+
     prompt = f"""당신은 글로벌 HR 벤치마킹 리서치 전문가입니다.
 
 ## 조사 대상
@@ -221,15 +236,36 @@ async def _plan_search_queries(workflow_cache: dict) -> list[str]:
 - 주요 Pain Point: {', '.join(pain_points[:4]) if pain_points else '없음'}
 
 ## 목표
-위 프로세스에서 AI를 실제로 도입해 성과를 낸 글로벌 선도 기업 사례를 찾고 싶습니다.
-**구체적 기업명 + 수치 성과 + 실제 구현 방법**이 담긴 페이지를 찾을 수 있는 검색 쿼리 8개를 생성하세요.
+위 HR 프로세스에서 AI를 도입한 실제 사례가 담긴 **케이스 스터디·공식 문서·학술 논문** 페이지를 찾습니다.
 
-## 쿼리 생성 원칙
-1. **다양한 각도**: 기술 구현 사례 / 비즈니스 성과 / 업종별 (제조·금융·유통) / 한국어 사례 — 각각 1~2개
-2. **한국어 ↔ 영어 혼합**: 영어 쿼리 5개, 한국어 쿼리 3개
-3. **수치 성과 타겟**: "ROI", "efficiency gain", "time saved", "성과" 등 포함
-4. **구체적 기업 타겟**: "Fortune 500", "Samsung", "Siemens", "Google" 등 실명 포함
-5. **마케팅 자료 배제**: site:vendor.com 제외, 실제 사례 중심
+## ⚠️ 검색 쿼리 타입을 반드시 다음 3가지로 구분하여 각 2~3개씩 생성
+
+### 타입 A: HR AI 벤더 케이스 스터디 페이지 (2개)
+- HR AI SaaS 벤더(Paradox, Eightfold, Phenom, Beamery, HireVue, Leena AI, ServiceNow, Workday, SAP SuccessFactors)의
+  고객 케이스 스터디 / 성공 사례 페이지를 타겟
+- 예시 패턴: `Paradox AI case study {focus_en} customer results`
+- 예시 패턴: `Eightfold talent intelligence case study manufacturing ROI`
+- 예시 패턴: `SAP SuccessFactors {focus_en} AI feature customer story`
+
+### 타입 B: 공식 제품 문서·기능 페이지 (2개)
+- SAP, Workday, Oracle HCM, ServiceNow HR, Microsoft Viva의 공식 docs / help / feature 페이지 타겟
+- 예시 패턴: `SAP SuccessFactors {focus_en} AI features site:help.sap.com OR site:sap.com`
+- 예시 패턴: `Workday {focus_en} generative AI features documentation`
+- 예시 패턴: `Oracle HCM {focus_en} AI automation official`
+
+### 타입 C: 학술 논문 / 연구 보고서 (2개)
+- AI + HR 프로세스 자동화에 관한 학술 논문(PDF), 연구 보고서 타겟
+- 예시 패턴: `{focus_en} AI automation HR process research paper PDF 2023 2024`
+- 예시 패턴: `artificial intelligence {focus_en} workforce management academic study filetype:pdf`
+
+### 타입 D: 한국어 공식 사례 (2개)
+- 한국 대기업(삼성, 현대, SK, LG, 두산) 또는 HR 솔루션 공식 사례 페이지
+- 예시 패턴: `삼성SDS 현대차 '{focus_kr}' AI 도입 공식 사례 케이스스터디`
+- 예시 패턴: `두산 SK {focus_kr} AI 자동화 백서 보고서 성과`
+
+## 절대 금지
+- 뉴스 기사 타겟 쿼리 (chosun, naver news, zdnet, techcrunch 등)
+- 너무 일반적인 쿼리 ("AI HR automation 2024" 단독)
 
 JSON만 출력:
 {{"queries": ["query1", "query2", "query3", "query4", "query5", "query6", "query7", "query8"]}}"""
@@ -257,25 +293,25 @@ JSON만 출력:
 
 
 def _fallback_queries(workflow_cache: dict) -> list[str]:
-    """LLM 쿼리 플래닝 실패 시 사용하는 기본 쿼리."""
+    """LLM 쿼리 플래닝 실패 시 사용하는 기본 쿼리 (케이스 스터디·문서·논문 타겟)."""
     process_name = workflow_cache.get("process_name", "HR process")
     _, _, l4_names, _ = _extract_names_from_cache(workflow_cache)
-    focus = l4_names[0] if l4_names else process_name
-
-    # 한국어 → 영어 기본 매핑
-    _KR = {"발령": "job transfer", "채용": "recruitment", "평가": "performance appraisal",
-           "급여": "payroll", "교육": "L&D training", "인사": "HR"}
-    focus_en = next((v for k, v in _KR.items() if k in focus), focus)
+    focus_kr = l4_names[0] if l4_names else process_name
+    focus_en = _translate_to_en(focus_kr)
 
     return [
-        f"{focus_en} AI automation enterprise case study measurable outcomes 2024 2025",
-        f"Workday SAP SuccessFactors {focus_en} generative AI workflow results",
-        f"Google Microsoft Amazon {focus_en} HR AI automation implementation",
-        f"Gartner Forrester {focus_en} AI adoption enterprise benchmark 2024",
-        f"Fortune 500 {focus_en} AI HR transformation ROI case study",
-        f"Siemens GE Unilever {focus_en} HR digitization results",
-        f"삼성 현대 LG '{focus}' AI 자동화 도입 성과 사례 2024",
-        f"'{focus}' AI 혁신 사례 HR 디지털 전환 성과 지표",
+        # 타입 A: 벤더 케이스 스터디
+        f"Paradox Eightfold Phenom HireVue {focus_en} AI case study customer results",
+        f"SAP SuccessFactors Workday {focus_en} AI automation customer story ROI",
+        # 타입 B: 공식 문서
+        f"SAP SuccessFactors {focus_en} AI features site:help.sap.com OR site:sap.com",
+        f"Workday {focus_en} generative AI documentation official",
+        # 타입 C: 학술 논문
+        f"{focus_en} artificial intelligence HR automation research paper PDF 2023 2024",
+        f"AI {focus_en} workforce management academic study filetype:pdf",
+        # 타입 D: 한국어 공식 사례
+        f"삼성SDS 현대차 SK LG '{focus_kr}' AI 도입 공식 케이스스터디 사례",
+        f"두산 '{focus_kr}' AI 자동화 백서 공식 사례 성과",
     ]
 
 
