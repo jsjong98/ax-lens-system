@@ -1412,6 +1412,14 @@ async def upload_workflow_excel(file: UploadFile = File(...)):
 
     content = await file.read()
     _WF_DIR.mkdir(exist_ok=True)
+
+    # 기존 엑셀 파일 전부 삭제 (이전 파일 혼재 방지)
+    for old in _WF_DIR.glob("*.xlsx"):
+        try:
+            old.unlink()
+        except Exception:
+            pass
+
     safe_wf_excel_name = Path(file.filename or "workflow_excel.xlsx").name
     save_path = _WF_DIR / safe_wf_excel_name
     save_path.write_bytes(content)
