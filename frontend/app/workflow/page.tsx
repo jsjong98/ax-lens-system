@@ -780,7 +780,7 @@ export default function WorkflowPage() {
               )}
 
               {/* 매핑 확인 패널 */}
-              <MappingCheckPanel hasExcel={!!excelResult} hasAsIs={!!hasAsIs} />
+              <MappingCheckPanel hasExcel={!!excelResult} hasAsIs={!!hasAsIs} activeSheetId={activeSheet} />
 
               {/* 다음 단계 */}
               <div className="flex justify-end gap-2">

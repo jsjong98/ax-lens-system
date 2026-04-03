@@ -268,13 +268,13 @@ function ClsOverviewBar({ counts, total, title }: { counts: Record<string, numbe
 interface MappingCheckPanelProps {
   hasExcel: boolean;
   hasAsIs: boolean;
+  activeSheetId?: string | null;  // 페이지 레벨에서 선택된 시트 ID
 }
 
-export default function MappingCheckPanel({ hasExcel, hasAsIs }: MappingCheckPanelProps) {
+export default function MappingCheckPanel({ hasExcel, hasAsIs, activeSheetId }: MappingCheckPanelProps) {
   const [result, setResult] = useState<MappingCheckResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [activeSheet, setActiveSheet] = useState(0);
   const [showExcelOnly, setShowExcelOnly] = useState(false);
   const [excelTasks, setExcelTasks] = useState<WorkflowExcelTask[]>([]);
 
@@ -285,7 +285,6 @@ export default function MappingCheckPanel({ hasExcel, hasAsIs }: MappingCheckPan
       const [r, et] = await Promise.all([getMappingCheck(), getWorkflowExcelTasks()]);
       setResult(r);
       setExcelTasks(et.tasks || []);
-      setActiveSheet(0);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -426,26 +425,19 @@ export default function MappingCheckPanel({ hasExcel, hasAsIs }: MappingCheckPan
             </div>
           )}
 
-          {/* ④ L4 노드별 분류 현황 (시트 탭) */}
-          {result.sheets.length > 0 && (
+          {/* ④ L4 노드별 분류 현황 */}
+          {result.sheets.length > 0 && (() => {
+            const sheetIdx = activeSheetId
+              ? Math.max(0, result.sheets.findIndex((s) => s.sheet_id === activeSheetId))
+              : 0;
+            const activeSheetData = result.sheets[sheetIdx];
+            return (
             <div>
               <div className="text-xs font-bold text-gray-600 mb-2">L4 노드별 AI/Human 분류 연결 현황</div>
-              {result.sheets.length > 1 && (
-                <div className="flex gap-1 border-b border-gray-200 mb-3">
-                  {result.sheets.map((s, i) => (
-                    <button key={s.sheet_id} onClick={() => setActiveSheet(i)}
-                      className={`px-4 py-1.5 text-xs font-medium border-b-2 transition ${
-                        activeSheet === i ? "border-red-600 text-red-700" : "border-transparent text-gray-500 hover:text-gray-700"
-                      }`}>
-                      {s.sheet_name} <span className="text-gray-400">L4 {s.l4_count}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
 
-              {result.sheets[activeSheet] && (
+              {activeSheetData && (
                 <div className="space-y-4 max-h-[480px] overflow-y-auto pr-1">
-                  {result.sheets[activeSheet].l3_groups.map((g, gi) => (
+                  {activeSheetData.l3_groups.map((g, gi) => (
                     <div key={gi}>
                       {g.task_id && (
                         <div className="flex items-center gap-2 px-2 py-1.5 mb-1">
@@ -470,7 +462,8 @@ export default function MappingCheckPanel({ hasExcel, hasAsIs }: MappingCheckPan
                 </div>
               )}
             </div>
-          )}
+            );
+          })()}
 
           {/* ⑤ 미연결 엑셀 Task */}
           {result.excel_only.length > 0 && (
