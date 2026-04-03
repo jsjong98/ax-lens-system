@@ -1384,6 +1384,21 @@ _wf_classification: dict = {}  # 엑셀에서 추출한 분류 결과
 _wf_step1_cache: dict = {}     # Step 1 결과 캐시
 _wf_step2_cache: dict = {}     # Step 2 결과 캐시
 _wf_chat_history: list = []    # Step 1 채팅 이력
+_manual_matches: dict = {}     # 수동 매칭: json_task_id → excel_task_id
+
+def _load_manual_matches():
+    global _manual_matches
+    path = _WF_DIR / "manual_matches.json"
+    if path.exists():
+        try:
+            _manual_matches = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            _manual_matches = {}
+
+def _save_manual_matches():
+    (_WF_DIR / "manual_matches.json").write_text(
+        json.dumps(_manual_matches, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
 
 @app.post("/api/workflow/upload-excel", tags=["Workflow"])
@@ -2685,6 +2700,34 @@ def _fuzzy_match_excel(label: str, candidates: list, already_matched: set,
     return None
 
 
+@app.get("/api/workflow/manual-matches", tags=["Workflow"])
+async def get_manual_matches():
+    """저장된 수동 매칭 목록 반환."""
+    return {"ok": True, "matches": _manual_matches}
+
+
+@app.post("/api/workflow/manual-match", tags=["Workflow"])
+async def set_manual_match(request: Request):
+    """JSON L5 task_id → 엑셀 task_id 수동 연결 저장."""
+    body = await request.json()
+    json_task_id = body.get("json_task_id", "").strip()
+    excel_task_id = body.get("excel_task_id", "").strip()
+    if not json_task_id or not excel_task_id:
+        raise HTTPException(400, "json_task_id와 excel_task_id가 필요합니다.")
+    _manual_matches[json_task_id] = excel_task_id
+    _save_manual_matches()
+    return {"ok": True, "json_task_id": json_task_id, "excel_task_id": excel_task_id}
+
+
+@app.delete("/api/workflow/manual-match/{json_task_id:path}", tags=["Workflow"])
+async def delete_manual_match(json_task_id: str):
+    """수동 매칭 삭제."""
+    if json_task_id in _manual_matches:
+        del _manual_matches[json_task_id]
+        _save_manual_matches()
+    return {"ok": True}
+
+
 @app.get("/api/workflow/mapping-check", tags=["Workflow"])
 async def get_mapping_check():
     """엑셀 Task ↔ As-Is 워크플로우 노드 매핑 현황을 반환합니다."""
@@ -2756,30 +2799,43 @@ def _run_mapping_check() -> dict:
                 eff_l3.setdefault(l3_tid, []).append(l4_tid)
 
             # L4 엔트리 생성 (closure 피하고 인자로 전달)
-            def _l4_entry(l4_tid, l4_label, _l5_by_l4=l5_by_l4, _by_id=by_id, _by_l4=by_l4):
+            def _l4_entry(l4_tid, l4_label, _l5_by_l4=l5_by_l4, _by_id=by_id, _by_l4=by_l4,
+                          _manual=_manual_matches):
                 children = sorted(_l5_by_l4.get(l4_tid, []), key=lambda x: x.task_id)
                 # 이 L4 범위 안의 엑셀 Task 후보 (퍼지 매칭 스코프 제한)
                 l4_candidates = _by_l4.get(l4_tid, [])
                 entries, cls_counts = [], {}
                 exact_matched_ids: set[str] = set()
 
-                # 1차 패스: 정확 매칭
+                # 1차 패스: 정확 매칭 + 수동 매칭 미리 수집 (중복 방지용)
                 for l5n in children:
                     et = _by_id.get(l5n.task_id)
                     if et:
                         exact_matched_ids.add(et.id)
+                    elif l5n.task_id in _manual:
+                        exact_matched_ids.add(_manual[l5n.task_id])
 
-                # 2차 패스: 정확 매칭 우선, 없으면 같은 L4 범위 내 퍼지 매칭
+                # 2차 패스: 정확 → 수동 → 퍼지 순서로 매칭
                 for l5n in children:
                     et = _by_id.get(l5n.task_id)
                     fuzzy_matched = False
+                    manual_matched = False
                     fuzzy_score = 0.0
-                    if not et and l5n.label and l4_candidates:
-                        result = _fuzzy_match_excel(l5n.label, l4_candidates, exact_matched_ids)
-                        if result:
-                            et, fuzzy_score = result
-                            fuzzy_matched = True
-                            exact_matched_ids.add(et.id)  # 중복 퍼지 매칭 방지
+
+                    if not et:
+                        # 수동 매칭
+                        manual_excel_id = _manual.get(l5n.task_id)
+                        if manual_excel_id:
+                            et = _by_id.get(manual_excel_id)
+                            if et:
+                                manual_matched = True
+                        # 퍼지 매칭 (수동도 없을 때)
+                        if not et and l5n.label and l4_candidates:
+                            result = _fuzzy_match_excel(l5n.label, l4_candidates, exact_matched_ids)
+                            if result:
+                                et, fuzzy_score = result
+                                fuzzy_matched = True
+                                exact_matched_ids.add(et.id)
 
                     if et:
                         matched_excel_ids.add(et.id)
@@ -2792,13 +2848,15 @@ def _run_mapping_check() -> dict:
                         ] if v]
                         entries.append({"task_id": l5n.task_id, "label": l5n.label,
                             "matched": True, "fuzzy_matched": fuzzy_matched,
+                            "manual_matched": manual_matched,
                             "fuzzy_score": round(fuzzy_score, 2),
                             "excel_id": et.id, "excel_name": et.name,
                             "cls_label": lbl, "pain_points": pains,
                             "description": (et.description or "")[:80]})
                     else:
                         entries.append({"task_id": l5n.task_id, "label": l5n.label,
-                            "matched": False, "fuzzy_matched": False, "fuzzy_score": 0.0,
+                            "matched": False, "fuzzy_matched": False,
+                            "manual_matched": False, "fuzzy_score": 0.0,
                             "excel_id": "", "excel_name": "",
                             "cls_label": "", "pain_points": [], "description": ""})
                 return {"task_id": l4_tid, "label": l4_label, "level": "L4",
@@ -4098,6 +4156,7 @@ async def _restore_task():
     """실제 복구 작업 — 블로킹 I/O를 스레드풀에서 실행."""
     import asyncio
     global _wf_excel_tasks, _wf_classification, _tasks_cache, _current_excel_path
+    _load_manual_matches()
 
     from workflow_parser import parse_workflow_json, get_workflow_summary
     from excel_reader import load_tasks

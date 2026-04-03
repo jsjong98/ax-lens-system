@@ -1,8 +1,12 @@
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
-import { getMappingCheck, type MappingCheckResult, type MappingL4Node } from "@/lib/api";
-import { RefreshCw, ChevronDown, ChevronRight, CheckCircle, XCircle, AlertCircle, Link2 } from "lucide-react";
+import {
+  getMappingCheck, setManualMatch, deleteManualMatch,
+  getWorkflowExcelTasks,
+  type MappingCheckResult, type MappingL4Node, type WorkflowExcelTask,
+} from "@/lib/api";
+import { RefreshCw, ChevronDown, ChevronRight, CheckCircle, XCircle, AlertCircle, Link2, Pencil, Trash2, X } from "lucide-react";
 
 // ── 분류 스타일 ────────────────────────────────────────────────────────────
 const CLS: Record<string, { bg: string; text: string; bar: string }> = {
@@ -61,10 +65,33 @@ function ClsSummaryBar({ counts, total }: { counts: Record<string, number>; tota
 }
 
 // ── L4 노드 행 ─────────────────────────────────────────────────────────────
-function L4Row({ node }: { node: MappingL4Node }) {
+function L4Row({
+  node, excelTasks, onManualMatch, onDeleteMatch,
+}: {
+  node: MappingL4Node;
+  excelTasks: WorkflowExcelTask[];
+  onManualMatch: (jsonTaskId: string, excelTaskId: string) => Promise<void>;
+  onDeleteMatch: (jsonTaskId: string) => Promise<void>;
+}) {
   const [open, setOpen] = useState(false);
+  const [editingL5, setEditingL5] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
   const hasAnyMatch = node.matched_l5 > 0;
   const cls = node.cls_summary || {};
+
+  const filteredTasks = excelTasks.filter((t) =>
+    !searchQuery || t.name.toLowerCase().includes(searchQuery.toLowerCase()) || t.id.includes(searchQuery)
+  );
+
+  const handleSelect = async (l5TaskId: string, excelTaskId: string) => {
+    await onManualMatch(l5TaskId, excelTaskId);
+    setEditingL5(null);
+    setSearchQuery("");
+  };
+
+  const handleDelete = async (l5TaskId: string) => {
+    await onDeleteMatch(l5TaskId);
+  };
 
   return (
     <div className={`border rounded-lg mb-1 ${hasAnyMatch ? "border-green-200 bg-green-50/30" : "border-gray-200 bg-gray-50/30"}`}>
@@ -93,40 +120,106 @@ function L4Row({ node }: { node: MappingL4Node }) {
             <Link2 className="h-3 w-3" /> L5 노드 ({node.total_l5}개 · 연결 {node.matched_l5}개)
           </div>
           {node.l5_nodes.map((l5) => (
-            <div
-              key={l5.task_id}
-              className={`rounded border px-2.5 py-1.5 flex items-start gap-2 ${
-                !l5.matched ? "bg-gray-50 border-gray-200"
-                : l5.fuzzy_matched ? "bg-yellow-50 border-yellow-200"
-                : "bg-white border-green-100"
-              }`}
-            >
-              {!l5.matched
-                ? <XCircle className="h-3.5 w-3.5 text-gray-300 shrink-0 mt-0.5" />
-                : l5.fuzzy_matched
-                ? <AlertCircle className="h-3.5 w-3.5 text-yellow-400 shrink-0 mt-0.5" />
-                : <CheckCircle className="h-3.5 w-3.5 text-green-400 shrink-0 mt-0.5" />}
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <span className="font-mono text-[9px] text-gray-400">{l5.task_id}</span>
-                  <span className="text-xs text-gray-700 font-medium truncate">{l5.label}</span>
+            <div key={l5.task_id} className="space-y-1">
+              <div
+                className={`rounded border px-2.5 py-1.5 flex items-start gap-2 ${
+                  !l5.matched ? "bg-gray-50 border-gray-200"
+                  : l5.manual_matched ? "bg-blue-50 border-blue-200"
+                  : l5.fuzzy_matched ? "bg-yellow-50 border-yellow-200"
+                  : "bg-white border-green-100"
+                }`}
+              >
+                {!l5.matched
+                  ? <XCircle className="h-3.5 w-3.5 text-gray-300 shrink-0 mt-0.5" />
+                  : l5.manual_matched
+                  ? <Link2 className="h-3.5 w-3.5 text-blue-500 shrink-0 mt-0.5" />
+                  : l5.fuzzy_matched
+                  ? <AlertCircle className="h-3.5 w-3.5 text-yellow-400 shrink-0 mt-0.5" />
+                  : <CheckCircle className="h-3.5 w-3.5 text-green-400 shrink-0 mt-0.5" />}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-mono text-[9px] text-gray-400">{l5.task_id}</span>
+                    <span className="text-xs text-gray-700 font-medium truncate">{l5.label}</span>
+                  </div>
+                  {l5.matched && l5.excel_name && (
+                    <div className={`text-[10px] mt-0.5 truncate ${
+                      l5.manual_matched ? "text-blue-700" : l5.fuzzy_matched ? "text-yellow-700" : "text-gray-500"
+                    }`}>
+                      {l5.manual_matched ? `⚙ ${l5.excel_name}` : l5.fuzzy_matched ? `≈ ${l5.excel_name}` : `↳ ${l5.excel_name}`}
+                      {l5.fuzzy_matched && !l5.manual_matched && (
+                        <span className="ml-1 text-yellow-500">(유사 {Math.round(l5.fuzzy_score * 100)}%)</span>
+                      )}
+                    </div>
+                  )}
+                  {l5.matched && l5.description && (
+                    <div className="text-[10px] text-gray-400 mt-0.5 line-clamp-1">{l5.description}</div>
+                  )}
                 </div>
-                {l5.matched && l5.excel_name && (
-                  <div className={`text-[10px] mt-0.5 truncate ${l5.fuzzy_matched ? "text-yellow-700" : "text-gray-500"}`}>
-                    {l5.fuzzy_matched ? `≈ ${l5.excel_name}` : `↳ ${l5.excel_name}`}
-                    {l5.fuzzy_matched && (
-                      <span className="ml-1 text-yellow-500">(유사 {Math.round(l5.fuzzy_score * 100)}%)</span>
+                <div className="flex items-center gap-1 shrink-0">
+                  {l5.matched && l5.cls_label && <LabelBadge label={l5.cls_label} />}
+                  {l5.matched && <PainBadge points={l5.pain_points} />}
+                  {/* 수동 매칭된 경우: 연결 해제 버튼 */}
+                  {l5.manual_matched && (
+                    <button
+                      onClick={() => handleDelete(l5.task_id)}
+                      className="p-0.5 rounded hover:bg-red-100 text-gray-400 hover:text-red-500 transition"
+                      title="수동 연결 해제"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  )}
+                  {/* 미연결 또는 퍼지 매칭: 직접 연결 버튼 */}
+                  {(!l5.matched || l5.fuzzy_matched) && editingL5 !== l5.task_id && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setEditingL5(l5.task_id); setSearchQuery(""); }}
+                      className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-100 text-blue-600 hover:bg-blue-200 transition"
+                      title="직접 연결"
+                    >
+                      <Pencil className="h-2.5 w-2.5" /> 직접 연결
+                    </button>
+                  )}
+                  {/* 닫기 */}
+                  {editingL5 === l5.task_id && (
+                    <button
+                      onClick={() => { setEditingL5(null); setSearchQuery(""); }}
+                      className="p-0.5 rounded hover:bg-gray-200 text-gray-400 transition"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* 인라인 검색 패널 */}
+              {editingL5 === l5.task_id && (
+                <div className="ml-5 border border-blue-200 rounded-lg bg-blue-50 p-2 space-y-1.5">
+                  <div className="text-[10px] font-bold text-blue-700">엑셀 Task 검색 후 선택하세요</div>
+                  <input
+                    autoFocus
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Task명 또는 ID 검색..."
+                    className="w-full text-xs border border-blue-200 rounded px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400"
+                  />
+                  <div className="max-h-40 overflow-y-auto space-y-0.5">
+                    {filteredTasks.slice(0, 30).map((t) => (
+                      <button
+                        key={t.id}
+                        onClick={() => handleSelect(l5.task_id, t.id)}
+                        className="w-full text-left px-2 py-1 rounded hover:bg-blue-100 transition"
+                      >
+                        <span className="font-mono text-[9px] text-gray-400 mr-1">{t.id}</span>
+                        <span className="text-[11px] text-gray-700">{t.name}</span>
+                        {t.l4 && <span className="ml-1 text-[9px] text-gray-400">({t.l4})</span>}
+                      </button>
+                    ))}
+                    {filteredTasks.length === 0 && (
+                      <div className="text-[10px] text-gray-400 text-center py-2">검색 결과 없음</div>
                     )}
                   </div>
-                )}
-                {l5.matched && l5.description && (
-                  <div className="text-[10px] text-gray-400 mt-0.5 line-clamp-1">{l5.description}</div>
-                )}
-              </div>
-              <div className="flex items-center gap-1 shrink-0">
-                {l5.matched && l5.cls_label && <LabelBadge label={l5.cls_label} />}
-                {l5.matched && <PainBadge points={l5.pain_points} />}
-              </div>
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -183,13 +276,15 @@ export default function MappingCheckPanel({ hasExcel, hasAsIs }: MappingCheckPan
   const [error, setError] = useState<string | null>(null);
   const [activeSheet, setActiveSheet] = useState(0);
   const [showExcelOnly, setShowExcelOnly] = useState(false);
+  const [excelTasks, setExcelTasks] = useState<WorkflowExcelTask[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const r = await getMappingCheck();
+      const [r, et] = await Promise.all([getMappingCheck(), getWorkflowExcelTasks()]);
       setResult(r);
+      setExcelTasks(et.tasks || []);
       setActiveSheet(0);
     } catch (e) {
       setError((e as Error).message);
@@ -197,6 +292,16 @@ export default function MappingCheckPanel({ hasExcel, hasAsIs }: MappingCheckPan
       setLoading(false);
     }
   }, []);
+
+  const handleManualMatch = useCallback(async (jsonTaskId: string, excelTaskId: string) => {
+    await setManualMatch(jsonTaskId, excelTaskId);
+    await load();
+  }, [load]);
+
+  const handleDeleteMatch = useCallback(async (jsonTaskId: string) => {
+    await deleteManualMatch(jsonTaskId);
+    await load();
+  }, [load]);
 
   // 엑셀 + As-Is 모두 있으면 자동 로드
   useEffect(() => {
@@ -351,7 +456,15 @@ export default function MappingCheckPanel({ hasExcel, hasAsIs }: MappingCheckPan
                           </span>
                         </div>
                       )}
-                      {g.l4_nodes.map((n) => <L4Row key={n.task_id} node={n} />)}
+                      {g.l4_nodes.map((n) => (
+                        <L4Row
+                          key={n.task_id}
+                          node={n}
+                          excelTasks={excelTasks}
+                          onManualMatch={handleManualMatch}
+                          onDeleteMatch={handleDeleteMatch}
+                        />
+                      ))}
                     </div>
                   ))}
                 </div>

@@ -1020,6 +1020,7 @@ export interface MappingL5Node {
   label: string;
   matched: boolean;
   fuzzy_matched: boolean;
+  manual_matched: boolean;
   fuzzy_score: number;
   excel_id: string;
   excel_name: string;
@@ -1088,6 +1089,17 @@ export interface MappingCheckResult {
 
 export async function getMappingCheck(): Promise<MappingCheckResult> {
   return apiFetch<MappingCheckResult>("/workflow/mapping-check");
+}
+
+export async function setManualMatch(jsonTaskId: string, excelTaskId: string): Promise<{ ok: boolean }> {
+  return apiFetch("/workflow/manual-match", {
+    method: "POST",
+    body: JSON.stringify({ json_task_id: jsonTaskId, excel_task_id: excelTaskId }),
+  });
+}
+
+export async function deleteManualMatch(jsonTaskId: string): Promise<{ ok: boolean }> {
+  return apiFetch(`/workflow/manual-match/${encodeURIComponent(jsonTaskId)}`, { method: "DELETE" });
 }
 
 export interface HrWorkflowNode {
