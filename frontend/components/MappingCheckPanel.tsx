@@ -96,20 +96,27 @@ function L4Row({ node }: { node: MappingL4Node }) {
             <div
               key={l5.task_id}
               className={`rounded border px-2.5 py-1.5 flex items-start gap-2 ${
-                l5.matched ? "bg-white border-green-100" : "bg-gray-50 border-gray-200"
+                !l5.matched ? "bg-gray-50 border-gray-200"
+                : l5.fuzzy_matched ? "bg-yellow-50 border-yellow-200"
+                : "bg-white border-green-100"
               }`}
             >
-              {l5.matched
-                ? <CheckCircle className="h-3.5 w-3.5 text-green-400 shrink-0 mt-0.5" />
-                : <XCircle className="h-3.5 w-3.5 text-gray-300 shrink-0 mt-0.5" />}
+              {!l5.matched
+                ? <XCircle className="h-3.5 w-3.5 text-gray-300 shrink-0 mt-0.5" />
+                : l5.fuzzy_matched
+                ? <AlertCircle className="h-3.5 w-3.5 text-yellow-400 shrink-0 mt-0.5" />
+                : <CheckCircle className="h-3.5 w-3.5 text-green-400 shrink-0 mt-0.5" />}
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5">
                   <span className="font-mono text-[9px] text-gray-400">{l5.task_id}</span>
                   <span className="text-xs text-gray-700 font-medium truncate">{l5.label}</span>
                 </div>
                 {l5.matched && l5.excel_name && (
-                  <div className="text-[10px] text-gray-500 mt-0.5 truncate">
-                    ↳ {l5.excel_name}
+                  <div className={`text-[10px] mt-0.5 truncate ${l5.fuzzy_matched ? "text-yellow-700" : "text-gray-500"}`}>
+                    {l5.fuzzy_matched ? `≈ ${l5.excel_name}` : `↳ ${l5.excel_name}`}
+                    {l5.fuzzy_matched && (
+                      <span className="ml-1 text-yellow-500">(유사 {Math.round(l5.fuzzy_score * 100)}%)</span>
+                    )}
                   </div>
                 )}
                 {l5.matched && l5.description && (

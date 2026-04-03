@@ -1019,6 +1019,8 @@ export interface MappingL5Node {
   task_id: string;
   label: string;
   matched: boolean;
+  fuzzy_matched: boolean;
+  fuzzy_score: number;
   excel_id: string;
   excel_name: string;
   cls_label: string;

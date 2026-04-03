@@ -2654,6 +2654,37 @@ async def save_slide_l4_mapping(request: Request):
     return {"ok": True, "mappings": mappings}
 
 
+def _word_jaccard(a: str, b: str) -> float:
+    """두 한국어 문자열의 단어 단위 Jaccard 유사도 (0~1)."""
+    a_words = set(a.split())
+    b_words = set(b.split())
+    if not a_words or not b_words:
+        return 0.0
+    inter = len(a_words & b_words)
+    union = len(a_words | b_words)
+    return inter / union if union else 0.0
+
+
+def _fuzzy_match_excel(label: str, candidates: list, already_matched: set,
+                       threshold: float = 0.4) -> tuple | None:
+    """
+    label(JSON L5 노드명)과 가장 유사한 엑셀 Task를 candidates 안에서 찾아 반환.
+    - 이미 정확 매칭된 Task(already_matched)는 제외
+    - Jaccard 유사도가 threshold 이상인 최고점 Task 반환
+    - 없으면 None 반환. 반환값: (Task, score)
+    """
+    best, best_score = None, 0.0
+    for t in candidates:
+        if t.id in already_matched:
+            continue
+        score = _word_jaccard(label, t.name)
+        if score > best_score:
+            best, best_score = t, score
+    if best and best_score >= threshold:
+        return best, best_score
+    return None
+
+
 @app.get("/api/workflow/mapping-check", tags=["Workflow"])
 async def get_mapping_check():
     """엑셀 Task ↔ As-Is 워크플로우 노드 매핑 현황을 반환합니다."""
@@ -2725,11 +2756,31 @@ def _run_mapping_check() -> dict:
                 eff_l3.setdefault(l3_tid, []).append(l4_tid)
 
             # L4 엔트리 생성 (closure 피하고 인자로 전달)
-            def _l4_entry(l4_tid, l4_label, _l5_by_l4=l5_by_l4, _by_id=by_id):
+            def _l4_entry(l4_tid, l4_label, _l5_by_l4=l5_by_l4, _by_id=by_id, _by_l4=by_l4):
                 children = sorted(_l5_by_l4.get(l4_tid, []), key=lambda x: x.task_id)
+                # 이 L4 범위 안의 엑셀 Task 후보 (퍼지 매칭 스코프 제한)
+                l4_candidates = _by_l4.get(l4_tid, [])
                 entries, cls_counts = [], {}
+                exact_matched_ids: set[str] = set()
+
+                # 1차 패스: 정확 매칭
                 for l5n in children:
                     et = _by_id.get(l5n.task_id)
+                    if et:
+                        exact_matched_ids.add(et.id)
+
+                # 2차 패스: 정확 매칭 우선, 없으면 같은 L4 범위 내 퍼지 매칭
+                for l5n in children:
+                    et = _by_id.get(l5n.task_id)
+                    fuzzy_matched = False
+                    fuzzy_score = 0.0
+                    if not et and l5n.label and l4_candidates:
+                        result = _fuzzy_match_excel(l5n.label, l4_candidates, exact_matched_ids)
+                        if result:
+                            et, fuzzy_score = result
+                            fuzzy_matched = True
+                            exact_matched_ids.add(et.id)  # 중복 퍼지 매칭 방지
+
                     if et:
                         matched_excel_ids.add(et.id)
                         lbl = _wf_classification.get(et.id, {}).get("label", "미분류")
@@ -2740,12 +2791,15 @@ def _run_mapping_check() -> dict:
                             ("시스템/도구", et.pain_system),
                         ] if v]
                         entries.append({"task_id": l5n.task_id, "label": l5n.label,
-                            "matched": True, "excel_id": et.id, "excel_name": et.name,
+                            "matched": True, "fuzzy_matched": fuzzy_matched,
+                            "fuzzy_score": round(fuzzy_score, 2),
+                            "excel_id": et.id, "excel_name": et.name,
                             "cls_label": lbl, "pain_points": pains,
                             "description": (et.description or "")[:80]})
                     else:
                         entries.append({"task_id": l5n.task_id, "label": l5n.label,
-                            "matched": False, "excel_id": "", "excel_name": "",
+                            "matched": False, "fuzzy_matched": False, "fuzzy_score": 0.0,
+                            "excel_id": "", "excel_name": "",
                             "cls_label": "", "pain_points": [], "description": ""})
                 return {"task_id": l4_tid, "label": l4_label, "level": "L4",
                         "l5_nodes": entries, "cls_summary": cls_counts,
