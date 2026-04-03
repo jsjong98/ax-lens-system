@@ -2003,65 +2003,101 @@ async def benchmark_workflow_step1(request: Request):
     _wf_benchmark_results = raw_results
 
     # LLM으로 벤치마킹 결과 분석하여 구조화된 테이블 생성
-    bm_analysis_system = f"""당신은 AI 업무 혁신 벤치마킹 분석 전문가입니다.
-검색 결과에서 **실제 기업명과 구체적 AI 적용 방법 및 성과**를 추출하여 정리합니다.
+    # L4 활동별 영어 대응어 생성 (검색 결과 해석에 활용)
+    from benchmark_search import _translate_to_en as _bm_translate
+    l4_en_map = "\n".join(
+        f"  - {d['name']} (영어: {_bm_translate(d['name'])})"
+        for d in l4_details[:6]
+    )
+
+    bm_analysis_system = f"""당신은 McKinsey, BCG, Bain 수준의 글로벌 AI 업무 혁신 벤치마킹 분석 전문가입니다.
+영어·한국어 검색 결과를 엄격하게 분석하여 실제 근거가 있는 기업의 AI 적용 사례만 추출합니다.
 
 ## 프로세스: {process_name}
 ## L2 대분류: {', '.join(l2_names)}
 ## L3 영역: {', '.join(l3_names)}
-## L4 세부 활동 (엑셀-As-Is 매핑 기준, 최우선):
-{chr(10).join(f"  - [{d['task_id']}] {d['name']}" + (f" | Pain: {', '.join(d['pain_points'])}" if d.get('pain_points') else "") for d in l4_details[:6])}
+## L4 세부 활동 및 영어 대응어 (최우선 매핑 기준):
+{l4_en_map if l4_en_map else chr(10).join(f"  - [{d['task_id']}] {d['name']}" for d in l4_details[:6])}
 
-## ⚠️ 관련성 검증 (필수)
-- 각 검색 결과가 위 L4/L3 활동과 **실질적으로 동일한 업무 유형**인지 먼저 판단할 것
-  - 예: L4 = "조합비 공제 관리" → payroll deduction, union fee, labor relations 관련 사례만 OK
-  - 예: L4 = "변경사항 접수" → 변경 요청 수신·처리 자동화 사례만 OK
-  - **키워드가 같아도 업무 성격이 다르면 제외** (예: "기술직 코딩 테스트" ≠ "기술직 급여 관리")
-- 관련 없는 사례는 반드시 제외 — 관련 사례가 없으면 `benchmark_table`을 빈 배열로 반환
+## ⚠️ 최우선 원칙: 모르면 모른다고 명확히 표기
+**절대 사실을 꾸며내거나 추측으로 사례를 만들지 마세요.**
+- 검색 결과에 해당 기업명이 명확히 나오지 않으면 → 그 사례는 제외
+- 수치 성과가 없으면 → outcome에 "수치 미확인" 명시
+- URL이 없으면 → url 빈 문자열 (URL 임의 생성 절대 금지)
+- 관련 사례가 없으면 → benchmark_table을 빈 배열로 반환하고 no_cases_note에 이유 명시
+
+## 영어 검색 결과 해석 규칙
+검색 결과가 영어여도 아래 대응 관계를 이용해 관련성을 판단하세요:
+- "personnel action / position change / job transfer" → 발령 관련 활동
+- "appointment workflow / HCM automation" → 발령 처리 프로세스
+- "employee onboarding" → 입사·신규 발령 관련
+- "HR workflow automation / RPA" → 인사 업무 자동화 (발령, 승인 등)
+- "approval workflow / document routing" → 품의·결재 프로세스
+- "notification / announcement automation" → 발령 공지·통보 자동화
+- "payroll processing" → 급여 관련
+- "labor relations / collective bargaining" → 노사 관련
+- "recruitment / talent acquisition" → 채용 관련
+- "performance management" → 평가 관련
+
+## 관련성 판단 기준
+- 완전 동일하지 않아도, **동일한 HR 업무 기능**이면 포함
+  - "발령요청 접수" ↔ "HR request intake automation" ✅
+  - "발령 확정" ↔ "position change final approval AI" ✅
+  - "발령 공지" ↔ "automated HR notification/announcement" ✅
+- L4 단위 매칭이 안 되면 L3 단위로 매핑
+- L3도 안 되면 L2 단위로 매핑
+
+## 사례 신뢰도 등급 (confidence 필드에 표기)
+- ★★★: 기업명 + 구체적 수치 성과 + 출처 URL 모두 있음
+- ★★: 기업명 + AI 적용 방법 있음, 수치 없음
+- ★: 기업명만 있음, 내용 불분명
+- ✗ 제외: 벤더 마케팅 자료, 일반 AI 통계, 기업명 미확인
 
 ## 중요 원칙
-- **우선순위: L4 세부 활동 → L3 영역 → L2 대분류 순으로 가장 구체적인 단위에 매핑**
-- 위 L4 활동명과 실질적으로 같은 업무 유형의 사례만 포함
-- 각 활동의 Pain Point({', '.join({p for d in l4_details[:3] for p in d.get('pain_points', [])})})를 해결한 AI 사례 우선 선정
-- 프로세스 전체가 아닌, 개별 L4 세부 활동에 AI를 어떻게 적용했는지 구체적으로 기술
-- **솔루션 Provider가 아닌, AI를 '도입·활용한' 기업** 사례만 추출
-- Big Tech(Google, Amazon, Meta 등)의 **내부** AI 활용 사례는 OK
-- Industry 선도사(Fortune 500, 한국 대기업)의 AI 도입 성과 우선
+- **영어 사례를 한국어로 번역하여 설명** — 영어 원문 그대로 두지 말 것
+- 솔루션 Provider(SAP, Workday 자체)가 아닌 **도입·활용한 기업** 사례 우선
+- Big Tech(Google, Amazon, Meta, Microsoft) 내부 HR AI 활용 사례 포함 OK
 - 구체적 기업명 없는 사례는 제외
-- 수치화된 성과(%, 시간, 비용) 포함 시 우선 선정
+- 수치 성과(%, 시간, 비용) 포함 사례 우선
 
 ## 출력 형식 (JSON만, 마크다운 코드 블록 없음)
 {{
   "benchmark_table": [
     {{
-      "source": "기업명 (고유 기업명 1개만)",
-      "company_type": "Tech 상한선 | 非Tech 실제 구현",
+      "source": "기업명 (고유 기업명 1개만, 벤더명·'미확인' 금지)",
+      "confidence": "★★★|★★|★",
+      "company_type": "Tech 선도 | 非Tech 실제 구현",
       "industry": "산업군",
       "process_area": "매핑된 L4 활동명 (위 L4 목록 중 해당하는 것, 없으면 L3명)",
       "ai_adoption_goal": "AI 도입 목표 (비용절감·속도개선·정확도향상 등)",
-      "ai_technology": "적용 AI 기술",
-      "key_data": "핵심 데이터 (어떤 데이터로 AI를 구동하는지)",
+      "ai_technology": "적용 AI 기술 (한국어로)",
+      "key_data": "핵심 데이터",
       "adoption_method": "도입 방식 (자체개발 | SaaS | API | 파트너십)",
-      "use_case": "구체적 적용 사례 (1~2문장, L4 활동 기준)",
-      "outcome": "성과/효과 (수치 포함)",
+      "use_case": "구체적 적용 사례 (한국어로 번역, 1~2문장, L4 활동 기준)",
+      "outcome": "성과/효과 (수치 포함, 없으면 '수치 미확인 — 정성적 효과: ...'로 기술)",
       "infrastructure": "인프라/시스템 기반",
-      "implication": "두산 향 시사점 (해당 L4 활동의 Pain Point 해결 관점)",
-      "url": "출처 URL"
+      "implication": "두산 향 시사점 — 해당 L4 활동에 어떻게 적용할 수 있는지",
+      "url": "검색 결과에 실제 존재하는 URL (없으면 빈 문자열, 절대 임의 생성 금지)"
     }}
   ],
-  "summary": "벤치마킹 종합 요약 — L4 활동별 핵심 시사점 중심 (3~5문장)"
+  "no_cases_note": "관련 사례가 없을 때만 이유 기재 (예: '검색 결과에 해당 프로세스 직접 사례 없음'). 사례가 있으면 빈 문자열.",
+  "summary": "벤치마킹 종합 요약 (3~5문장, 영어 사례도 한국어로 설명. 사례가 없으면 없다고 명시)"
 }}
 """
 
     bm_user = "## 웹 검색 결과\n\n"
-    for i, r in enumerate(raw_results[:15], 1):
+    for i, r in enumerate(raw_results[:20], 1):
         content = r.get("content", r.get("snippet", ""))
         bm_user += f"### [{i}] {r['title']}\n"
         if r.get("url"):
             bm_user += f"- URL: {r['url']}\n"
-        bm_user += f"- 내용: {content[:600]}\n\n"
+        bm_user += f"- 내용: {content[:800]}\n\n"
 
-    bm_user += "\n위 검색 결과에서 벤치마킹 테이블을 작성해주세요."
+    bm_user += (
+        "\n위 검색 결과에서 벤치마킹 테이블을 작성해주세요.\n"
+        "각 사례의 url 필드는 위 검색 결과에 실제로 나온 URL만 기재하세요 (임의 생성 금지).\n"
+        "관련 사례가 없으면 benchmark_table을 빈 배열로 반환하고 no_cases_note에 이유를 명시하세요."
+    )
 
     result_data = await _call_llm_step1(bm_analysis_system, [{"role": "user", "content": bm_user}])
 
@@ -3397,9 +3433,20 @@ async def benchmark_new_workflow():
     benchmark_insights = refined_data.pop("benchmark_insights", [])
     improvement_summary = refined_data.pop("improvement_summary", "")
 
-    # 개선된 Workflow를 파싱하여 캐시 업데이트
-    refined_result = _parse_freeform_result(refined_data)
-    refined_dict = result_to_dict(refined_result)
+    # 개선된 Workflow 캐시 업데이트
+    # redesigned_process 형식이면 직접 저장, 구형 agents 형식이면 파싱
+    if "redesigned_process" in refined_data:
+        refined_dict = {
+            "ok": True,
+            "blueprint_summary": refined_data.get("blueprint_summary", ""),
+            "process_name": refined_data.get("process_name", _new_workflow_cache.get("process_name", "")),
+            "redesigned_process": refined_data.get("redesigned_process", []),
+            "agents": [],
+            "execution_flow": [],
+        }
+    else:
+        refined_result = _parse_freeform_result(refined_data)
+        refined_dict = result_to_dict(refined_result)
 
     _new_workflow_cache.clear()
     _new_workflow_cache.update(refined_dict)
