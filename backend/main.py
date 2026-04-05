@@ -1570,6 +1570,7 @@ async def get_workflow_excel_tasks():
 
 _wf_benchmark_results: list = []   # 벤치마킹 검색 결과 (raw)
 _wf_benchmark_table: list = []     # 벤치마킹 결과 테이블 (LLM 분석 후)
+_wf_search_log: list = []          # 벤치마킹 검색 로그 (thinking process)
 
 # ── 벤치마킹 source / URL 검증 필터 ─────────────────────────────────────────
 
@@ -2106,10 +2107,13 @@ async def benchmark_workflow_step1(request: Request):
             f"{extra_companies} '{focus}' AI 자동화 도입 사례 성과",
         ]
 
-    raw_results = await search_benchmarks(bm_data)
+    bm_search_result = await search_benchmarks(bm_data)
+    raw_results = bm_search_result.get("results", [])
+    _bm_search_log = bm_search_result.get("search_log", [])
 
-    global _wf_benchmark_results, _wf_benchmark_table
+    global _wf_benchmark_results, _wf_benchmark_table, _wf_search_log
     _wf_benchmark_results = raw_results
+    _wf_search_log = _bm_search_log
 
     # LLM으로 벤치마킹 결과 분석하여 구조화된 테이블 생성
     # L4 활동별 영어 대응어 생성 (검색 결과 해석에 활용)
@@ -2271,6 +2275,7 @@ async def benchmark_workflow_step1(request: Request):
         "result_count": len(raw_results),
         "benchmark_table": _wf_benchmark_table,
         "summary": summary_text,
+        "search_log": _bm_search_log,
     }
 
 
@@ -2323,7 +2328,8 @@ async def generate_workflow_step1(request: Request):
             "agents": [],
             "blueprint_summary": f"{' '.join(prompt_companies)} {process_name} AI 적용 사례",
         }
-        raw = await search_benchmarks(bm_data)
+        _bm_sr = await search_benchmarks(bm_data)
+        raw = _bm_sr.get("results", [])
         if raw:
             global _wf_benchmark_results
             _wf_benchmark_results = raw
@@ -2443,7 +2449,8 @@ async def chat_workflow_step1(request: Request):
             bm_data["extra_queries"] = [
                 f"{' '.join(companies)} '{process_name}' AI automation case study 2024 2025",
             ]
-        raw = await search_benchmarks(bm_data)
+        _bm_sr2 = await search_benchmarks(bm_data)
+        raw = _bm_sr2.get("results", [])
 
         if raw:
             # LLM으로 새 벤치마킹 분석
@@ -3571,7 +3578,8 @@ async def benchmark_new_workflow():
         raise HTTPException(400, "Workflow 결과가 없습니다. 먼저 1단계를 실행하세요.")
 
     # 1. 웹 벤치마킹 검색
-    benchmark_results = await search_benchmarks(_new_workflow_cache)
+    _nw_bm_sr = await search_benchmarks(_new_workflow_cache)
+    benchmark_results = _nw_bm_sr.get("results", [])
 
     if not benchmark_results:
         raise HTTPException(500, "벤치마킹 검색 결과를 가져오지 못했습니다. 잠시 후 다시 시도해 주세요.")

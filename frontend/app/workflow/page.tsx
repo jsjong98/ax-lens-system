@@ -18,6 +18,7 @@ import {
   type WorkflowExcelUploadResult,
   type WorkflowStepResult,
   type BenchmarkTableRow,
+  type SearchLogItem,
 } from "@/lib/api";
 import WorkflowEditor from "@/components/WorkflowEditor";
 import ToBeWorkflowModal from "@/components/ToBeWorkflowModal";
@@ -66,6 +67,8 @@ export default function WorkflowPage() {
   const [benchmarkTable, setBenchmarkTable] = useState<BenchmarkTableRow[]>([]);
   const [benchmarkSummary, setBenchmarkSummary] = useState("");
   const [bmLoading, setBmLoading] = useState(false);
+  const [searchLog, setSearchLog] = useState<SearchLogItem[]>([]);
+  const [showSearchLog, setShowSearchLog] = useState(false);
 
   // Step 3: Step 2 상세 설계
   const [step2Result, setStep2Result] = useState<WorkflowStepResult | null>(null);
@@ -181,16 +184,17 @@ export default function WorkflowPage() {
   const handleBenchmark = useCallback(async (companies?: string) => {
     setBmLoading(true);
     setError(null);
-    setChatMessages((prev) => [
-      ...prev,
-      { role: "system", content: `벤치마킹 수행 중...${companies ? ` (기업: ${companies})` : " (Big Tech / Industry 선도사)"}` },
-    ]);
+    setSearchLog([]);
+    setShowSearchLog(true);
+    const loadingMsg = `벤치마킹 수행 중...${companies ? ` (기업: ${companies})` : " (Big Tech / Industry 선도사)"}`;
+    setChatMessages((prev) => [...prev, { role: "system", content: loadingMsg }]);
     try {
       const result = await benchmarkWorkflowStep1({ companies, sheet_id: activeSheet ?? undefined });
       setBenchmarkTable(result.benchmark_table);
       setBenchmarkSummary(result.summary);
+      if (result.search_log) setSearchLog(result.search_log);
       setChatMessages((prev) => [
-        ...prev.filter((m) => m.content !== `벤치마킹 수행 중...${companies ? ` (기업: ${companies})` : " (Big Tech / Industry 선도사)"}`),
+        ...prev.filter((m) => m.content !== loadingMsg),
         { role: "assistant", content: `[벤치마킹 완료] ${result.result_count}개 사례 수집\n\n${result.summary}` },
       ]);
     } catch (e) {
@@ -199,7 +203,7 @@ export default function WorkflowPage() {
     } finally {
       setBmLoading(false);
     }
-  }, []);
+  }, [activeSheet]);
 
   /* ── Step 2: Step 1 기본 설계 생성 + 채팅 ──────────────── */
   const handleGenerateStep1 = useCallback(async (prompt?: string) => {
@@ -864,6 +868,61 @@ export default function WorkflowPage() {
                 </button>
               </div>
             </div>
+
+            {/* 검색 과정 (Thinking Process) */}
+            {searchLog.length > 0 && (
+              <div className="mb-4 rounded-lg border border-gray-200 overflow-hidden">
+                <button
+                  onClick={() => setShowSearchLog((v) => !v)}
+                  className="w-full flex items-center justify-between px-3 py-2 bg-gray-50 hover:bg-gray-100 text-xs text-gray-600 font-medium transition"
+                >
+                  <span>검색 과정 보기 ({searchLog.length}단계)</span>
+                  <span>{showSearchLog ? "▲" : "▼"}</span>
+                </button>
+                {showSearchLog && (
+                  <div className="max-h-[260px] overflow-y-auto px-3 py-2 space-y-1 bg-white font-mono text-[11px]">
+                    {searchLog.map((item, i) => {
+                      let label = "";
+                      let cls = "text-gray-600";
+                      if (item.type === "engine") {
+                        label = item.text ?? "";
+                        cls = "text-blue-700 font-bold";
+                      } else if (item.type === "plan") {
+                        label = item.fallback
+                          ? `쿼리 플래닝 (fallback) — ${item.query_count}개`
+                          : `쿼리 플래닝 완료 — ${item.query_count}개 쿼리${item.hypotheses?.length ? ` / 가설: ${item.hypotheses.slice(0, 2).join(" · ")}` : ""}`;
+                        cls = "text-blue-600 font-semibold";
+                      } else if (item.type === "round_start") {
+                        label = `▶ Round ${item.round} 시작 — ${item.query_count}개 쿼리 병렬 검색`;
+                        cls = "text-indigo-700 font-semibold";
+                      } else if (item.type === "query") {
+                        label = `  검색: "${item.q}"${item.found !== "?" ? ` → ${item.found}건` : ""}`;
+                        cls = "text-indigo-500";
+                      } else if (item.type === "round_end") {
+                        label = `◀ Round ${item.round} 완료 — 누적 ${item.total}건`;
+                        cls = "text-indigo-700 font-semibold";
+                      } else if (item.type === "embed_rank") {
+                        label = item.status ?? `의미 재랭킹 — top score: ${item.top_score}`;
+                        cls = "text-purple-600";
+                      } else if (item.type === "gap") {
+                        label = `Gap 분석: ${item.text ?? ""}`;
+                        cls = "text-orange-600";
+                      } else if (item.type === "done") {
+                        label = `완료 — 총 ${item.total}건 수집, ${item.final}건 반환 (엔진: ${item.engine})`;
+                        cls = "text-green-700 font-bold";
+                      } else {
+                        label = item.text ?? item.type;
+                      }
+                      return (
+                        <div key={i} className={`leading-snug ${cls}`}>
+                          {label}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* 벤치마킹 결과 테이블 */}
             {benchmarkTable.length > 0 && (

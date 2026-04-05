@@ -956,11 +956,29 @@ export interface BenchmarkTableRow {
   url: string;
 }
 
+export interface SearchLogItem {
+  type: string;        // "engine", "plan", "round_start", "round_end", "query", "embed_rank", "gap", "done"
+  text?: string;
+  q?: string;
+  found?: number | string;
+  round?: number;
+  query_count?: number;
+  total?: number;
+  final?: number;
+  top_score?: number;
+  status?: string;
+  queries?: string[];
+  hypotheses?: string[];
+  engine?: string;
+  fallback?: boolean;
+}
+
 export interface BenchmarkStep1Result {
   ok: boolean;
   result_count: number;
   benchmark_table: BenchmarkTableRow[];
   summary: string;
+  search_log?: SearchLogItem[];
 }
 
 export async function benchmarkWorkflowStep1(params?: {
