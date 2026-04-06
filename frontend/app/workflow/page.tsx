@@ -929,9 +929,18 @@ export default function WorkflowPage() {
               <div className="mb-5">
                 <div className="flex items-center justify-between mb-2">
                   <div className="text-xs font-bold text-gray-700">벤치마킹 결과표</div>
-                  {benchmarkSummary && (
-                    <div className="text-[10px] text-gray-500 max-w-[60%] text-right">{benchmarkSummary.slice(0, 150)}</div>
-                  )}
+                  <div className="flex items-center gap-2">
+                    {benchmarkSummary && (
+                      <div className="text-[10px] text-gray-500 max-w-[50%] text-right">{benchmarkSummary.slice(0, 150)}</div>
+                    )}
+                    <a
+                      href="/api/workflow/benchmark-table/export"
+                      download
+                      className="flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-bold text-green-700 border border-green-300 bg-green-50 hover:bg-green-100 transition whitespace-nowrap"
+                    >
+                      ⬇ xlsx
+                    </a>
+                  </div>
                 </div>
                 <div className="max-h-[340px] overflow-y-auto overflow-x-auto rounded-lg border border-blue-200">
                   <table className="w-full text-xs" style={{ minWidth: "1100px" }}>

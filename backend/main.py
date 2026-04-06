@@ -2019,6 +2019,81 @@ def _save_step1_result(result_data: dict) -> dict:
 
 # ── 벤치마킹 전용 ──────────────────────────────────────────
 
+@app.get("/api/workflow/benchmark-table/export", tags=["Workflow"])
+async def export_benchmark_table_xlsx():
+    """벤치마킹 결과 테이블을 xlsx 파일로 내보냅니다."""
+    from fastapi.responses import Response
+    from datetime import datetime, timedelta, timezone
+
+    _KST = timezone(timedelta(hours=9))
+
+    if not _wf_benchmark_table:
+        raise HTTPException(400, "벤치마킹 결과가 없습니다. 먼저 벤치마킹을 실행하세요.")
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "벤치마킹 결과"
+
+    headers = [
+        "기업", "유형", "산업", "적용 L4", "도입 목표",
+        "AI 기술", "핵심 데이터", "도입 방식", "적용 사례",
+        "성과", "인프라", "두산 시사점", "출처 URL",
+    ]
+    field_keys = [
+        "source", "company_type", "industry", "target_l4", "goal",
+        "ai_technology", "key_data", "adoption_method", "use_case",
+        "outcome", "infrastructure", "implication", "url",
+    ]
+
+    # 헤더 스타일
+    header_fill = PatternFill("solid", fgColor="1F3864")
+    header_font = Font(bold=True, color="FFFFFF", size=10)
+    header_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    for col_idx, header in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col_idx, value=header)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = header_align
+
+    # 데이터 행
+    row_fill_even = PatternFill("solid", fgColor="EEF2FF")
+    data_align = Alignment(vertical="top", wrap_text=True)
+
+    for row_idx, entry in enumerate(_wf_benchmark_table, 2):
+        fill = row_fill_even if row_idx % 2 == 0 else None
+        for col_idx, key in enumerate(field_keys, 1):
+            val = entry.get(key, "") or ""
+            cell = ws.cell(row=row_idx, column=col_idx, value=val)
+            cell.alignment = data_align
+            if fill:
+                cell.fill = fill
+
+    # 열 너비 조정
+    col_widths = [18, 10, 12, 14, 20, 20, 18, 12, 35, 25, 20, 35, 40]
+    for col_idx, width in enumerate(col_widths, 1):
+        ws.column_dimensions[ws.cell(row=1, column=col_idx).column_letter].width = width
+
+    ws.row_dimensions[1].height = 28
+    ws.freeze_panes = "A2"
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    now_str = datetime.now(_KST).strftime("%Y%m%d_%H%M")
+    filename = f"벤치마킹_결과_{now_str}.xlsx"
+    encoded = filename.encode("utf-8")
+
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded.decode('latin-1', errors='replace')}; filename=\"benchmark_{now_str}.xlsx\"",
+        },
+    )
+
+
 @app.post("/api/workflow/benchmark-step1", tags=["Workflow"])
 async def benchmark_workflow_step1(request: Request):
     """
@@ -2572,18 +2647,16 @@ L4 활동: {', '.join(bm_data['l4_names'][:4])}
             bm_result = await _call_llm_step1(bm_sys, [{"role":"user","content":bm_user_msg}])
             if bm_result and bm_result.get("benchmark_table"):
                 new_bm_entries = bm_result["benchmark_table"]
-                # URL 없는 항목은 절대 추가 불가 (출처 없는 사례 = 불인정)
-                existing_sources = {b.get("source","") for b in _wf_benchmark_table}
+                existing_sources = {b.get("source", "") for b in _wf_benchmark_table}
                 for entry in new_bm_entries:
                     src = entry.get("source", "")
                     url = entry.get("url", "")
                     if (url
                             and src not in existing_sources
-                            and not _is_news_url(url)  # 한국 저품질 뉴스만 차단
+                            and not _is_news_url(url)
                             and _is_valid_benchmark_source(src)
                             and (entry.get("use_case") or entry.get("outcome"))):
                         _wf_benchmark_table.append(entry)
-            added = len(_wf_benchmark_table) - len(existing_sources if bm_result else [])
             extra_bm_text = f"\n\n[✅ Perplexity 검색 완료 — {len(_qg)}개 쿼리 실행, {len(new_bm_entries)}건 사례 분석]"
 
     # 기존 설계 결과 or 벤치마킹 결과가 있으면 포함
