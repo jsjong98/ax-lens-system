@@ -482,20 +482,24 @@ async def _plan_search_queries(
 - BP = Business Partner (인사 담당 파트너), ER = Employee Relations
 
 ## 검색 쿼리 설계 원칙
-1. L5 Task의 실제 업무(시스템 반영, 결재, 공지)에 집중한 구체적 쿼리 작성
-2. **모든 쿼리에 AI 기술 키워드 필수 포함** — AI 없는 단순 자동화 쿼리 절대 금지
-   - ✅ "SAP SuccessFactors Employee Central AI-powered job change approval routing automation Fortune 500 results"
-   - ✅ "Workday HCM GenAI intelligent personnel action notification auto-generation ERP sync case study"
-   - ✅ "ServiceNow HR case management AI agent approval workflow LLM document drafting results"
-   - ❌ "SAP SuccessFactors approval workflow automation" (AI 키워드 없음 — 금지)
+목적: **AX(AI Transformation) 전략 수립을 위한 벤치마킹** — 글로벌 대기업이 AI를 도입하여 이 HR 행정 프로세스를 어떻게 전환했는지 찾는 것이 핵심입니다.
+특정 HCM 시스템(SAP/Workday) 중심이 아닌, **AI 기술 전환(transformation) 관점**으로 쿼리를 설계하세요.
+
+1. **AI 전환 관점 우선** — 시스템 이름보다 AI 기술·성과가 앞에 오는 쿼리
+   - ✅ "Fortune 500 company generative AI HR personnel assignment notification automation transformation results 2024"
+   - ✅ "large enterprise LLM AI agent HR approval document auto-generation administrative process ROI case study"
+   - ✅ "global company AI transformation HR administrative workflow intelligent automation success story"
+   - ❌ "SAP SuccessFactors approval workflow automation" (AI 전환 관점 없음 — 금지)
    - ❌ "organizational restructuring AI automation" (전략 프로세스 — 제외)
-3. Forbes Global 500 / Fortune 500 수준 글로벌 대기업만 사용
+2. **모든 쿼리에 AI 기술 키워드 필수** — "AI", "GenAI", "LLM", "intelligent automation", "AI agent", "generative AI" 중 하나 이상
+3. Forbes Global 500 / Fortune 500 수준 글로벌 대기업만 사용, 스타트업·중소기업 금지
 
 ## 쿼리 10개 생성 (구성)
-- **글로벌 대기업 AI 적용 가설 쿼리** 4개: SAP SuccessFactors/Workday/ServiceNow + AI/GenAI/LLM + 결재·공지·시스템 동기화
-- **AI 프로세스 자동화 사례 쿼리** 3개: Workday/ServiceNow/Oracle HCM + AI/intelligent automation + 발령 후처리 공식 고객 사례
-- **리서치·학술 기관** 1개: WEF/SHRM/Gartner/HBR 인용 AI 기반 HR 행정 자동화 기업 사례
-- **한국 대기업 AI 사례** 2개: 삼성·현대·SK·LG + AI/GenAI + 인사발령 시스템 자동화 공식 사례
+- **AI 전환 사례 쿼리** 3개: 특정 시스템 언급 없이 AI/GenAI/LLM으로 HR 행정(발령·공지·승인)을 전환한 글로벌 대기업 사례
+- **AI 기술별 HR 적용 쿼리** 3개: LLM 문서 자동생성 / AI Agent 승인 라우팅 / GenAI 공지 자동작성 — L5 Task와 직접 매핑되는 기술 적용 사례
+- **HCM+AI 전환 쿼리** 2개: Workday/SAP SuccessFactors/ServiceNow가 AI를 도입하여 고객사의 프로세스를 전환한 공식 사례 (시스템 기능 소개 아닌 전환 성과 중심)
+- **리서치·학술 기관** 1개: SHRM/Gartner/HBR/McKinsey가 인용한 AI 기반 HR 행정 자동화 전환 기업 사례
+- **한국 대기업 AI 전환 사례** 1개: 삼성·현대·SK·LG + AI/GenAI + 인사행정 프로세스 전환 사례
 
 JSON만 출력:
 {{"queries": ["q1",...,"q10"], "hypotheses": ["가설1","가설2","가설3"]}}"""
