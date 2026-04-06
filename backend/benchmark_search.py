@@ -66,10 +66,7 @@ def _search_perplexity_sonar(query: str) -> list[dict]:
         "messages": [{"role": "user", "content": query}],
         "max_tokens": 2000,
         "stream": True,
-        "web_search_options": {
-            "search_type": "auto",
-            "search_context_size": "high",
-        },
+        "search_context_size": "high",          # 상위 파라미터 (web_search_options 아님)
         "search_domain_filter": _SONAR_DOMAIN_DENYLIST,
         "return_citations": True,
     }).encode("utf-8")

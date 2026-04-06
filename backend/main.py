@@ -1601,8 +1601,8 @@ _NEWS_DOMAINS = [
     "venturebeat.com", "zdnet.com",
 ]
 
-# URL 경로에서 뉴스 패턴
-_NEWS_URL_PATTERNS = ["/news/", "/article/", "/press/", "/newsroom/press"]
+# URL 경로에서 뉴스 패턴 (공식 기업 블로그/케이스스터디 URL은 허용)
+_NEWS_URL_PATTERNS = ["/newsroom/press-release", "/press-release/"]
 
 
 import re as _re_filter
