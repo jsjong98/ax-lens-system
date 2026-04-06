@@ -1605,15 +1605,44 @@ _NEWS_DOMAINS = [
 _NEWS_URL_PATTERNS = ["/news/", "/article/", "/press/", "/newsroom/press"]
 
 
+import re as _re_filter
+
+# 국내 중소·중견 IT기업 패턴 (글로벌 인지도 없는 한국 기업)
+_KR_SMALL_COMPANY_PATTERN = _re_filter.compile(
+    r"(코퍼레이션|솔루션|시스템즈?|소프트|테크놀로지|테크|인포|데이터|클라우드|"
+    r"이노베이션|디지털|네트웍스?|서비스|컨설팅|파트너스?)"
+    r"(?!\s*(삼성|현대|SK|LG|포스코|롯데|두산|한화))",  # 대기업 계열사 제외
+)
+
+# 글로벌 인지도 있는 한국 대기업 허용 목록
+_KR_ALLOWED = {
+    "삼성전자", "삼성sds", "현대자동차", "현대차", "sk하이닉스", "sk텔레콤",
+    "lg전자", "lg cns", "포스코", "롯데", "두산", "한화", "기아", "kt",
+}
+
+
 def _is_valid_benchmark_source(source: str) -> bool:
-    """source 필드가 실명 기업인지 검사합니다. 익명·컨설팅펌·긴 제목이면 False."""
-    s = source.strip().lower()
+    """source 필드가 실명 글로벌 대기업인지 검사합니다."""
+    src = source.strip()
+    s = src.lower()
     if not s or len(s) < 2:
         return False
-    # 너무 긴 source는 기사 제목이 들어온 것 (기업명은 보통 30자 이내)
-    if len(source.strip()) > 40:
+    # 너무 긴 source는 기사 제목이 들어온 것
+    if len(src) > 40:
         return False
-    return not any(pattern in s for pattern in _FORBIDDEN_SOURCE_PATTERNS)
+    # 금지 패턴
+    if any(pattern in s for pattern in _FORBIDDEN_SOURCE_PATTERNS):
+        return False
+    # 한국어 포함 여부 확인
+    has_korean = any("\uAC00" <= c <= "\uD7A3" for c in src)
+    if has_korean:
+        # 허용된 한국 대기업이면 통과
+        if any(allowed in s for allowed in _KR_ALLOWED):
+            return True
+        # 국내 중소 IT기업 패턴이면 차단
+        if _KR_SMALL_COMPANY_PATTERN.search(src):
+            return False
+    return True
 
 
 def _is_news_url(url: str) -> bool:
@@ -2173,27 +2202,31 @@ async def benchmark_workflow_step1(request: Request):
    - ❌ 벤더 마케팅 자료, 일반 AI 통계, 기업명 미확인
 
 ## source 필드 핵심 규칙
-`source`는 반드시 **AI를 실제로 도입하여 운영한 기업의 고유 명칭**이어야 합니다.
-- ✅ 허용: Google, Amazon, Meta, Microsoft, Siemens, DHL, 삼성전자, Unilever, JPMorgan 등
-- ✅ 허용: Tech 선도사 또는 비Tech 실제 구현 기업
-- ❌ 절대 금지: McKinsey, BCG, Bain, Deloitte, PwC, EY, KPMG, Accenture, Gartner, Forrester, IDC
-  → 이들은 보고서 **작성자**일 뿐, AI를 직접 도입한 기업이 아님
-  → 만약 McKinsey 보고서에 특정 기업 사례가 언급되면, 그 **기업명**을 source로 사용
-  → 보고서에 구체적 기업명이 없으면 해당 인사이트는 제외
+`source`는 반드시 **글로벌 인지도가 있는 대기업**의 고유 명칭이어야 합니다.
 
-**⛔ 아래 형식은 source에 절대 사용 금지 — 조건 없이 해당 행 전체 DROP:**
-  - "Fortune 500 기업", "글로벌 대기업", "한 제조사", "한 기업", "한 은행", "한 금융사"
-  - "(익명)", "익명 기업", "undisclosed", "anonymous", "leading company", "major company"
-  - "Nextant", 솔루션 벤더 자체 (Workday, SAP, Oracle 등이 **도입처**로 기재된 경우)
-  - 기업명이 특정되지 않는 모든 표현
-  → **기업 실명이 없으면 그 사례는 존재하지 않는 것. 포함하지 말 것.**
+**✅ 허용 기업 기준 — 아래 카테고리에 해당하는 기업만 포함:**
+- **Big Tech**: Google, Amazon, Meta, Microsoft, Apple, IBM, Oracle, Salesforce, SAP (도입처로서)
+- **글로벌 소비재·유통**: Unilever, P&G, Nestlé, Coca-Cola, PepsiCo, Walmart, Target, IKEA, L'Oréal
+- **글로벌 제조·산업**: Siemens, GE, Honeywell, 3M, DuPont, ExxonMobil, Shell, Bosch, Caterpillar
+- **글로벌 금융**: JPMorgan, Goldman Sachs, Citi, HSBC, Deutsche Bank, Mastercard, Visa
+- **글로벌 물류·항공**: DHL, FedEx, UPS, Delta, American Airlines, Maersk
+- **한국 대기업 (글로벌 인지도 있는)**: 삼성전자, 현대자동차, SK하이닉스, LG전자, 포스코, 롯데, 두산
+- **기타 Forbes Global 500 수준 대기업** — 일반인도 아는 기업
+
+**❌ 절대 금지 — 해당 행 전체 DROP:**
+- McKinsey, BCG, Bain, Deloitte, PwC, EY, KPMG, Accenture, Gartner, Forrester, IDC (보고서 작성자)
+- **국내 중소·중견 IT기업** (에스앤아이, 인포뱅크, 더존비즈온, 솔트룩스 등 — 글로벌 인지도 없음)
+- **스타트업·벤처기업** — 설립 10년 이내 또는 직원 수 1,000명 미만 추정 기업
+- "Fortune 500 기업", "글로벌 대기업", "한 제조사", "한 기업", "(익명)", "undisclosed", "anonymous"
+- 솔루션 벤더 자체 (Workday, ServiceNow 등이 **도입처**가 아닌 **제공자**로 기재된 경우)
+- 기업명이 특정되지 않거나 글로벌 인지도가 없는 모든 기업
+→ **모르는 기업 이름이 나오면 → 그 사례는 제외. 애매하면 DROP.**
 
 ## 중요 원칙
 - **영어 사례를 한국어로 번역하여 설명** — 영어 원문 그대로 두지 말 것
-- 솔루션 Provider(SAP, Workday 자체)가 아닌 **도입·활용한 기업** 사례 우선
-- Big Tech(Google, Amazon, Meta, Microsoft) 또는 비Tech 선도사 중심
-- 구체적 기업명 없는 사례는 제외
+- 글로벌 대기업 사례만 → 소규모 기업·스타트업 제외
 - 수치 성과(%, 시간, 비용) 포함 사례 우선
+- 관련 사례가 3건 미만이면 억지로 채우지 말고 있는 것만 반환
 
 ## 출력 형식 (JSON만, 마크다운 코드 블록 없음)
 {{
