@@ -38,12 +38,12 @@ def _get_perplexity_key() -> str:
 # ── Perplexity Search API ────────────────────────────────────────────────────
 
 # 뉴스 도메인 denylist — Perplexity search_domain_filter에 적용 (denylist: "-domain")
+# 한국 저품질 뉴스만 차단 — 글로벌 IT/비즈니스 미디어(techcrunch, reuters 등)는 허용
 _SONAR_DOMAIN_DENYLIST = [
     "-chosun.com", "-mk.co.kr", "-hankyung.com", "-hani.co.kr",
     "-joins.com", "-joongang.co.kr", "-yonhapnews.co.kr", "-yna.co.kr",
     "-news.naver.com", "-news.daum.net", "-etnews.com", "-zdnet.co.kr",
     "-bloter.net", "-ddaily.co.kr", "-aitimes.com", "-newsis.com",
-    "-techcrunch.com", "-reuters.com", "-bloomberg.com", "-cnbc.com",
 ]
 
 

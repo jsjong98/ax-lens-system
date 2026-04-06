@@ -1586,19 +1586,14 @@ _FORBIDDEN_SOURCE_PATTERNS = [
     # 뉴스 기사 제목이 source로 들어오는 경우 (대괄호·따옴표·공백 많은 긴 문자열)
 ]
 
-# 뉴스 도메인 — 이런 URL은 벤치마킹 근거로 쓸 수 없음
+# 한국 저품질 뉴스 도메인만 차단 (글로벌 뉴스는 Sonar Pro citation으로 내용 충분)
 _NEWS_DOMAINS = [
-    # 한국 뉴스
     "news.naver.com", "n.news.naver.com", "news.daum.net",
     "chosun.com", "joins.com", "joongang.co.kr", "hani.co.kr",
     "mk.co.kr", "hankyung.com", "etnews.com", "zdnet.co.kr",
     "itworld.co.kr", "dt.co.kr", "bloter.net", "ddaily.co.kr",
     "aitimes.com", "aitimes.kr", "boannews.com", "itbiznews.com",
     "newsis.com", "yonhapnews.co.kr", "yna.co.kr",
-    # 글로벌 뉴스
-    "techcrunch.com", "reuters.com", "bloomberg.com", "cnbc.com",
-    "businessinsider.com", "forbes.com/news", "wsj.com",
-    "venturebeat.com", "zdnet.com",
 ]
 
 # URL 경로에서 뉴스 패턴 (공식 기업 블로그/케이스스터디 URL은 허용)
@@ -2207,10 +2202,10 @@ async def benchmark_workflow_step1(request: Request):
    - ✅ 공식 기업 블로그 / 기술 블로그 (engineering.fb.com, cloud.google.com 등)
    - ✅ 공식 케이스 스터디 / 백서 / 연구 보고서
    - ✅ 학술 논문, LinkedIn 공식 게시물
-   - ✅ 글로벌 리서치·컨설팅 기관 보고서에서 **특정 기업 사례를 인용한 경우** (weforum.org, shrm.org, gartner.com, mckinsey.com, hbr.org 등) — 단, source는 해당 기관이 아닌 인용된 기업명으로 기재
+   - ✅ 글로벌 리서치·컨설팅 기관 보고서에서 **특정 기업 사례를 인용한 경우** (weforum.org, shrm.org, gartner.com, mckinsey.com, hbr.org 등) — source는 인용된 기업명으로 기재
    - ✅ SAP/Workday/ServiceNow/Oracle 공식 고객 사례 페이지
-   - ❌ **뉴스 기사 절대 금지** — 뉴스 기사(언론사, 포털 뉴스)는 벤치마킹 근거가 아님
-     (chosun.com, mk.co.kr, zdnet, techcrunch, reuters, bloomberg 등 뉴스 URL 포함 금지)
+   - ✅ techcrunch, reuters, bloomberg, venturebeat 등 글로벌 IT/비즈니스 미디어 — 구체적 기업명·수치가 포함된 경우 허용
+   - ❌ 한국 뉴스 포털 (chosun.com, mk.co.kr, hani.co.kr, 네이버뉴스 등) — 내용이 얕고 출처 불명확
    - ❌ 벤더 마케팅 자료, 일반 AI 통계, 기업명 미확인
 
 ## source 필드 핵심 규칙
@@ -2309,7 +2304,7 @@ async def benchmark_workflow_step1(request: Request):
             if r.get("url")  # URL 없는 항목 제외
         ]
     else:
-        # URL 없는 사례 제거 (출처 없는 사례는 테이블에 포함 불가)
+        # URL + source + 내용 확인 (한국 저품질 뉴스만 차단)
         raw_table = result_data.get("benchmark_table", [])
         _wf_benchmark_table = [
             row for row in raw_table
@@ -2559,7 +2554,7 @@ L4 활동: {', '.join(bm_data['l4_names'][:4])}
                     url = entry.get("url", "")
                     if (url
                             and src not in existing_sources
-                            and not _is_news_url(url)
+                            and not _is_news_url(url)  # 한국 저품질 뉴스만 차단
                             and _is_valid_benchmark_source(src)
                             and (entry.get("use_case") or entry.get("outcome"))):
                         _wf_benchmark_table.append(entry)
