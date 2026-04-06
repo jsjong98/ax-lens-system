@@ -352,33 +352,28 @@ async def _plan_search_queries(
     focus_kr = l4_names[0] if l4_names else process_name
 
     prompt = f"""당신은 글로벌 HR AI 벤치마킹 리서치 전문가입니다.
-당신의 학습 지식을 사용하여 **글로벌 선도 대기업**을 타겟하는 가설 기반 쿼리를 생성하세요.
+당신의 학습 지식을 사용하여 구체적인 기업·도구 조합을 타겟하는 가설 기반 쿼리를 생성하세요.
 
 ## 조사 대상
 - 프로세스: {process_name}
 - L4 활동: {', '.join(l4_names[:6])}
 - Pain Point: {', '.join(pain_points[:4]) if pain_points else '없음'}
 
-## 타겟 기업 — 반드시 아래 리스트에서만 선택
-아래 카테고리에서 해당 프로세스와 가장 관련성 높은 기업을 골라 쿼리를 만드세요:
-- **제조·산업**: Siemens, GE, Honeywell, 3M, DuPont, Caterpillar, Bosch, ABB
-- **소비재·유통**: Unilever, P&G, Nestlé, Walmart, Target, Coca-Cola, PepsiCo, L'Oréal
-- **에너지·화학**: ExxonMobil, Shell, BP, Chevron, BASF, Dow Chemical
-- **금융**: JPMorgan, Goldman Sachs, Citi, HSBC, Mastercard, Visa
-- **물류·항공**: DHL, FedEx, UPS, Maersk, Delta Airlines
-- **Big Tech (도입처로서)**: Google, Amazon, Microsoft, Meta, IBM, Oracle
-- **한국 대기업**: 삼성전자, 현대자동차, SK하이닉스, LG전자, 포스코, 두산
+## 기업 선정 기준 (쿼리에 포함할 기업)
+- **Forbes Global 500 또는 Fortune 500 수준의 글로벌 대기업**만 사용
+- 해당 프로세스와 관련성이 높은 산업의 선도 기업 우선
+- 구체적인 AI 도입 사례가 알려진 기업 우선 (당신의 학습 지식 활용)
+- 스타트업·중소기업·국내 중소IT기업 사용 금지
 
 ## 가설 기반 검색 전략
 이미 알고 있는 사실을 검증하는 쿼리를 만드세요:
-- ✅ "Unilever HireVue AI video interview screening 50000 candidates automation results"
-- ✅ "Siemens SAP SuccessFactors AI workforce planning time reduction ROI"
-- ✅ "Walmart AI HR workforce scheduling automation savings case study"
+- ✅ "Unilever HireVue AI video interview screening automation results"
+- ✅ "Siemens SAP SuccessFactors AI workforce planning ROI case study"
+- ✅ "General Motors Paradox AI recruiting chatbot 2 million savings"
 - ❌ "AI HR automation enterprise 2024" (너무 일반적)
-- ❌ 중소기업, 스타트업, 국내 중소IT업체 절대 사용 금지
 
 ## 쿼리 10개 생성 (아래 구성으로)
-- **글로벌 대기업+도구 가설 쿼리** 5개: 위 리스트 기업 + HR AI 도구 조합 (구체적 수치 포함)
+- **글로벌 대기업+도구 가설 쿼리** 5개: 관련성 높은 글로벌 대기업 + HR AI 도구 조합
 - **벤더 공식 케이스 스터디** 3개: Paradox, Eightfold, HireVue, SAP, Workday 공식 사이트
 - **한국 대기업 사례** 2개: 삼성·현대·SK·LG + '{focus_kr}' AI 도입 공식 사례
 
@@ -462,15 +457,8 @@ async def _generate_followup_queries(
 Round 1 결과 ({len(round1_results)}건):
 {found_lines}
 
-부족한 점을 파악하고 후속 쿼리 4개 생성. 반드시 아래 글로벌 선도 대기업만 사용:
-- 제조·산업: Siemens, GE, Honeywell, 3M, DuPont, Caterpillar, Bosch
-- 소비재·유통: Unilever, P&G, Nestlé, Walmart, Coca-Cola, PepsiCo
-- 에너지: ExxonMobil, Shell, Chevron
-- 금융: JPMorgan, Goldman Sachs, HSBC
-- 물류: DHL, FedEx, Maersk
-- Big Tech: Google, Amazon, Microsoft, IBM
-- 한국: 삼성전자, 현대자동차, SK, LG, 포스코
-
+부족한 점을 파악하고 후속 쿼리 4개 생성 (Forbes Global 500 수준 글로벌 대기업 + 구체적 AI 도구·성과 포함).
+스타트업·중소기업 사용 금지.
 JSON만: {{"queries": ["q1","q2","q3","q4"], "gap": "부족한 점 한 줄"}}"""
 
     try:
