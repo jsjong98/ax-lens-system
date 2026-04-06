@@ -1,13 +1,16 @@
 """
-benchmark_search.py — Perplexity Search + Embedding API 기반 벤치마킹
+benchmark_search.py — Perplexity Sonar Pro 기반 벤치마킹
 
 파이프라인:
   Phase 1. Claude Haiku가 가설 기반 검색 쿼리 10개 직접 생성
-  Phase 2. Perplexity Search API로 병렬 검색 (최대 5개씩 배치)
+  Phase 2. Sonar Pro (streaming) 병렬 검색
+           - model: sonar-pro
+           - search_type: auto → 복잡한 쿼리는 Pro Search (multi-step + fetch_url_content)
+           - search_context_size: high
+           - search_domain_filter: 뉴스 도메인 제외
   Phase 3. Perplexity Embedding API로 의미 기반 재랭킹
   Phase 4. Claude Haiku가 Gap 분석 → Round 2 후속 쿼리 4개 생성
-  Phase 5. Round 2 병렬 검색 + Embedding 재랭킹
-  Phase 6. 전체 결과를 LLM에 전달 → 벤치마킹 테이블 생성
+  Phase 5. Round 2 병렬 검색
 
 * search_log: 검색 과정 전체를 기록 → 프론트에 "생각 과정" 표시용
 * Fallback: Perplexity API 없으면 Tavily → DuckDuckGo 순으로 대체
@@ -27,20 +30,40 @@ from typing import Any
 
 # ── Perplexity Search API ────────────────────────────────────────────────────
 
+# 뉴스 도메인 denylist — Perplexity search_domain_filter에 적용 (denylist: "-domain")
+_SONAR_DOMAIN_DENYLIST = [
+    "-chosun.com", "-mk.co.kr", "-hankyung.com", "-hani.co.kr",
+    "-joins.com", "-joongang.co.kr", "-yonhapnews.co.kr", "-yna.co.kr",
+    "-news.naver.com", "-news.daum.net", "-etnews.com", "-zdnet.co.kr",
+    "-bloter.net", "-ddaily.co.kr", "-aitimes.com", "-newsis.com",
+    "-techcrunch.com", "-reuters.com", "-bloomberg.com", "-cnbc.com",
+]
+
+
 def _search_perplexity_sonar(query: str) -> list[dict]:
     """
-    Perplexity Sonar API — 쿼리 1개를 Sonar 모델로 검색.
-    AI가 웹을 읽고 종합한 답변 + citations URL 반환.
-    POST https://api.perplexity.ai/chat/completions (model=sonar)
+    Perplexity Sonar Pro + Pro Search (streaming SSE).
+    - model: sonar-pro (sonar 대비 complex query 지원 강화)
+    - stream: True (Pro Search 활성화 필수 조건)
+    - search_type: auto (복잡한 쿼리 → multi-step + fetch_url_content 자동 적용)
+    - search_context_size: high (더 넓은 웹 컨텍스트 수집)
+    - search_domain_filter: 뉴스 도메인 제외
+    SSE 스트림을 파싱해 전체 content + citations 추출.
     """
     api_key = os.getenv("PERPLEXITY_API_KEY", "")
     if not api_key or not query:
         return []
 
     payload = json.dumps({
-        "model": "sonar",
+        "model": "sonar-pro",
         "messages": [{"role": "user", "content": query}],
-        "max_tokens": 1500,
+        "max_tokens": 2000,
+        "stream": True,
+        "web_search_options": {
+            "search_type": "auto",
+            "search_context_size": "high",
+        },
+        "search_domain_filter": _SONAR_DOMAIN_DENYLIST,
         "return_citations": True,
     }).encode("utf-8")
 
@@ -55,40 +78,60 @@ def _search_perplexity_sonar(query: str) -> list[dict]:
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=45) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+        content_parts: list[str] = []
+        citations: list[str] = []
 
-        content = data["choices"][0]["message"]["content"]
-        citations = data.get("citations", [])
+        with urllib.request.urlopen(req, timeout=90) as resp:
+            for raw_line in resp:
+                line = raw_line.decode("utf-8").rstrip("\n\r")
+                if not line.startswith("data: "):
+                    continue
+                data_str = line[6:].strip()
+                if data_str == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(data_str)
+                except json.JSONDecodeError:
+                    continue
+
+                # content delta 수집
+                for choice in chunk.get("choices", []):
+                    delta = choice.get("delta", {})
+                    if delta.get("content"):
+                        content_parts.append(delta["content"])
+
+                # citations — 마지막 청크에 포함될 수 있음
+                if chunk.get("citations"):
+                    citations = chunk["citations"]
+
+        content = "".join(content_parts)
 
         results = []
-        # 각 citation URL을 개별 결과로 변환, content는 공유
         if citations:
             for url in citations:
                 results.append({
                     "title": query[:80],
                     "url": url,
                     "content": content,
-                    "snippet": content[:400],
-                    "source": "perplexity-sonar",
+                    "snippet": content[:500],
+                    "source": "perplexity-sonar-pro",
                     "query": query,
                 })
         else:
-            # citation 없어도 content 자체를 결과로 보존
             results.append({
                 "title": query[:80],
                 "url": "",
                 "content": content,
-                "snippet": content[:400],
-                "source": "perplexity-sonar",
+                "snippet": content[:500],
+                "source": "perplexity-sonar-pro",
                 "query": query,
             })
 
-        print(f"[benchmark] Sonar '{query[:50]}' → {len(citations)}개 citation")
+        print(f"[benchmark] Sonar Pro '{query[:50]}' → {len(citations)}개 citation, {len(content)}자")
         return results
 
     except Exception as e:
-        print(f"[benchmark] Sonar 실패 ({query[:40]}): {e}")
+        print(f"[benchmark] Sonar Pro 실패 ({query[:40]}): {e}")
         return []
 
 
