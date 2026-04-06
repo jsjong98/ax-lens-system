@@ -243,12 +243,18 @@ export default function AdminPage() {
             <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
               <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 text-sm font-bold text-gray-700">API 토큰 사용량</div>
               <div className="p-4">
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-3 gap-4">
                   {Object.entries(usage).map(([provider, u]) => (
                     <div key={provider} className="border border-gray-200 rounded-lg p-4">
                       <div className="flex items-center justify-between mb-3">
-                        <span className={`text-sm font-bold ${provider === "openai" ? "text-green-700" : "text-orange-700"}`}>
-                          {provider === "openai" ? "OpenAI (Model A)" : "Anthropic (Model B)"}
+                        <span className={`text-sm font-bold ${
+                          provider === "openai" ? "text-green-700"
+                          : provider === "anthropic" ? "text-orange-700"
+                          : "text-purple-700"
+                        }`}>
+                          {provider === "openai" ? "OpenAI (Model A)"
+                          : provider === "anthropic" ? "Anthropic (Model B)"
+                          : "Perplexity (Sonar Pro)"}
                         </span>
                         <span className="text-lg font-bold text-gray-800">${u.estimated_cost_usd.toFixed(4)}</span>
                       </div>
