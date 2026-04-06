@@ -433,6 +433,10 @@ def _build_sonar_queries(workflow_cache: dict) -> list[str]:
         f"ServiceNow HR ServiceDelivery Oracle HCM '{focus_en}' customer case study "
         f"automation efficiency Fortune 500 2024",
 
+        # LinkedIn Engineering Blog + HBR + MIT Sloan 인용 기업 사례
+        f"site:engineering.linkedin.com OR site:hbr.org OR site:sloanreview.mit.edu "
+        f"'{focus_en}' AI automation enterprise case study results",
+
         # 한국 대기업
         f"삼성전자 현대자동차 SK LG 포스코 '{focus_kr}' AI 자동화 도입 사례 성과 공식",
     ]
