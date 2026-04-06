@@ -457,11 +457,18 @@ async def _plan_search_queries(
 **후처리 행정 자동화(downstream administrative process)** 입니다.
 
 따라서 검색 대상은:
-- ✅ 인사 데이터 시스템 자동 업데이트 (SAP SuccessFactors Position Management, ERP 연계)
-- ✅ 발령 승인 워크플로우 자동화 (결재 라우팅, 전자결재)
-- ✅ 인사발령 공지 자동 발송 (Portal 게시, 이메일 자동화)
-- ✅ 그룹웨어·ERP Interface 자동 동기화
+- ✅ AI·LLM·GenAI·ML이 인사 데이터 시스템 자동 업데이트 (SAP SuccessFactors Position Management, ERP 연계)
+- ✅ AI·지능형 자동화가 발령 승인 워크플로우 자동화 (결재 라우팅, 이상 감지, 자동 검토)
+- ✅ GenAI·AI Agent가 인사발령 공지 자동 생성·발송 (Portal 게시, 이메일 자동화)
+- ✅ AI·RPA+AI(Intelligent Automation)가 그룹웨어·ERP Interface 자동 동기화
 - ❌ 조직 재설계(org design), 인력 재배치 전략, M&A 조직통합 — 제외
+- ❌ 단순 규칙 기반(rule-based) 워크플로우 자동화만 있는 사례 — 제외 (반드시 AI 기술 포함 필수)
+
+## 🤖 핵심 요구사항: 모든 쿼리는 반드시 AI 기술을 포함해야 합니다
+찾고자 하는 것은 **AI(LLM, GenAI, ML, Intelligent Automation, AI Agent)가 실제로 적용된 사례**입니다.
+단순한 SAP/Workday 내장 워크플로우 자동화 사례는 대상이 아닙니다.
+- 반드시 포함할 키워드: "AI", "artificial intelligence", "GenAI", "LLM", "machine learning", "intelligent automation", "AI agent", "generative AI" 중 하나 이상
+- 예시 AI 적용 영역: LLM 기반 자동 문서 초안 생성, ML 이상 감지 자동 플래그, AI Agent 승인 라우팅 최적화, GenAI 공지문 자동 작성
 
 ## 두산 HR 프로세스 계층 (전체 이해 필수)
 {l2_context}
@@ -476,17 +483,19 @@ async def _plan_search_queries(
 
 ## 검색 쿼리 설계 원칙
 1. L5 Task의 실제 업무(시스템 반영, 결재, 공지)에 집중한 구체적 쿼리 작성
-2. 이미 알고 있는 사실을 검증하는 가설 기반 쿼리 — 너무 일반적인 쿼리 금지
-   - ✅ "SAP SuccessFactors Employee Central job information change approval workflow automation Fortune 500"
-   - ✅ "ServiceNow HR case management personnel action notification automation ERP sync results"
+2. **모든 쿼리에 AI 기술 키워드 필수 포함** — AI 없는 단순 자동화 쿼리 절대 금지
+   - ✅ "SAP SuccessFactors Employee Central AI-powered job change approval routing automation Fortune 500 results"
+   - ✅ "Workday HCM GenAI intelligent personnel action notification auto-generation ERP sync case study"
+   - ✅ "ServiceNow HR case management AI agent approval workflow LLM document drafting results"
+   - ❌ "SAP SuccessFactors approval workflow automation" (AI 키워드 없음 — 금지)
    - ❌ "organizational restructuring AI automation" (전략 프로세스 — 제외)
 3. Forbes Global 500 / Fortune 500 수준 글로벌 대기업만 사용
 
 ## 쿼리 10개 생성 (구성)
-- **글로벌 대기업+시스템 가설 쿼리** 4개: SAP SuccessFactors/Workday/ServiceNow + 결재·공지·시스템 동기화 자동화
-- **프로세스 전체 범위 쿼리** 3개: Workday/ServiceNow/Oracle HCM 공식 고객 사례 + 발령 후처리 행정
-- **리서치·학술 기관** 1개: WEF/SHRM/Gartner/HBR 인용 HR 행정 자동화 기업 사례
-- **한국 대기업 사례** 2개: 삼성·현대·SK·LG + 인사발령 시스템 자동화 공식 사례
+- **글로벌 대기업 AI 적용 가설 쿼리** 4개: SAP SuccessFactors/Workday/ServiceNow + AI/GenAI/LLM + 결재·공지·시스템 동기화
+- **AI 프로세스 자동화 사례 쿼리** 3개: Workday/ServiceNow/Oracle HCM + AI/intelligent automation + 발령 후처리 공식 고객 사례
+- **리서치·학술 기관** 1개: WEF/SHRM/Gartner/HBR 인용 AI 기반 HR 행정 자동화 기업 사례
+- **한국 대기업 AI 사례** 2개: 삼성·현대·SK·LG + AI/GenAI + 인사발령 시스템 자동화 공식 사례
 
 JSON만 출력:
 {{"queries": ["q1",...,"q10"], "hypotheses": ["가설1","가설2","가설3"]}}"""
@@ -573,8 +582,10 @@ async def _generate_followup_queries(
 Round 1 결과 ({len(round1_results)}건):
 {found_lines}
 
-부족한 점을 파악하고 후속 쿼리 4개 생성 (Forbes Global 500 수준 글로벌 대기업 + 구체적 AI 도구·성과 포함).
-스타트업·중소기업 사용 금지.
+부족한 점을 파악하고 후속 쿼리 4개 생성 규칙:
+- Forbes Global 500 수준 글로벌 대기업만 사용, 스타트업·중소기업 금지
+- **모든 쿼리에 "AI", "GenAI", "LLM", "intelligent automation", "machine learning" 중 하나 이상 반드시 포함**
+- 단순 워크플로우 자동화(rule-based) 쿼리 금지 — AI 기술 적용 사례 쿼리만 허용
 JSON만: {{"queries": ["q1","q2","q3","q4"], "gap": "부족한 점 한 줄"}}"""
 
     try:
