@@ -2621,25 +2621,31 @@ async def chat_workflow_step1(request: Request):
 
         if raw:
             # 검색 결과를 쿼리별로 그룹핑 (LLM 추출 + 채팅 컨텍스트 공용)
+            # raw 전체를 순회해야 모든 라운드(R1/R2/R3)의 쿼리가 포함됨
+            # raw[:12] 처럼 자르면 앞 쿼리의 citation들만 잡혀 나머지 쿼리가 누락됨
             from collections import defaultdict as _ddict
-            _qg: dict = _ddict(lambda: {"content": "", "urls": []})
-            for r in raw[:12]:
+            _qg: dict = _ddict(lambda: {"content": "", "urls": [], "round": 0})
+            for r in raw:
                 _q = r.get("query", r.get("title", ""))
                 if r.get("content") and not _qg[_q]["content"]:
                     _qg[_q]["content"] = r.get("content", "")
                 if r.get("url"):
                     _qg[_q]["urls"].append(r["url"])
+                if r.get("round", 0) > _qg[_q]["round"]:
+                    _qg[_q]["round"] = r.get("round", 0)
 
             # ── 채팅 LLM에 넘길 실제 검색 결과 텍스트 구성 ──
-            raw_search_context = "## ✅ Perplexity 실시간 검색 결과 (방금 백엔드에서 실행됨)\n"
+            # 쿼리별 R1→R2→R3 순서로 정렬, 각 content는 800자로 제한 (총 토큰 절감)
+            sorted_qg = sorted(_qg.items(), key=lambda x: x[1].get("round", 0))
+            raw_search_context = f"## ✅ Perplexity 실시간 검색 결과 (3라운드 {len(sorted_qg)}개 쿼리 실행)\n"
             raw_search_context += "※ 아래는 실제 웹에서 수집된 내용입니다. 이 내용을 기반으로 답변하세요.\n"
-            for idx, (_q, _g) in enumerate(_qg.items(), 1):
-                raw_search_context += f"\n### [{idx}] 검색 쿼리: {_q[:100]}\n"
+            for idx, (_q, _g) in enumerate(sorted_qg, 1):
+                raw_search_context += f"\n### [R{_g.get('round','?')}-{idx}] 검색 쿼리: {_q[:100]}\n"
                 if _g["urls"]:
-                    raw_search_context += "출처 URL:\n" + "\n".join(f"  - {u}" for u in _g["urls"][:5]) + "\n"
+                    raw_search_context += "출처 URL:\n" + "\n".join(f"  - {u}" for u in _g["urls"][:4]) + "\n"
                 else:
                     raw_search_context += "출처 URL: 없음\n"
-                raw_search_context += f"내용:\n{_g['content'][:1500]}\n"
+                raw_search_context += f"내용:\n{_g['content'][:800]}\n"
 
             # ── LLM으로 테이블 항목 추출 (URL 있는 것만 테이블에 추가) ──
             bm_sys = f"""벤치마킹 분석 전문가입니다. 검색 결과에서 '{process_name}' 프로세스 관련 사례를 추출합니다.
@@ -2653,11 +2659,11 @@ L4 활동: {', '.join(bm_data['l4_names'][:4])}
 관련성 없는 사례는 제외. 출력 형식 (JSON만):
 {{"benchmark_table": [{{"source":"","company_type":"Tech 상한선|非Tech 실제 구현","industry":"","process_area":"","ai_adoption_goal":"","ai_technology":"","key_data":"","adoption_method":"","use_case":"","outcome":"","infrastructure":"","implication":"","url":"[검색결과URL만]"}}]}}"""
             bm_user_msg = "## 검색 결과\n"
-            for idx, (_q, _g) in enumerate(_qg.items(), 1):
-                bm_user_msg += f"\n### [{idx}] {_q[:100]}\n"
+            for idx, (_q, _g) in enumerate(sorted_qg, 1):
+                bm_user_msg += f"\n### [R{_g.get('round','?')}-{idx}] {_q[:100]}\n"
                 if _g["urls"]:
-                    bm_user_msg += "출처 URL:\n" + "\n".join(f"  - {u}" for u in _g["urls"][:5]) + "\n"
-                bm_user_msg += f"내용: {_g['content'][:1500]}\n"
+                    bm_user_msg += "출처 URL:\n" + "\n".join(f"  - {u}" for u in _g["urls"][:4]) + "\n"
+                bm_user_msg += f"내용: {_g['content'][:800]}\n"
             bm_result = await _call_llm_step1(bm_sys, [{"role":"user","content":bm_user_msg}])
             if bm_result and bm_result.get("benchmark_table"):
                 new_bm_entries = bm_result["benchmark_table"]
@@ -2671,7 +2677,7 @@ L4 활동: {', '.join(bm_data['l4_names'][:4])}
                             and _is_valid_benchmark_source(src)
                             and (entry.get("use_case") or entry.get("outcome"))):
                         _wf_benchmark_table.append(entry)
-            extra_bm_text = f"\n\n[✅ Perplexity 검색 완료 — {len(_qg)}개 쿼리 실행, {len(new_bm_entries)}건 사례 분석]"
+            extra_bm_text = f"\n\n[✅ Perplexity 검색 완료 — 3라운드 {len(sorted_qg)}개 쿼리 실행, {len(new_bm_entries)}건 사례 분석]"
 
     # 기존 설계 결과 or 벤치마킹 결과가 있으면 포함
     context = ""
