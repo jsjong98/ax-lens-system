@@ -446,40 +446,40 @@ async def _plan_search_queries(
     l2_context = f"기능 단위: {', '.join(l2_names[:2])} (BP = Business Partner, HR 파트너 기능)" if l2_names else ""
 
     prompt = f"""당신은 AX(AI Transformation) 전략 수립을 위한 글로벌 HR 벤치마킹 리서치 전문가입니다.
-아래 HR 프로세스의 **L5 Task 하나하나**를 기준으로, 각 세부 업무에 AI가 어떻게 적용될 수 있는지 찾는 검색 쿼리를 생성하세요.
+아래 HR 프로세스 계층을 **전부 읽고 이해한 뒤**, AI 전환 사례를 찾기 위한 검색 쿼리를 생성하세요.
 
-## 핵심 원칙: L5 Task 단위로 쿼리를 설계하세요
-- 프로세스 이름(L3/L4)이 아닌 **L5 개별 업무**가 쿼리의 출발점입니다
-- "이 업무를 AI로 어떻게 자동화했나?"를 묻는 형태로 작성하세요
-- 프로세스가 바뀌어도 같은 방식이 작동해야 합니다 (발령관리든, 복리후생이든, 채용이든)
-
-## 두산 HR 프로세스 계층
+## 두산 HR 프로세스 계층 (전체 이해 필수)
 {l2_context}
 - L3 프로세스: {process_name}
-- L4 활동: {', '.join(l4_names[:6])}
-- **L5 Task 상세 (쿼리 설계의 핵심 근거)**:
+- L4 활동 (쿼리의 주요 단위):
+{chr(10).join(f"  [{i+1}] {n}" for i, n in enumerate(l4_names[:6]))}
+- L5 Task 상세 (L4 활동의 실제 내용 이해용 — 쿼리 추상화에 활용):
 {l5_lines if l5_lines else '  (정보 없음)'}
 - Pain Point: {', '.join(list(dict.fromkeys(pain_points))[:5]) if pain_points else '없음'}
 
 ## 약어 정의
 - BP = Business Partner (인사 담당 파트너), ER = Employee Relations
 
-## 쿼리 작성 규칙
-1. **L5 Task 기반**: L5 Task의 실제 행위(예: "시스템에 데이터 입력", "문서 초안 작성", "승인 요청", "공지 발송")를 영어로 추상화하여 쿼리 작성
-2. **AI 기술 키워드 필수**: 모든 쿼리에 "AI", "GenAI", "LLM", "intelligent automation", "AI agent", "generative AI" 중 하나 이상 포함
-3. **프로세스명·시스템명 앞에 두지 말 것**: AI 기술 + 업무 행위가 앞, 특정 시스템은 선택적으로만 사용
-4. Forbes Global 500 / Fortune 500 수준 글로벌 대기업 사례만 사용
-   - ✅ "generative AI HR data entry automation enterprise employees case study ROI 2024"
-   - ✅ "LLM AI agent approval document auto-draft HR process large company results"
-   - ✅ "AI intelligent automation HR announcement notification auto-generation global enterprise"
-   - ❌ "SAP SuccessFactors approval workflow" (시스템 기능 소개, AI 전환 아님)
-   - ❌ 프로세스 대분류 이름(예: "personnel assignment AI") — L5 업무 행위 단위로
+## 쿼리 설계 원칙
+**L4 활동이 쿼리의 스위트스팟입니다.**
+- L5 단위는 너무 작아 검색 결과가 지나치게 단편적이 됩니다
+- L3 단위는 너무 커서 검색 결과가 지나치게 일반적이 됩니다
+- **L4 활동 하나당 1~2개 쿼리**: L5 내용을 참고해 L4가 실제로 무슨 업무인지 정확히 이해한 뒤, 그 활동에 AI가 적용된 사례를 찾는 쿼리 작성
+- 사람이 "이 활동의 AI 자동화 사례를 찾는다면 어떻게 검색할까?"의 관점으로 작성
+
+쿼리 작성 시 반드시 지킬 것:
+1. **AI 키워드 필수**: "AI", "GenAI", "LLM", "intelligent automation", "AI agent", "generative AI" 중 하나 이상
+2. **AI 전환 관점**: 시스템 기능 소개가 아닌 기업이 AI를 도입해 이 활동을 전환한 성과·사례 중심
+3. **Forbes Global 500 / Fortune 500 수준** 글로벌 대기업 사례만, 스타트업·중소기업 금지
+   - ✅ "Fortune 500 company AI generative AI [L4 활동 영어 추상화] automation case study results"
+   - ✅ "large enterprise LLM intelligent automation [L4 활동 영어 추상화] HR transformation ROI"
+   - ❌ "SAP SuccessFactors [기능명] automation" (시스템 기능 설명, AI 전환 아님)
 
 ## 쿼리 10개 생성 (구성)
-- **L5 Task별 AI 자동화 쿼리** 5개: L5 Task 상세에서 핵심 업무 행위 5개를 골라 각각 "이 행위를 AI로 자동화한 글로벌 대기업 사례" 쿼리
-- **AI 기술별 쿼리** 2개: LLM 문서 초안 자동생성 / AI Agent 승인 라우팅 — L5 Task들의 공통 AI 적용 패턴
-- **AX 전환 성과 쿼리** 2개: 이 L5 Task들의 업무를 AI 도입으로 전환한 전체 성과(시간 절감, 오류 감소, 비용 절감) 사례
-- **한국 대기업 사례** 1개: 삼성·현대·SK·LG + 유사 HR 행정 업무 + AI/GenAI 전환 사례
+- **L4 활동별 AI 전환 쿼리** 6개: L4 활동 각각에 대해 "이 활동을 AI로 전환한 글로벌 대기업 사례" 쿼리 (L5 내용 참고해 L4 활동의 실제 의미 파악 후 작성)
+- **AX 전환 성과 쿼리** 2개: 이 L3 프로세스 전체 또는 L4 묶음을 AI 도입으로 전환한 종합 성과(시간 절감·비용·오류 감소) 글로벌 사례
+- **리서치 기관 인용** 1개: SHRM/Gartner/HBR/McKinsey가 인용한 이 유형의 HR 활동 AI 전환 기업 사례
+- **한국 대기업 사례** 1개: 삼성·현대·SK·LG + 유사 HR 활동 + AI/GenAI 전환 사례
 
 JSON만 출력:
 {{"queries": ["q1",...,"q10"], "hypotheses": ["가설1","가설2","가설3"]}}"""
