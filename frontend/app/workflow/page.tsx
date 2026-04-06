@@ -949,16 +949,13 @@ export default function WorkflowPage() {
                         <th className="text-left px-3 py-2 font-medium text-blue-800 whitespace-nowrap">성과</th>
                         <th className="text-left px-3 py-2 font-medium text-blue-800 whitespace-nowrap">인프라</th>
                         <th className="text-left px-3 py-2 font-medium text-blue-800 whitespace-nowrap">두산 시사점</th>
+                        <th className="text-left px-3 py-2 font-medium text-blue-800 whitespace-nowrap">출처</th>
                       </tr>
                     </thead>
                     <tbody>
                       {benchmarkTable.map((row, i) => (
                         <tr key={i} className="border-b border-blue-100 hover:bg-blue-50/50">
-                          <td className="px-3 py-2 font-medium text-gray-800 whitespace-nowrap">
-                            {row.url ? (
-                              <a href={row.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{row.source}</a>
-                            ) : row.source}
-                          </td>
+                          <td className="px-3 py-2 font-medium text-gray-800 whitespace-nowrap">{row.source}</td>
                           <td className="px-3 py-2 whitespace-nowrap">
                             {row.company_type && (
                               <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${row.company_type.includes("Tech") && !row.company_type.includes("非") ? "bg-indigo-50 text-indigo-700" : "bg-orange-50 text-orange-700"}`}>
@@ -978,6 +975,16 @@ export default function WorkflowPage() {
                           <td className="px-3 py-2 text-green-700 font-medium max-w-[130px]">{row.outcome}</td>
                           <td className="px-3 py-2 text-gray-500 max-w-[120px]">{row.infrastructure}</td>
                           <td className="px-3 py-2 text-gray-500 max-w-[180px]">{row.implication}</td>
+                          <td className="px-3 py-2 whitespace-nowrap">
+                            {row.url ? (
+                              <a href={row.url} target="_blank" rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 text-blue-600 hover:underline text-[10px]">
+                                🔗 링크
+                              </a>
+                            ) : (
+                              <span className="text-gray-300 text-[10px]">없음</span>
+                            )}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
