@@ -495,12 +495,17 @@ JSON만 출력:
 
     try:
         from anthropic import AsyncAnthropic
+        from usage_store import add_usage as _add_usage_plan
         client = AsyncAnthropic(api_key=api_key)
         resp = await client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=700,
             messages=[{"role": "user", "content": prompt}],
         )
+        if resp.usage:
+            _add_usage_plan("anthropic",
+                            input_tokens=resp.usage.input_tokens,
+                            output_tokens=resp.usage.output_tokens)
         raw = resp.content[0].text.strip()
         m = re.search(r'\{.*\}', raw, re.DOTALL)
         if m:
@@ -576,12 +581,17 @@ JSON만: {{"queries": ["q1","q2","q3","q4"], "gap": "부족한 점 한 줄"}}"""
 
     try:
         from anthropic import AsyncAnthropic
+        from usage_store import add_usage as _add_usage_gap
         client = AsyncAnthropic(api_key=api_key)
         resp = await client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=400,
             messages=[{"role": "user", "content": prompt}],
         )
+        if resp.usage:
+            _add_usage_gap("anthropic",
+                           input_tokens=resp.usage.input_tokens,
+                           output_tokens=resp.usage.output_tokens)
         raw = resp.content[0].text.strip()
         m = re.search(r'\{.*\}', raw, re.DOTALL)
         if m:
@@ -876,6 +886,8 @@ async def refine_workflow_with_benchmarks(
     from new_workflow_generator import _extract_json
     user_prompt = _build_benchmark_prompt(workflow_cache, benchmark_results)
 
+    from usage_store import add_usage as _add_usage_bm
+
     anthropic_key = api_key or os.getenv("ANTHROPIC_API_KEY", "")
     if anthropic_key:
         try:
@@ -886,6 +898,10 @@ async def refine_workflow_with_benchmarks(
                 system=_BENCHMARK_SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": user_prompt}],
             )
+            if response.usage:
+                _add_usage_bm("anthropic",
+                              input_tokens=response.usage.input_tokens,
+                              output_tokens=response.usage.output_tokens)
             return _extract_json(response.content[0].text)
         except Exception as e:
             print(f"[benchmark] Anthropic 실패: {e}")
@@ -903,6 +919,10 @@ async def refine_workflow_with_benchmarks(
                 ],
                 response_format={"type": "json_object"},
             )
+            if response.usage:
+                _add_usage_bm("openai",
+                              input_tokens=response.usage.prompt_tokens,
+                              output_tokens=response.usage.completion_tokens)
             return json.loads(response.choices[0].message.content or "{}")
         except Exception as e:
             print(f"[benchmark] OpenAI 실패: {e}")

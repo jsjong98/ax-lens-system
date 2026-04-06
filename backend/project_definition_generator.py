@@ -385,6 +385,7 @@ async def generate_project_definition_with_llm(
 
     user_prompt = _build_user_prompt(tasks, classification_results, tobe_data, process_name)
 
+    from usage_store import add_usage as _add_usage
     client = anthropic.AsyncAnthropic(api_key=api_key)
     response = await client.messages.create(
         model=model,
@@ -393,6 +394,10 @@ async def generate_project_definition_with_llm(
         messages=[{"role": "user", "content": user_prompt}],
         temperature=0.3,
     )
+    if response.usage:
+        _add_usage("anthropic",
+                   input_tokens=response.usage.input_tokens,
+                   output_tokens=response.usage.output_tokens)
 
     text = response.content[0].text
     parsed = _parse_llm_response(text)
