@@ -421,8 +421,8 @@ async def _plan_search_queries(
     search_log: list[dict],
 ) -> list[str]:
     """
-    Claude Sonnet이 L2→L3→L4→L5 전 계층 맥락을 이해하여 가설 기반 쿼리를 생성합니다.
-    Perplexity(Sonar Pro) 및 Tavily/DuckDuckGo fallback 모두 이 함수를 사용합니다.
+    Round 1 — L5 Task 단위 구체 쿼리 (5개).
+    Sonnet이 각 L5 Task의 실제 업무 행위를 읽고, 그 업무를 AI로 자동화한 가장 구체적인 사례를 찾는 쿼리를 생성합니다.
     """
     api_key = os.getenv("ANTHROPIC_API_KEY", "")
     if not api_key:
@@ -464,41 +464,33 @@ async def _plan_search_queries(
     l2_context = f"기능 단위: {', '.join(l2_names[:2])} (BP = Business Partner, HR 파트너 기능)" if l2_names else ""
 
     prompt = f"""당신은 AX(AI Transformation) 전략 수립을 위한 글로벌 HR 벤치마킹 리서치 전문가입니다.
-아래 HR 프로세스 계층을 **전부 읽고 이해한 뒤**, AI 전환 사례를 찾기 위한 검색 쿼리를 생성하세요.
+이것은 3라운드 탐색의 **Round 1: L5 Task 단위 구체 탐색**입니다.
 
-## 두산 HR 프로세스 계층 (전체 이해 필수)
+## 두산 HR 프로세스 계층
 {l2_context}
 - L3 프로세스: {process_name}
-- L4 활동 + 하위 L5 Task 상세 (L4 이름만 보지 말고, L5를 모두 읽고 L4의 실제 의미를 파악하세요):
+- L4 + L5 상세 (각 L5 Task의 실제 업무 행위를 파악하세요):
 {l4_with_l5 if l4_with_l5 else '  (정보 없음)'}
 - Pain Point: {', '.join(list(dict.fromkeys(pain_points))[:5]) if pain_points else '없음'}
 
 ## 약어 정의
 - BP = Business Partner (인사 담당 파트너), ER = Employee Relations
 
-## 쿼리 설계 원칙
-**L4 활동이 쿼리의 스위트스팟입니다.**
-- L5 단위는 너무 작아 검색 결과가 지나치게 단편적이 됩니다
-- L3 단위는 너무 커서 검색 결과가 지나치게 일반적이 됩니다
-- **L4 활동 하나당 1~2개 쿼리**: L5 내용을 참고해 L4가 실제로 무슨 업무인지 정확히 이해한 뒤, 그 활동에 AI가 적용된 사례를 찾는 쿼리 작성
-- 사람이 "이 활동의 AI 자동화 사례를 찾는다면 어떻게 검색할까?"의 관점으로 작성
+## Round 1 목표: L5 Task 하나씩 들여다보기
+각 L5 Task의 구체적 업무 행위(예: "문서 초안 작성", "시스템 데이터 입력", "승인 상신", "공지 발송")를 영어로 추상화하여,
+**그 행위를 AI로 자동화한 가장 구체적인 글로벌 대기업 사례**를 찾는 쿼리를 만드세요.
 
-쿼리 작성 시 반드시 지킬 것:
-1. **AI 키워드 필수**: "AI", "GenAI", "LLM", "intelligent automation", "AI agent", "generative AI" 중 하나 이상
-2. **AI 전환 관점**: 시스템 기능 소개가 아닌 기업이 AI를 도입해 이 활동을 전환한 성과·사례 중심
-3. **Forbes Global 500 / Fortune 500 수준** 글로벌 대기업 사례만, 스타트업·중소기업 금지
-   - ✅ "Fortune 500 company AI generative AI [L4 활동 영어 추상화] automation case study results"
-   - ✅ "large enterprise LLM intelligent automation [L4 활동 영어 추상화] HR transformation ROI"
-   - ❌ "SAP SuccessFactors [기능명] automation" (시스템 기능 설명, AI 전환 아님)
+쿼리 규칙:
+1. L5 Task 내용을 근거로 — L4 이름만 보고 만들지 말 것 (예: "조직개편"만 보면 의미 오해 가능)
+2. AI 키워드 필수: "AI", "GenAI", "LLM", "intelligent automation", "AI agent" 중 하나 이상
+3. Forbes Global 500 / Fortune 500 수준만, 스타트업 금지
+4. 시스템 기능 소개 아닌 AI 전환 성과·사례 중심
 
-## 쿼리 10개 생성 (구성)
-- **L4 활동별 AI 전환 쿼리** 6개: L4 활동 각각에 대해 "이 활동을 AI로 전환한 글로벌 대기업 사례" 쿼리 (L5 내용 참고해 L4 활동의 실제 의미 파악 후 작성)
-- **AX 전환 성과 쿼리** 2개: 이 L3 프로세스 전체 또는 L4 묶음을 AI 도입으로 전환한 종합 성과(시간 절감·비용·오류 감소) 글로벌 사례
-- **리서치 기관 인용** 1개: SHRM/Gartner/HBR/McKinsey가 인용한 이 유형의 HR 활동 AI 전환 기업 사례
-- **한국 대기업 사례** 1개: 삼성·현대·SK·LG + 유사 HR 활동 + AI/GenAI 전환 사례
+## 쿼리 5개 생성
+- L5 Task 행위 기반 AI 자동화 사례 쿼리 5개 (각기 다른 L5 업무 행위 커버)
 
 JSON만 출력:
-{{"queries": ["q1",...,"q10"], "hypotheses": ["가설1","가설2","가설3"]}}"""
+{{"queries": ["q1","q2","q3","q4","q5"], "hypotheses": ["가설1","가설2","가설3"]}}"""
 
     try:
         from anthropic import AsyncAnthropic
@@ -517,7 +509,7 @@ JSON만 출력:
         m = re.search(r'\{.*\}', raw, re.DOTALL)
         if m:
             data = json.loads(m.group())
-            queries = data.get("queries", [])[:10]
+            queries = data.get("queries", [])[:5]
             hypotheses = data.get("hypotheses", [])
             if queries:
                 search_log.append({
@@ -555,71 +547,230 @@ def _fallback_queries(workflow_cache: dict) -> list[str]:
     ]
 
 
-# ── Phase 4: Gap 분석 → Round 2 쿼리 생성 ────────────────────────────────────
+# ── Round 2/3 쿼리 생성 ──────────────────────────────────────────────────────
 
-async def _generate_followup_queries(
+def _fmt_results_summary(results: list[dict], limit: int = 15) -> str:
+    """검색 결과를 Sonnet에게 넘길 간결한 요약 문자열로 변환."""
+    lines = []
+    for r in results[:limit]:
+        status = "✓" if r.get("url") else "✗"
+        title = r.get("title", "")[:70]
+        lines.append(f"- {status} [R{r.get('round', '?')}] {title}")
+    return "\n".join(lines) if lines else "(결과 없음)"
+
+
+async def _plan_l4_queries(
     workflow_cache: dict,
-    round1_results: list[dict],
+    r1_results: list[dict],
     search_log: list[dict],
 ) -> list[str]:
-    """Round 1 결과를 보고 부족한 부분을 파악, 후속 쿼리 생성."""
+    """
+    Round 2 — L4 활동 단위 쿼리 (5개).
+    Sonnet이 R1 결과 + L5 맥락을 보고 L4 활동 단위에서 AI 전환 패턴을 찾는 쿼리를 생성합니다.
+    """
     api_key = os.getenv("ANTHROPIC_API_KEY", "")
     if not api_key:
         return []
 
     process_name = workflow_cache.get("process_name", "")
-    _, _, l4_names, _ = _extract_names_from_cache(workflow_cache)
+    _, _, _, l4_details = _extract_names_from_cache(workflow_cache)
+    l5_tasks = workflow_cache.get("l5_tasks", [])
 
-    found_lines = "\n".join(
-        f"- {'✓' if r.get('url') else '✗'} | score={r.get('embed_score', 0):.2f} | {r.get('title', '')[:70]}"
-        for r in round1_results[:20]
-    )
+    from collections import defaultdict
+    l5_by_l4: dict = defaultdict(list)
+    for t in l5_tasks:
+        l5_by_l4[t.get("l4", "")].append(t)
 
-    prompt = f"""리서치 전문가. Round 1 결과를 보고 아직 부족한 것을 파악하여 후속 쿼리 4개를 생성하세요.
+    l4_grouped_lines = []
+    for i, d in enumerate(l4_details[:6]):
+        l4_name = d.get("name", "")
+        tasks_under = l5_by_l4.get(l4_name, [])
+        l4_grouped_lines.append(f"  [{i+1}] L4: {l4_name}")
+        for t in tasks_under[:5]:
+            desc = t.get("description", "")
+            line = f"      └ {t['name']}" + (f": {desc}" if desc else "")
+            l4_grouped_lines.append(line)
+    l4_with_l5 = "\n".join(l4_grouped_lines) or "  (정보 없음)"
 
-프로세스: {process_name} | L4: {', '.join(l4_names[:5])}
+    r1_summary = _fmt_results_summary(r1_results)
 
-Round 1 결과 ({len(round1_results)}건):
-{found_lines}
+    prompt = f"""AX 벤치마킹 리서치 전문가입니다.
+이것은 3라운드 탐색의 **Round 2: L4 활동 단위 패턴 탐색**입니다.
 
-부족한 점을 파악하고 후속 쿼리 4개 생성 규칙:
-- Forbes Global 500 수준 글로벌 대기업만 사용, 스타트업·중소기업 금지
-- **모든 쿼리에 "AI", "GenAI", "LLM", "intelligent automation", "machine learning" 중 하나 이상 반드시 포함**
-- 단순 워크플로우 자동화(rule-based) 쿼리 금지 — AI 기술 적용 사례 쿼리만 허용
-JSON만: {{"queries": ["q1","q2","q3","q4"], "gap": "부족한 점 한 줄"}}"""
+## HR 프로세스 계층
+- L3: {process_name}
+- L4 + L5 상세:
+{l4_with_l5}
+
+## Round 1 결과 ({len(r1_results)}건) — L5 Task 단위 구체 탐색 결과
+{r1_summary}
+
+## Round 2 목표: L5를 모두 이해한 뒤 L4 활동 단위로 질문
+R1에서 개별 L5 Task 수준의 사례를 탐색했습니다.
+이제 **L4 활동 하나를 L5 Task들을 모두 읽어 실제 의미를 파악한 뒤**, 그 활동 전체를 AI로 전환한 더 넓은 패턴·사례를 찾는 쿼리를 만드세요.
+- L4 이름만 보지 말 것 (예: "조직개편"이라는 L4 이름만 보면 전략 프로세스로 오해 가능 — L5를 읽으면 행정 후처리임을 알 수 있음)
+- R1에서 이미 찾은 방향은 겹치지 않도록
+- AI 키워드 필수: "AI", "GenAI", "LLM", "intelligent automation", "AI agent" 중 하나 이상
+- Forbes Global 500 수준만, 스타트업 금지
+
+## 쿼리 5개 생성
+- L4 활동별 AI 전환 사례 쿼리 5개 (L5를 이해하고 L4 단위로 추상화한 쿼리)
+
+JSON만: {{"queries": ["q1","q2","q3","q4","q5"], "l4_focus": "어떤 L4 활동에 집중했는지 한 줄"}}"""
 
     try:
         from anthropic import AsyncAnthropic
-        from usage_store import add_usage as _add_usage_gap
+        from usage_store import add_usage as _add_usage_r2
         client = AsyncAnthropic(api_key=api_key)
         resp = await client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=600,
+            max_tokens=800,
             messages=[{"role": "user", "content": prompt}],
         )
         if resp.usage:
-            _add_usage_gap("anthropic",
-                           input_tokens=resp.usage.input_tokens,
-                           output_tokens=resp.usage.output_tokens)
+            _add_usage_r2("anthropic",
+                          input_tokens=resp.usage.input_tokens,
+                          output_tokens=resp.usage.output_tokens)
+        raw = resp.content[0].text.strip()
+        m = re.search(r'\{.*\}', raw, re.DOTALL)
+        if m:
+            data = json.loads(m.group())
+            queries = data.get("queries", [])[:5]
+            focus = data.get("l4_focus", "")
+            search_log.append({"type": "plan_r2", "l4_focus": focus, "queries": queries})
+            print(f"[benchmark] R2 쿼리 — L4 포커스: {focus}")
+            return queries
+    except Exception as e:
+        print(f"[benchmark] R2 쿼리 생성 실패: {e}")
+    return []
+
+
+async def _plan_l3_queries(
+    workflow_cache: dict,
+    r1_results: list[dict],
+    r2_results: list[dict],
+    search_log: list[dict],
+) -> list[str]:
+    """
+    Round 3 — L3 프로세스 전체 전환 + 보완 쿼리 (4개).
+    Sonnet이 R1+R2 결과를 보고 L3 전체의 AX 전환 개요 + 아직 못 찾은 부분을 보완합니다.
+    """
+    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        return []
+
+    process_name = workflow_cache.get("process_name", "")
+    _, _, _, l4_details = _extract_names_from_cache(workflow_cache)
+    l4_names = [d.get("name", "") for d in l4_details[:6]]
+
+    all_results = r1_results + r2_results
+    r1_summary = _fmt_results_summary(r1_results, limit=10)
+    r2_summary = _fmt_results_summary(r2_results, limit=10)
+
+    prompt = f"""AX 벤치마킹 리서치 전문가입니다.
+이것은 3라운드 탐색의 **Round 3: L3 프로세스 전체 AX 전환 + 보완**입니다.
+
+## HR 프로세스
+- L3: {process_name}
+- L4 활동: {', '.join(l4_names)}
+
+## Round 1 결과 ({len(r1_results)}건) — L5 단위 구체 탐색
+{r1_summary}
+
+## Round 2 결과 ({len(r2_results)}건) — L4 단위 패턴 탐색
+{r2_summary}
+
+## Round 3 목표: L3 전체를 조망하는 AX 전환 + 보완
+R1(L5 구체)/R2(L4 패턴)에서 찾지 못한 것을 파악하고:
+1. L4, L5를 모두 이해한 뒤 이 **L3 프로세스 전체**를 AI로 전환한 종합 사례 쿼리
+2. R1/R2에서 커버되지 않은 L4 활동이나 관점의 보완 쿼리
+
+규칙:
+- AI 키워드 필수: "AI", "GenAI", "LLM", "intelligent automation" 중 하나 이상
+- Forbes Global 500 수준만, 스타트업 금지
+- R1/R2에서 이미 찾은 방향 중복 금지
+
+## 쿼리 4개 생성
+- L3 전체 AX 전환 종합 사례 쿼리 2개
+- R1/R2 보완 쿼리 2개 (아직 못 찾은 L4 활동 또는 관점)
+
+JSON만: {{"queries": ["q1","q2","q3","q4"], "gap": "R1/R2에서 부족했던 점 한 줄"}}"""
+
+    try:
+        from anthropic import AsyncAnthropic
+        from usage_store import add_usage as _add_usage_r3
+        client = AsyncAnthropic(api_key=api_key)
+        resp = await client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=800,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        if resp.usage:
+            _add_usage_r3("anthropic",
+                          input_tokens=resp.usage.input_tokens,
+                          output_tokens=resp.usage.output_tokens)
         raw = resp.content[0].text.strip()
         m = re.search(r'\{.*\}', raw, re.DOTALL)
         if m:
             data = json.loads(m.group())
             queries = data.get("queries", [])[:4]
             gap = data.get("gap", "")
-            search_log.append({"type": "gap", "text": gap, "queries": queries})
-            print(f"[benchmark] Gap: {gap}")
+            search_log.append({"type": "plan_r3", "gap": gap, "queries": queries})
+            print(f"[benchmark] R3 쿼리 — Gap: {gap}")
             return queries
     except Exception as e:
-        print(f"[benchmark] follow-up 쿼리 실패: {e}")
+        print(f"[benchmark] R3 쿼리 생성 실패: {e}")
     return []
 
 
 # ── 통합 검색 파이프라인 ──────────────────────────────────────────────────────
 
+async def _run_search_round(
+    queries: list[str],
+    round_num: int,
+    use_pplx: bool,
+    use_tavily: bool,
+    seen_keys: set,
+    search_log: list[dict],
+) -> list[dict]:
+    """단일 라운드 검색 실행 — 엔진별 분기 + 중복 제거 후 결과 반환."""
+    results: list[dict] = []
+    search_log.append({"type": "round_start", "round": round_num, "query_count": len(queries)})
+
+    if use_pplx:
+        tasks = [asyncio.to_thread(_search_perplexity_sonar, q) for q in queries]
+    elif use_tavily:
+        tasks = [asyncio.to_thread(_search_tavily, q, 5) for q in queries]
+    else:
+        tasks = [asyncio.to_thread(_search_duckduckgo, q, 5) for q in queries]
+
+    batches = await asyncio.gather(*tasks, return_exceptions=True)
+
+    for q, batch in zip(queries, batches):
+        if isinstance(batch, Exception):
+            search_log.append({"type": "query", "round": round_num, "q": q, "found": 0})
+            continue
+        cnt = 0
+        for r in batch:
+            key = r.get("url") or r.get("query", q) or r.get("title", "")
+            if key and key not in seen_keys:
+                seen_keys.add(key)
+                r["round"] = round_num
+                results.append(r)
+                cnt += 1
+        search_log.append({"type": "query", "round": round_num, "q": q, "found": cnt})
+
+    search_log.append({"type": "round_end", "round": round_num, "total": len(results)})
+    print(f"[benchmark] Round {round_num} 완료 — {len(results)}건 추가")
+    return results
+
+
 async def search_benchmarks(workflow_cache: dict) -> dict:
     """
-    Perplexity Search + Embedding 기반 벤치마킹 파이프라인.
+    Sonnet ↔ Sonar 3라운드 벤치마킹 파이프라인.
+    - Round 1 (L5): Sonnet이 L5 Task 단위 구체 쿼리 생성 → 검색
+    - Round 2 (L4): Sonnet이 R1 결과 보고 L4 활동 단위 쿼리 생성 → 검색
+    - Round 3 (L3): Sonnet이 R1+R2 결과 보고 L3 전환 + 보완 쿼리 생성 → 검색
     반환: {"results": [...], "search_log": [...]}
     """
     search_log: list[dict] = []
@@ -629,128 +780,37 @@ async def search_benchmarks(workflow_cache: dict) -> dict:
     engine = "Perplexity" if use_pplx else ("Tavily" if use_tavily else "DuckDuckGo")
     search_log.append({"type": "engine", "text": f"검색 엔진: {engine}"})
 
-    # ── Phase 1: 쿼리 생성 ────────────────────────────────────────────────────
-    # Sonnet이 L2→L3→L4→L5 전 계층을 이해하여 가설 기반 쿼리 생성
-    # Sonar Pro / Tavily / DuckDuckGo 모두 동일한 쿼리 플래닝 사용
-    queries_r1 = await _plan_search_queries(workflow_cache, search_log)
-
-    # ── Phase 2: Round 1 병렬 검색 ───────────────────────────────────────────
-    search_log.append({"type": "round_start", "round": 1, "query_count": len(queries_r1)})
-
-    all_results: list[dict] = []
     seen_keys: set[str] = set()
+    all_results: list[dict] = []
 
-    if use_pplx:
-        # Sonar: 쿼리별 병렬 호출 (각 쿼리가 AI 종합 답변 + citations 반환)
-        sonar_tasks = [asyncio.to_thread(_search_perplexity_sonar, q) for q in queries_r1]
-        sonar_results = await asyncio.gather(*sonar_tasks, return_exceptions=True)
+    # ── Round 1: L5 Task 단위 구체 탐색 ──────────────────────────────────────
+    queries_r1 = await _plan_search_queries(workflow_cache, search_log)
+    r1_results = await _run_search_round(queries_r1, 1, use_pplx, use_tavily, seen_keys, search_log)
+    all_results.extend(r1_results)
 
-        for q, batch_r in zip(queries_r1, sonar_results):
-            if isinstance(batch_r, Exception):
-                search_log.append({"type": "query", "round": 1, "q": q, "found": 0})
-                continue
-            cnt = 0
-            for r in batch_r:
-                key = r.get("url") or r.get("query", q)
-                if key and key not in seen_keys:
-                    seen_keys.add(key)
-                    r["round"] = 1
-                    all_results.append(r)
-                    cnt += 1
-            search_log.append({"type": "query", "round": 1, "q": q, "found": cnt})
-
-    elif use_tavily:
-        tasks = [asyncio.to_thread(_search_tavily, q, 5) for q in queries_r1]
-        raw_batches = await asyncio.gather(*tasks, return_exceptions=True)
-        for q, batch in zip(queries_r1, raw_batches):
-            if isinstance(batch, Exception):
-                continue
-            cnt = 0
-            for r in batch:
-                key = r.get("url") or r.get("title", "")
-                if key and key not in seen_keys:
-                    seen_keys.add(key)
-                    r["round"] = 1
-                    all_results.append(r)
-                    cnt += 1
-            search_log.append({"type": "query", "round": 1, "q": q, "found": cnt})
-    else:
-        tasks = [asyncio.to_thread(_search_duckduckgo, q, 5) for q in queries_r1]
-        raw_batches = await asyncio.gather(*tasks, return_exceptions=True)
-        for q, batch in zip(queries_r1, raw_batches):
-            if isinstance(batch, Exception):
-                continue
-            cnt = 0
-            for r in batch:
-                key = r.get("url") or r.get("title", "")
-                if key and key not in seen_keys:
-                    seen_keys.add(key)
-                    r["round"] = 1
-                    all_results.append(r)
-                    cnt += 1
-            search_log.append({"type": "query", "round": 1, "q": q, "found": cnt})
-
-    search_log.append({"type": "round_end", "round": 1, "total": len(all_results)})
-    print(f"[benchmark] Round 1 완료 — {len(all_results)}건")
-
-    # ── Phase 3: Embedding 기반 재랭킹 ───────────────────────────────────────
+    # ── Embedding 재랭킹 (Sonar Pro 결과 품질 향상) ───────────────────────────
     if use_pplx and all_results:
         process_name = workflow_cache.get("process_name", "")
         _, _, l4_names, _ = _extract_names_from_cache(workflow_cache)
         query_context = f"{process_name} AI 자동화 구현 사례 수치 성과: {', '.join(l4_names[:5])}"
         all_results = await _rerank_by_embeddings(all_results, query_context, search_log)
+        r1_results = all_results  # 재랭킹된 결과를 R2 플래닝에 사용
 
-    # ── Phase 4: Gap 분석 → Round 2 ──────────────────────────────────────────
-    # Sonar Pro는 Pro Search 모드로 1라운드에서 충분히 커버하므로 Round 2 skip
-    if use_pplx:
-        queries_r2 = []
-        search_log.append({"type": "gap", "text": "Sonar Pro Pro Search 모드 — Round 2 생략", "queries": []})
-    else:
-        queries_r2 = await _generate_followup_queries(workflow_cache, all_results, search_log)
-
+    # ── Round 2: L4 활동 단위 패턴 탐색 ─────────────────────────────────────
+    queries_r2 = await _plan_l4_queries(workflow_cache, r1_results, search_log)
     if queries_r2:
-        search_log.append({"type": "round_start", "round": 2, "query_count": len(queries_r2)})
+        r2_results = await _run_search_round(queries_r2, 2, use_pplx, use_tavily, seen_keys, search_log)
+        all_results.extend(r2_results)
+    else:
+        r2_results = []
 
-        if use_pplx:
-            sonar_tasks2 = [asyncio.to_thread(_search_perplexity_sonar, q) for q in queries_r2]
-            sonar_results2 = await asyncio.gather(*sonar_tasks2, return_exceptions=True)
-            for q, batch_r in zip(queries_r2, sonar_results2):
-                if isinstance(batch_r, Exception):
-                    search_log.append({"type": "query", "round": 2, "q": q, "found": 0})
-                    continue
-                cnt = 0
-                for r in batch_r:
-                    key = r.get("url") or r.get("query", q)
-                    if key and key not in seen_keys:
-                        seen_keys.add(key)
-                        r["round"] = 2
-                        all_results.append(r)
-                        cnt += 1
-                search_log.append({"type": "query", "round": 2, "q": q, "found": cnt})
-        elif use_tavily:
-            tasks2 = [asyncio.to_thread(_search_tavily, q, 5) for q in queries_r2]
-            raw2 = await asyncio.gather(*tasks2, return_exceptions=True)
-            r2_added = 0
-            for q, batch in zip(queries_r2, raw2):
-                if isinstance(batch, Exception):
-                    continue
-                cnt = 0
-                for r in batch:
-                    key = r.get("url") or r.get("title", "")
-                    if key and key not in seen_keys:
-                        seen_keys.add(key)
-                        r["round"] = 2
-                        all_results.append(r)
-                        r2_added += 1
-                        cnt += 1
-                search_log.append({"type": "query", "round": 2, "q": q, "found": cnt})
-            r2_added = 0  # already counted above
+    # ── Round 3: L3 전체 AX 전환 + 보완 ─────────────────────────────────────
+    queries_r3 = await _plan_l3_queries(workflow_cache, r1_results, r2_results, search_log)
+    if queries_r3:
+        r3_results = await _run_search_round(queries_r3, 3, use_pplx, use_tavily, seen_keys, search_log)
+        all_results.extend(r3_results)
 
-        search_log.append({"type": "round_end", "round": 2, "total": len(all_results)})
-        print(f"[benchmark] Round 2 완료 — 총 {len(all_results)}건")
-
-    # ── 최종 정렬 ────────────────────────────────────────────────────────────
-    # embed_score 있으면 우선, 없으면 URL 유무 기준
+    # ── 최종 정렬 ─────────────────────────────────────────────────────────────
     all_results.sort(
         key=lambda r: r.get("embed_score", 0.5 if r.get("url") else 0),
         reverse=True,
