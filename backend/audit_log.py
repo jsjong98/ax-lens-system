@@ -12,8 +12,10 @@ audit_log.py — 감사 로그 시스템
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+_KST = timezone(timedelta(hours=9))
 
 _PERSIST_ROOT = Path("/app/persist") if Path("/app/persist").exists() else Path(__file__).parent
 _LOG_FILE = _PERSIST_ROOT / "audit_log.json"
@@ -66,7 +68,7 @@ def log_event(
     - data_download, data_export
     """
     entry = {
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(_KST).isoformat(),
         "event": event_type,
         "email": email,
         "ip": ip,

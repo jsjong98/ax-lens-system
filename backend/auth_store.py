@@ -365,6 +365,16 @@ def authenticate(email: str, password: str, ip: str = "", user_agent: str = "") 
     user = users.get(email)
     if not user:
         log_event("login_failed", email=email, ip=ip, detail="존재하지 않는 이메일")
+        # Admin에게 미등록 ID 로그인 시도 알림 (fire-and-forget)
+        import asyncio
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.ensure_future(send_unknown_login_alert(email, ip))
+            else:
+                loop.run_until_complete(send_unknown_login_alert(email, ip))
+        except Exception:
+            pass
         return None
     if not _verify_password(password, user["password_hash"]):
         log_event("login_failed", email=email, ip=ip, detail="비밀번호 불일치")
@@ -541,6 +551,74 @@ def reset_password(email: str, code: str, new_password: str) -> bool:
     from audit_log import log_event
     log_event("password_reset", email=email)
     return True
+
+
+async def send_unknown_login_alert(attempted_email: str, ip: str) -> None:
+    """
+    존재하지 않는 ID로 로그인 시도 시 Admin에게 경고 메일 발송.
+    RESEND_API_KEY 또는 ADMIN_EMAIL 미설정이면 로그만 남기고 종료.
+    """
+    api_key = os.getenv("RESEND_API_KEY", "")
+    admin_email = ADMIN_EMAIL
+    if not api_key or not admin_email:
+        print(f"[AUTH] 미등록 ID 로그인 시도: {attempted_email} (IP: {ip}) — 메일 발송 생략(설정 없음)")
+        return
+
+    import urllib.request
+    import urllib.error
+
+    now_kst = datetime.now(_KST).strftime("%Y-%m-%d %H:%M:%S KST")
+
+    payload = json.dumps({
+        "from": "PwC AX Lens <noreply@pwc-ax-lens.com>",
+        "to": [admin_email],
+        "subject": "[PwC AX Lens] ⚠️ 미등록 ID 로그인 시도 감지",
+        "html": f"""
+        <div style="font-family: 'Noto Sans KR', Arial, sans-serif; max-width: 520px; margin: 0 auto; padding: 40px 24px;">
+            <div style="text-align: center; margin-bottom: 28px;">
+                <h2 style="color: #A62121; margin: 0;">PwC AX Lens System</h2>
+                <p style="color: #6b7280; font-size: 13px; margin: 4px 0 0;">보안 알림</p>
+            </div>
+            <div style="background: #fff7ed; border: 1px solid #fed7aa; border-radius: 12px; padding: 28px;">
+                <p style="color: #92400e; font-weight: 700; font-size: 15px; margin: 0 0 16px;">
+                    ⚠️ 시스템에 등록되지 않은 ID로 로그인을 시도했습니다.
+                </p>
+                <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+                    <tr>
+                        <td style="color: #6b7280; padding: 6px 0; width: 90px;">시도 ID</td>
+                        <td style="color: #111827; font-weight: 600;">{attempted_email}</td>
+                    </tr>
+                    <tr>
+                        <td style="color: #6b7280; padding: 6px 0;">접속 IP</td>
+                        <td style="color: #111827;">{ip or "알 수 없음"}</td>
+                    </tr>
+                    <tr>
+                        <td style="color: #6b7280; padding: 6px 0;">접속 시간</td>
+                        <td style="color: #111827;">{now_kst}</td>
+                    </tr>
+                </table>
+            </div>
+            <p style="color: #9ca3af; font-size: 12px; text-align: center; margin-top: 20px;">
+                정상적인 접근이라면 해당 ID를 시스템에 등록해 주세요.
+            </p>
+        </div>
+        """,
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        "https://api.resend.com/emails",
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10):
+            print(f"[AUTH] 미등록 ID 알림 메일 발송 → {admin_email} (시도: {attempted_email}, IP: {ip})")
+    except Exception as e:
+        print(f"[AUTH] 미등록 ID 알림 메일 발송 실패: {e}")
 
 
 async def send_reset_email(email: str, code: str) -> bool:
