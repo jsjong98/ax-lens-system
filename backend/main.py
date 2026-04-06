@@ -2118,9 +2118,12 @@ async def benchmark_workflow_step1(request: Request):
     l3_names = [d["name"] for d in l3_details]
     l4_names = [d["name"] for d in l4_details]
 
-    # L5 task 전체 (name + description) — 쿼리 빌드 시 시스템명/Pain 추출에 활용
+    # L5 task — l4_details(현재 분석 범위로 필터링된 L4 그룹)에서만 수집
+    # excel_by_l4.values() 전체를 쓰면 다른 프로세스(채용관리 등)의 L5 task까지 섞임
     l5_tasks = []
-    for tasks in excel_by_l4.values():
+    for d in l4_details:
+        l4_id = d.get("task_id", "")
+        tasks = excel_by_l4.get(l4_id, [])
         for t in tasks:
             if t.name:
                 l5_tasks.append({
@@ -2128,6 +2131,16 @@ async def benchmark_workflow_step1(request: Request):
                     "description": t.description or "",
                     "l4": t.l4 or "",
                 })
+
+    # 검증 로그 — bm_data에 실제 어떤 계층 정보가 들어가는지 확인
+    print(f"[benchmark] 메타데이터 검증")
+    print(f"  process_name (L3): {process_name}")
+    print(f"  l2_names: {l2_names}")
+    print(f"  l3_names: {l3_names}")
+    print(f"  l4_names: {l4_names}")
+    print(f"  l5_tasks ({len(l5_tasks)}개):")
+    for lt in l5_tasks[:10]:
+        print(f"    [{lt['l4']}] {lt['name']}: {lt['description'][:60] if lt['description'] else '(description 없음)'}")
 
     bm_data = {
         "process_name": process_name,
