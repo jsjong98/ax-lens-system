@@ -2207,6 +2207,8 @@ async def benchmark_workflow_step1(request: Request):
    - ✅ 공식 기업 블로그 / 기술 블로그 (engineering.fb.com, cloud.google.com 등)
    - ✅ 공식 케이스 스터디 / 백서 / 연구 보고서
    - ✅ 학술 논문, LinkedIn 공식 게시물
+   - ✅ 글로벌 리서치·컨설팅 기관 보고서에서 **특정 기업 사례를 인용한 경우** (weforum.org, shrm.org, gartner.com, mckinsey.com, hbr.org 등) — 단, source는 해당 기관이 아닌 인용된 기업명으로 기재
+   - ✅ SAP/Workday/ServiceNow/Oracle 공식 고객 사례 페이지
    - ❌ **뉴스 기사 절대 금지** — 뉴스 기사(언론사, 포털 뉴스)는 벤치마킹 근거가 아님
      (chosun.com, mk.co.kr, zdnet, techcrunch, reuters, bloomberg 등 뉴스 URL 포함 금지)
    - ❌ 벤더 마케팅 자료, 일반 AI 통계, 기업명 미확인

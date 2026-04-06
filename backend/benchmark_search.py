@@ -412,27 +412,29 @@ def _build_sonar_queries(workflow_cache: dict) -> list[str]:
     _, _, l4_names, _ = _extract_names_from_cache(workflow_cache)
     focus_kr = l4_names[0] if l4_names else process_name
     focus_en = _translate_to_en(focus_kr)
-    l4_en = " ".join(_translate_to_en(n) for n in l4_names[:3])
 
     queries = [
-        # 글로벌 Tech 대기업 (소프트웨어·AI 도입 선도)
-        f"IBM Microsoft SAP Workday Oracle Salesforce AI automation '{focus_en}' HR process "
-        f"case study implementation results 2023 2024 2025 site:*.com",
+        # SAP/Workday/ServiceNow 공식 고객 사례 페이지 직접 타겟
+        f"SAP SuccessFactors customer success story '{focus_en}' AI automation Fortune 500 "
+        f"results measurable outcome workforce",
 
-        # 글로벌 非Tech 대기업 (실제 운영 도입)
-        f"Unilever Siemens JPMorgan DHL Walmart GE Honeywell AI '{focus_en}' "
-        f"automation efficiency ROI official case study",
+        f"Workday customer story '{focus_en}' AI machine learning HR automation "
+        f"enterprise results 2023 2024 2025",
 
-        # L4 활동 기반 포괄 검색
-        f"Forbes Global 500 company AI automation '{l4_en}' process "
-        f"case study measurable outcome 2024 2025",
+        # 글로벌 非Tech 대기업 공식 사례
+        f"Unilever Siemens JPMorgan DHL Walmart GE Honeywell '{focus_en}' "
+        f"AI HR automation official case study results savings efficiency",
 
-        # 벤더 공식 케이스스터디 (SAP, Workday, ServiceNow 고객 사례)
-        f"SAP SuccessFactors Workday ServiceNow 'case study' '{focus_en}' "
-        f"Fortune 500 customer AI result site:sap.com OR site:workday.com OR site:servicenow.com",
+        # WEF·SHRM·Gartner 리서치 인용 기업 사례 (리서치 기관이 특정 기업을 인용한 사례)
+        f"WEF SHRM Gartner '{focus_en}' AI automation enterprise case study "
+        f"company implementation results 2024 2025",
+
+        # ServiceNow/Oracle HCM 공식 사례
+        f"ServiceNow HR ServiceDelivery Oracle HCM '{focus_en}' customer case study "
+        f"automation efficiency Fortune 500 2024",
 
         # 한국 대기업
-        f"삼성전자 현대자동차 SK LG 포스코 '{focus_kr}' AI 자동화 도입 사례 성과",
+        f"삼성전자 현대자동차 SK LG 포스코 '{focus_kr}' AI 자동화 도입 사례 성과 공식",
     ]
 
     # extra_queries 있으면 앞에 추가
