@@ -431,6 +431,8 @@ async def generate_new_workflow(
 
     user_prompt = _build_user_prompt(tasks, process_name)
 
+    from usage_store import add_usage as _add_usage
+
     # Anthropic Claude 시도
     anthropic_key = api_key or os.getenv("ANTHROPIC_API_KEY", "")
     if anthropic_key:
@@ -443,6 +445,10 @@ async def generate_new_workflow(
                 system=_SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": user_prompt}],
             )
+            if response.usage:
+                _add_usage("anthropic",
+                           input_tokens=response.usage.input_tokens,
+                           output_tokens=response.usage.output_tokens)
             raw = response.content[0].text
             data = _extract_json(raw)
             return _parse_result(data, tasks)
@@ -464,6 +470,10 @@ async def generate_new_workflow(
                 ],
                 response_format={"type": "json_object"},
             )
+            if response.usage:
+                _add_usage("openai",
+                           input_tokens=response.usage.prompt_tokens,
+                           output_tokens=response.usage.completion_tokens)
             raw = response.choices[0].message.content or "{}"
             data = json.loads(raw)
             return _parse_result(data, tasks)
@@ -991,6 +1001,8 @@ async def generate_workflow_from_freeform(
         process_name, inputs, outputs, systems, pain_points, additional_info,
     )
 
+    from usage_store import add_usage as _add_usage_ff
+
     # Anthropic Claude
     anthropic_key = api_key or os.getenv("ANTHROPIC_API_KEY", "")
     if anthropic_key:
@@ -1003,6 +1015,10 @@ async def generate_workflow_from_freeform(
                 system=_FREEFORM_SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": user_prompt}],
             )
+            if response.usage:
+                _add_usage_ff("anthropic",
+                              input_tokens=response.usage.input_tokens,
+                              output_tokens=response.usage.output_tokens)
             raw = response.content[0].text
             data = _extract_json(raw)
             return _parse_freeform_result(data)
@@ -1024,6 +1040,10 @@ async def generate_workflow_from_freeform(
                 ],
                 response_format={"type": "json_object"},
             )
+            if response.usage:
+                _add_usage_ff("openai",
+                              input_tokens=response.usage.prompt_tokens,
+                              output_tokens=response.usage.completion_tokens)
             raw = response.choices[0].message.content or "{}"
             data = json.loads(raw)
             return _parse_freeform_result(data)

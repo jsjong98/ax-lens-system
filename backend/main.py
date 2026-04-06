@@ -1940,6 +1940,8 @@ async def _call_llm_step1(system: str, messages: list) -> dict | None:
     anthropic_key = os.getenv("ANTHROPIC_API_KEY", "") or settings.anthropic_api_key
     result_data = None
 
+    from usage_store import add_usage as _add_usage
+
     if anthropic_key:
         try:
             from anthropic import AsyncAnthropic
@@ -1950,6 +1952,10 @@ async def _call_llm_step1(system: str, messages: list) -> dict | None:
                 system=system,
                 messages=messages,
             )
+            if response.usage:
+                _add_usage("anthropic",
+                           input_tokens=response.usage.input_tokens,
+                           output_tokens=response.usage.output_tokens)
             raw = response.content[0].text
             from new_workflow_generator import _extract_json
             result_data = _extract_json(raw)
@@ -1968,6 +1974,10 @@ async def _call_llm_step1(system: str, messages: list) -> dict | None:
                 messages=[{"role": "system", "content": system}, *messages],
                 response_format={"type": "json_object"},
             )
+            if response.usage:
+                _add_usage("openai",
+                           input_tokens=response.usage.prompt_tokens,
+                           output_tokens=response.usage.completion_tokens)
             raw = response.choices[0].message.content or "{}"
             return json.loads(raw)
         except Exception as e:
@@ -2594,6 +2604,8 @@ L4 활동: {', '.join(bm_data['l4_names'][:4])}
     anthropic_key = os.getenv("ANTHROPIC_API_KEY", "") or settings.anthropic_api_key
     response_text = ""
 
+    from usage_store import add_usage as _add_usage_chat
+
     if anthropic_key:
         try:
             from anthropic import AsyncAnthropic
@@ -2604,6 +2616,10 @@ L4 활동: {', '.join(bm_data['l4_names'][:4])}
                 system=chat_system,
                 messages=_wf_chat_history,
             )
+            if response.usage:
+                _add_usage_chat("anthropic",
+                                input_tokens=response.usage.input_tokens,
+                                output_tokens=response.usage.output_tokens)
             response_text = response.content[0].text
         except Exception as e:
             print(f"[workflow-chat] Anthropic 실패: {e}")
@@ -2622,6 +2638,10 @@ L4 활동: {', '.join(bm_data['l4_names'][:4])}
                         *_wf_chat_history,
                     ],
                 )
+                if resp.usage:
+                    _add_usage_chat("openai",
+                                    input_tokens=resp.usage.prompt_tokens,
+                                    output_tokens=resp.usage.completion_tokens)
                 response_text = resp.choices[0].message.content or ""
             except Exception as e:
                 print(f"[workflow-chat] OpenAI 실패: {e}")
@@ -2772,6 +2792,8 @@ Step 1에서 도출된 기본 설계를 기반으로, 두산에 최적화된 **A
 
     result_data = None
 
+    from usage_store import add_usage as _add_usage_step2
+
     if anthropic_key:
         try:
             from anthropic import AsyncAnthropic
@@ -2782,6 +2804,10 @@ Step 1에서 도출된 기본 설계를 기반으로, 두산에 최적화된 **A
                 system=step2_system,
                 messages=[{"role": "user", "content": "Step 1 결과와 Pain Point를 기반으로 상세 설계를 수행해주세요."}],
             )
+            if response.usage:
+                _add_usage_step2("anthropic",
+                                 input_tokens=response.usage.input_tokens,
+                                 output_tokens=response.usage.output_tokens)
             raw = response.content[0].text
             from new_workflow_generator import _extract_json
             result_data = _extract_json(raw)
@@ -2803,6 +2829,10 @@ Step 1에서 도출된 기본 설계를 기반으로, 두산에 최적화된 **A
                     ],
                     response_format={"type": "json_object"},
                 )
+                if response.usage:
+                    _add_usage_step2("openai",
+                                     input_tokens=response.usage.prompt_tokens,
+                                     output_tokens=response.usage.completion_tokens)
                 raw = response.choices[0].message.content or "{}"
                 result_data = json.loads(raw)
             except Exception as e:
