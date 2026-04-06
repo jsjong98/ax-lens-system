@@ -430,18 +430,36 @@ async def _plan_search_queries(
 
     process_name = workflow_cache.get("process_name", "")
     l2_names = workflow_cache.get("l2_names", [])
-    _, _, l4_names, l4_details = _extract_names_from_cache(workflow_cache)
+    _, _, _, l4_details = _extract_names_from_cache(workflow_cache)
     l5_tasks = workflow_cache.get("l5_tasks", [])
 
     pain_points = []
     for d in l4_details[:4]:
         pain_points.extend(d.get("pain_points", [])[:2])
 
-    # L5 Task 상세 목록 (name + description)
-    l5_lines = "\n".join(
-        f"  - {t['name']}: {t['description']}" if t.get("description") else f"  - {t['name']}"
-        for t in l5_tasks[:20]
-    )
+    # L4별로 L5 Task 묶기 — L4 이름만 보고 오해하지 않도록 각 L4의 실제 업무를 L5로 보여줌
+    from collections import defaultdict
+    l5_by_l4: dict = defaultdict(list)
+    for t in l5_tasks:
+        l4_key = t.get("l4", "")
+        if t.get("name"):
+            l5_by_l4[l4_key].append(t)
+
+    l4_grouped_lines = []
+    for i, d in enumerate(l4_details[:6]):
+        l4_name = d.get("name", "")
+        tasks_under = l5_by_l4.get(l4_name, [])
+        l4_grouped_lines.append(f"  [{i+1}] L4: {l4_name}")
+        if tasks_under:
+            for t in tasks_under[:6]:
+                desc = t.get("description", "")
+                line = f"      └ {t['name']}"
+                if desc:
+                    line += f": {desc}"
+                l4_grouped_lines.append(line)
+        else:
+            l4_grouped_lines.append("      └ (L5 상세 없음)")
+    l4_with_l5 = "\n".join(l4_grouped_lines)
 
     l2_context = f"기능 단위: {', '.join(l2_names[:2])} (BP = Business Partner, HR 파트너 기능)" if l2_names else ""
 
@@ -451,10 +469,8 @@ async def _plan_search_queries(
 ## 두산 HR 프로세스 계층 (전체 이해 필수)
 {l2_context}
 - L3 프로세스: {process_name}
-- L4 활동 (쿼리의 주요 단위):
-{chr(10).join(f"  [{i+1}] {n}" for i, n in enumerate(l4_names[:6]))}
-- L5 Task 상세 (L4 활동의 실제 내용 이해용 — 쿼리 추상화에 활용):
-{l5_lines if l5_lines else '  (정보 없음)'}
+- L4 활동 + 하위 L5 Task 상세 (L4 이름만 보지 말고, L5를 모두 읽고 L4의 실제 의미를 파악하세요):
+{l4_with_l5 if l4_with_l5 else '  (정보 없음)'}
 - Pain Point: {', '.join(list(dict.fromkeys(pain_points))[:5]) if pain_points else '없음'}
 
 ## 약어 정의
