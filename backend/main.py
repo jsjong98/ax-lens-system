@@ -2440,14 +2440,15 @@ async def benchmark_workflow_step1(request: Request):
 @app.post("/api/workflow/generate-step1", tags=["Workflow"])
 async def generate_workflow_step1(request: Request):
     """
-    Step 1-B: 프롬프트 기반 Workflow 기본 설계 (Top-Down, Lv.2~5).
-    벤치마킹과 순서 무관하게 독립 실행 가능.
-    프롬프트에 특정 기업이 언급되면 해당 기업 벤치마킹도 자동 수행.
+    Step 1-B: 벤치마킹 결과표 기반 Workflow 기본 설계 (Top-Down, Lv.2~5).
+    반드시 벤치마킹 수행(start_workflow_benchmark) 후에 호출해야 합니다.
     """
-    from benchmark_search import search_benchmarks
-
     if not _wf_excel_tasks:
         raise HTTPException(400, "엑셀을 먼저 업로드하세요.")
+
+    # 벤치마킹 결과표가 없으면 기본 설계 차단
+    if not _wf_benchmark_table:
+        raise HTTPException(400, "벤치마킹을 먼저 수행해주세요. 벤치마킹 결과표가 있어야 기본 설계를 생성할 수 있습니다.")
 
     body = await request.json()
     user_prompt = body.get("prompt", "")
@@ -2458,41 +2459,13 @@ async def generate_workflow_step1(request: Request):
     if process_name_override:
         process_name = process_name_override
 
-    # 프롬프트에서 기업명 감지 → 추가 벤치마킹
-    import re as _re
-    company_pattern = _re.findall(
-        r'(?:Google|Amazon|Meta|Microsoft|Apple|Unilever|삼성|현대|SK|LG|두산|'
-        r'JPMorgan|Goldman|DoorDash|Siemens|GE|SAP|Workday|IBM|Oracle|'
-        r'[A-Z][a-z]+(?:\s[A-Z][a-z]+)*)',
-        user_prompt or "",
-    )
-    prompt_companies = list(set(company_pattern))
-
-    # 벤치마킹 결과가 있으면 포함, 없으면 프롬프트 기업으로 빠른 검색
-    benchmark_text = ""
-    if _wf_benchmark_table:
-        benchmark_text = "## 벤치마킹 결과 (이미 수행됨)\n"
-        for bm in _wf_benchmark_table[:8]:
-            benchmark_text += (
-                f"- **{bm.get('source', '')}** ({bm.get('industry', '')}): "
-                f"{bm.get('use_case', '')} → {bm.get('outcome', '')}\n"
-            )
-    elif prompt_companies:
-        # 프롬프트에 기업이 언급됨 → 빠른 벤치마킹
-        bm_data = {
-            "process_name": process_name,
-            "agents": [],
-            "blueprint_summary": f"{' '.join(prompt_companies)} {process_name} AI 적용 사례",
-        }
-        _bm_sr = await search_benchmarks(bm_data)
-        raw = _bm_sr.get("results", [])
-        if raw:
-            global _wf_benchmark_results
-            _wf_benchmark_results = raw
-            benchmark_text = "## 벤치마킹 검색 결과 (프롬프트 기업 기반)\n"
-            for r in raw[:8]:
-                content = r.get("content", r.get("snippet", ""))
-                benchmark_text += f"- **{r['title']}**: {content[:200]}\n"
+    # 벤치마킹 결과표를 설계 컨텍스트로 포함
+    benchmark_text = "## 벤치마킹 결과 (선도사례 기반 설계 근거)\n"
+    for bm in _wf_benchmark_table[:8]:
+        benchmark_text += (
+            f"- **{bm.get('source', '')}** ({bm.get('industry', '')}): "
+            f"{bm.get('use_case', '')} → {bm.get('outcome', '')}\n"
+        )
 
     # As-Is + 엑셀 매핑 컨텍스트
     asis_context = _build_mapped_asis_context(sheet_id)

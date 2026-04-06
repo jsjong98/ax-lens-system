@@ -848,11 +848,12 @@ export default function WorkflowPage() {
                     "\uD83D\uDD0D 벤치마킹 수행"
                   )}
                 </button>
-                {/* 기본 설계 생성 버튼 — 항상 독립 */}
+                {/* 기본 설계 생성 버튼 — 벤치마킹 완료 후에만 활성화 */}
                 <button
                   onClick={() => handleGenerateStep1()}
-                  disabled={loading || bmLoading}
-                  className="px-4 py-2 rounded-lg text-sm font-bold text-white transition disabled:opacity-50 whitespace-nowrap"
+                  disabled={loading || bmLoading || benchmarkTable.length === 0}
+                  title={benchmarkTable.length === 0 ? "벤치마킹을 먼저 수행해주세요" : undefined}
+                  className="px-4 py-2 rounded-lg text-sm font-bold text-white transition disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
                   style={{ backgroundColor: step1Result ? "#15803D" : PWC.primary }}
                 >
                   {loading ? (
