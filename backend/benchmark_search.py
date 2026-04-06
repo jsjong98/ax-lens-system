@@ -352,25 +352,35 @@ async def _plan_search_queries(
     focus_kr = l4_names[0] if l4_names else process_name
 
     prompt = f"""당신은 글로벌 HR AI 벤치마킹 리서치 전문가입니다.
-당신의 학습 지식을 사용하여 구체적인 기업·도구 조합을 타겟하는 가설 기반 쿼리를 생성하세요.
+당신의 학습 지식을 사용하여 **글로벌 선도 대기업**을 타겟하는 가설 기반 쿼리를 생성하세요.
 
 ## 조사 대상
 - 프로세스: {process_name}
 - L4 활동: {', '.join(l4_names[:6])}
 - Pain Point: {', '.join(pain_points[:4]) if pain_points else '없음'}
 
+## 타겟 기업 — 반드시 아래 리스트에서만 선택
+아래 카테고리에서 해당 프로세스와 가장 관련성 높은 기업을 골라 쿼리를 만드세요:
+- **제조·산업**: Siemens, GE, Honeywell, 3M, DuPont, Caterpillar, Bosch, ABB
+- **소비재·유통**: Unilever, P&G, Nestlé, Walmart, Target, Coca-Cola, PepsiCo, L'Oréal
+- **에너지·화학**: ExxonMobil, Shell, BP, Chevron, BASF, Dow Chemical
+- **금융**: JPMorgan, Goldman Sachs, Citi, HSBC, Mastercard, Visa
+- **물류·항공**: DHL, FedEx, UPS, Maersk, Delta Airlines
+- **Big Tech (도입처로서)**: Google, Amazon, Microsoft, Meta, IBM, Oracle
+- **한국 대기업**: 삼성전자, 현대자동차, SK하이닉스, LG전자, 포스코, 두산
+
 ## 가설 기반 검색 전략
-Perplexity처럼 이미 알고 있는 사실을 검증하는 쿼리를 만드세요:
-- ✅ "General Motors Paradox AI chatbot recruiting 2 million savings 2022"
-- ✅ "Siemens SAP SuccessFactors AI recruiting time to hire 60 percent reduction"
-- ✅ "IBM Watson HR recruitment AI use cases data sheet"
+이미 알고 있는 사실을 검증하는 쿼리를 만드세요:
+- ✅ "Unilever HireVue AI video interview screening 50000 candidates automation results"
+- ✅ "Siemens SAP SuccessFactors AI workforce planning time reduction ROI"
+- ✅ "Walmart AI HR workforce scheduling automation savings case study"
 - ❌ "AI HR automation enterprise 2024" (너무 일반적)
+- ❌ 중소기업, 스타트업, 국내 중소IT업체 절대 사용 금지
 
 ## 쿼리 10개 생성 (아래 구성으로)
-- **기업+도구 가설 쿼리** 4개: 당신이 아는 실제 기업·HR AI 도구 조합 타겟
-- **벤더 케이스 스터디** 2개: Paradox, Eightfold, HireVue, SAP, Workday 공식 케이스
-- **공식 문서·기능** 2개: help.sap.com, workday.com, servicenow.com 등 공식 docs
-- **한국어 사례** 2개: 한국 대기업 + '{focus_kr}' AI 도입 사례
+- **글로벌 대기업+도구 가설 쿼리** 5개: 위 리스트 기업 + HR AI 도구 조합 (구체적 수치 포함)
+- **벤더 공식 케이스 스터디** 3개: Paradox, Eightfold, HireVue, SAP, Workday 공식 사이트
+- **한국 대기업 사례** 2개: 삼성·현대·SK·LG + '{focus_kr}' AI 도입 공식 사례
 
 JSON만 출력:
 {{"queries": ["q1",...,"q10"], "hypotheses": ["가설1","가설2","가설3"]}}"""
@@ -412,16 +422,16 @@ def _fallback_queries(workflow_cache: dict) -> list[str]:
     focus_kr = l4_names[0] if l4_names else process_name
     focus_en = _translate_to_en(focus_kr)
     return [
-        f"General Motors Paradox AI {focus_en} chatbot recruiting savings case study",
-        f"Siemens SAP SuccessFactors AI {focus_en} time reduction ROI results",
-        f"Unilever HireVue AI {focus_en} screening automation 2024",
-        f"IBM Watson {focus_en} HR AI use cases data sheet implementation",
-        f"Paradox Eightfold {focus_en} AI case study customer official",
-        f"SAP SuccessFactors {focus_en} premium AI features help documentation",
-        f"Workday {focus_en} generative AI features official documentation",
-        f"{focus_en} AI automation HR research paper PDF academic 2023 2024",
-        f"삼성SDS 현대차 '{focus_kr}' AI 자동화 공식 케이스스터디",
-        f"SK LG '{focus_kr}' AI HR 도입 성과 사례",
+        f"Unilever HireVue AI {focus_en} video interview screening automation results",
+        f"Siemens SAP SuccessFactors AI {focus_en} workforce planning time reduction ROI",
+        f"Walmart Target AI {focus_en} workforce scheduling automation savings case study",
+        f"General Motors Paradox AI {focus_en} recruiting chatbot savings official",
+        f"DHL FedEx AI {focus_en} HR automation productivity improvement results",
+        f"P&G Nestlé Coca-Cola AI {focus_en} talent acquisition case study",
+        f"Paradox Eightfold {focus_en} AI case study Fortune 500 customer official site",
+        f"Workday SAP SuccessFactors {focus_en} AI generative features official documentation",
+        f"삼성전자 현대자동차 '{focus_kr}' AI 자동화 공식 케이스스터디 성과",
+        f"SK하이닉스 LG전자 포스코 '{focus_kr}' AI HR 도입 사례 결과",
     ]
 
 
@@ -452,7 +462,15 @@ async def _generate_followup_queries(
 Round 1 결과 ({len(round1_results)}건):
 {found_lines}
 
-부족한 점을 파악하고 후속 쿼리 4개 생성 (가설 기반, 구체적 기업+도구+성과 포함).
+부족한 점을 파악하고 후속 쿼리 4개 생성. 반드시 아래 글로벌 선도 대기업만 사용:
+- 제조·산업: Siemens, GE, Honeywell, 3M, DuPont, Caterpillar, Bosch
+- 소비재·유통: Unilever, P&G, Nestlé, Walmart, Coca-Cola, PepsiCo
+- 에너지: ExxonMobil, Shell, Chevron
+- 금융: JPMorgan, Goldman Sachs, HSBC
+- 물류: DHL, FedEx, Maersk
+- Big Tech: Google, Amazon, Microsoft, IBM
+- 한국: 삼성전자, 현대자동차, SK, LG, 포스코
+
 JSON만: {{"queries": ["q1","q2","q3","q4"], "gap": "부족한 점 한 줄"}}"""
 
     try:
