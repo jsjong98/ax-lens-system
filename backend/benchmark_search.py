@@ -87,6 +87,8 @@ def _search_perplexity_sonar(query: str) -> list[dict]:
     try:
         content_parts: list[str] = []
         citations: list[str] = []
+        usage_input = 0
+        usage_output = 0
 
         with urllib.request.urlopen(req, timeout=90) as resp:
             for raw_line in resp:
@@ -111,7 +113,20 @@ def _search_perplexity_sonar(query: str) -> list[dict]:
                 if chunk.get("citations"):
                     citations = chunk["citations"]
 
+                # usage — 마지막 청크에 포함
+                if chunk.get("usage"):
+                    usage_input = chunk["usage"].get("prompt_tokens", 0)
+                    usage_output = chunk["usage"].get("completion_tokens", 0)
+
         content = "".join(content_parts)
+
+        # 토큰 사용량 누적 기록
+        if usage_input or usage_output:
+            try:
+                from usage_store import add_usage
+                add_usage("perplexity", input_tokens=usage_input, output_tokens=usage_output)
+            except Exception:
+                pass
 
         results = []
         if citations:
@@ -134,7 +149,7 @@ def _search_perplexity_sonar(query: str) -> list[dict]:
                 "query": query,
             })
 
-        print(f"[benchmark] Sonar Pro '{query[:50]}' → {len(citations)}개 citation, {len(content)}자")
+        print(f"[benchmark] Sonar Pro '{query[:50]}' → {len(citations)}개 citation, {len(content)}자 (in:{usage_input}/out:{usage_output})")
         return results
 
     except Exception as e:

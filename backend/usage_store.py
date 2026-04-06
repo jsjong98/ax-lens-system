@@ -5,8 +5,9 @@ usage_store.py — API 토큰 사용량 누적 저장소
 저장 위치: backend/usage.json
 
 참고 단가 (2026년 기준 추정 — 실제 청구는 각 제공사 대시보드 확인 필요)
-  OpenAI  (O 모델): 입력 $2.50 / 출력 $10.00  (per 1M tokens)
-  Anthropic (A 모델): 입력 $3.00 / 출력 $15.00  (per 1M tokens)
+  OpenAI    (O 모델):   입력 $2.50 / 출력 $10.00  (per 1M tokens)
+  Anthropic (A 모델):   입력 $3.00 / 출력 $15.00  (per 1M tokens)
+  Perplexity (Sonar Pro): 입력 $3.00 / 출력 $15.00 + 요청당 $0.014~$0.022 (per 1M tokens)
 """
 from __future__ import annotations
 import json
@@ -18,8 +19,9 @@ _USAGE_FILE = _PERSIST_ROOT / "usage.json"
 
 # 참고 단가 (per 1,000,000 tokens, USD)
 _PRICE: dict[str, dict[str, float]] = {
-    "openai":    {"input": 2.50, "output": 10.00},
-    "anthropic": {"input": 3.00, "output": 15.00},
+    "openai":      {"input": 2.50,  "output": 10.00},
+    "anthropic":   {"input": 3.00,  "output": 15.00},
+    "perplexity":  {"input": 3.00,  "output": 15.00},
 }
 
 _DEFAULT_ENTRY = {
@@ -70,7 +72,7 @@ def get_usage() -> dict:
     """전체 사용량 요약을 반환합니다."""
     data = _load()
     result = {}
-    for provider in ("openai", "anthropic"):
+    for provider in ("openai", "anthropic", "perplexity"):
         entry = data.get(provider, dict(_DEFAULT_ENTRY))
         price = _PRICE.get(provider, {"input": 0.0, "output": 0.0})
         result[provider] = {
@@ -84,7 +86,7 @@ def get_usage() -> dict:
 def reset_usage(provider: str = "all") -> None:
     """사용량을 초기화합니다. provider='all'이면 전체 초기화."""
     data = _load()
-    targets = ("openai", "anthropic") if provider == "all" else (provider,)
+    targets = ("openai", "anthropic", "perplexity") if provider == "all" else (provider,)
     for p in targets:
         data[p] = dict(_DEFAULT_ENTRY)
     _save(data)
