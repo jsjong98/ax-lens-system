@@ -2252,13 +2252,25 @@ async def benchmark_workflow_step1(request: Request):
 }}
 """
 
-    bm_user = "## 웹 검색 결과\n\n"
-    for i, r in enumerate(raw_results[:20], 1):
-        content = r.get("content", r.get("snippet", ""))
-        bm_user += f"### [{i}] {r['title']}\n"
+    # Sonar Pro 결과는 같은 쿼리의 citation URL들이 각각 별도 row로 들어옴.
+    # 동일 query끼리 묶어서 URL 목록을 함께 표시 → LLM이 URL 출처를 명확히 파악
+    from collections import defaultdict as _defaultdict
+    query_groups: dict = _defaultdict(lambda: {"content": "", "urls": []})
+    for r in raw_results[:20]:
+        q = r.get("query", r.get("title", ""))
+        if r.get("content") and not query_groups[q]["content"]:
+            query_groups[q]["content"] = r.get("content", "")
         if r.get("url"):
-            bm_user += f"- URL: {r['url']}\n"
-        bm_user += f"- 내용: {content[:2000]}\n\n"
+            query_groups[q]["urls"].append(r["url"])
+
+    bm_user = "## 웹 검색 결과\n\n"
+    for i, (q, g) in enumerate(query_groups.items(), 1):
+        bm_user += f"### [{i}] 검색 쿼리: {q[:100]}\n"
+        if g["urls"]:
+            bm_user += "- 출처 URL 목록:\n"
+            for url in g["urls"][:6]:
+                bm_user += f"  - {url}\n"
+        bm_user += f"- 내용: {g['content'][:2000]}\n\n"
 
     bm_user += (
         "\n위 검색 결과에서 벤치마킹 테이블을 작성해주세요.\n"
@@ -2492,22 +2504,32 @@ async def chat_workflow_step1(request: Request):
 L4 활동: {', '.join(bm_data['l4_names'][:4])}
 관련성 없는 사례는 제외. 출력 형식 (JSON만):
 {{"benchmark_table": [{{"source":"","company_type":"Tech 상한선|非Tech 실제 구현","industry":"","process_area":"","ai_adoption_goal":"","ai_technology":"","key_data":"","adoption_method":"","use_case":"","outcome":"","infrastructure":"","implication":"","url":""}}]}}"""
-            bm_user_msg = "## 검색 결과\n" + "\n".join(
-                f"[{i+1}] {r['title']}\n{r.get('content',r.get('snippet',''))[:400]}"
-                for i, r in enumerate(raw[:10])
-            )
+            from collections import defaultdict as _ddict
+            _qg: dict = _ddict(lambda: {"content": "", "urls": []})
+            for r in raw[:10]:
+                _q = r.get("query", r.get("title", ""))
+                if r.get("content") and not _qg[_q]["content"]:
+                    _qg[_q]["content"] = r.get("content", "")
+                if r.get("url"):
+                    _qg[_q]["urls"].append(r["url"])
+            bm_user_msg = "## 검색 결과\n"
+            for idx, (_q, _g) in enumerate(_qg.items(), 1):
+                bm_user_msg += f"\n### [{idx}] {_q[:100]}\n"
+                if _g["urls"]:
+                    bm_user_msg += "출처 URL:\n" + "\n".join(f"  - {u}" for u in _g["urls"][:5]) + "\n"
+                bm_user_msg += f"내용: {_g['content'][:1500]}\n"
             bm_result = await _call_llm_step1(bm_sys, [{"role":"user","content":bm_user_msg}])
             if bm_result and bm_result.get("benchmark_table"):
                 new_bm_entries = bm_result["benchmark_table"]
-                # 기존 테이블에 없는 기업 사례만 추가 (URL + 실명 source 검증)
+                # 기존 테이블에 없는 기업 사례만 추가 (실명 source 검증, URL은 optional)
                 existing_sources = {b.get("source","") for b in _wf_benchmark_table}
                 for entry in new_bm_entries:
                     src = entry.get("source", "")
                     url = entry.get("url", "")
                     if (src not in existing_sources
-                            and url
                             and not _is_news_url(url)
-                            and _is_valid_benchmark_source(src)):
+                            and _is_valid_benchmark_source(src)
+                            and (entry.get("use_case") or entry.get("outcome"))):
                         _wf_benchmark_table.append(entry)
                 extra_bm_text = f"\n\n[추가 벤치마킹 — {len(new_bm_entries)}건 분석 완료]"
 
