@@ -910,10 +910,6 @@ _BENCHMARK_SYSTEM_PROMPT = """
 
 
 def _build_benchmark_prompt(workflow_cache: dict, benchmark_results: list[dict]) -> str:
-    # 유효 결과 = URL 있는 것 (실제 출처 있는 사례)
-    valid_results = [r for r in benchmark_results if r.get("url")]
-    has_benchmarks = len(valid_results) >= 3
-
     lines = ["## 현재 To-Be Workflow\n"]
     lines.append(f"**프로세스명**: {workflow_cache.get('process_name', '')}\n")
     lines.append(f"**설계 요약**: {workflow_cache.get('blueprint_summary', '')}\n")
@@ -932,59 +928,20 @@ def _build_benchmark_prompt(workflow_cache: dict, benchmark_results: list[dict])
                     )
             lines.append("")
 
-    if has_benchmarks:
-        # ── 모드 A: 벤치마킹 사례 기반 설계 ──────────────────────────────────
-        lines.append(f"\n## 웹 벤치마킹 검색 결과 (총 {len(benchmark_results)}건, URL 확인 {len(valid_results)}건)\n")
-        for i, r in enumerate(benchmark_results[:20], 1):
-            score_label = f" [유사도:{r['embed_score']:.2f}]" if r.get("embed_score") else ""
-            round_label = f" [R{r.get('round', 1)}]" if r.get("round") else ""
-            lines.append(f"### [{i}]{round_label}{score_label} {r['title']}")
-            if r.get("url"):
-                lines.append(f"- 출처 URL: {r['url']}")
-            content = r.get("content", r.get("snippet", ""))
-            lines.append(f"- 내용: {content[:1500]}")
-            lines.append("")
+    lines.append(f"\n## 웹 벤치마킹 검색 결과 (총 {len(benchmark_results)}건)\n")
+    for i, r in enumerate(benchmark_results[:20], 1):
+        score_label = f" [유사도:{r['embed_score']:.2f}]" if r.get("embed_score") else ""
+        round_label = f" [R{r.get('round', 1)}]" if r.get("round") else ""
+        lines.append(f"### [{i}]{round_label}{score_label} {r['title']}")
+        if r.get("url"):
+            lines.append(f"- 출처 URL: {r['url']}")
+        content = r.get("content", r.get("snippet", ""))
+        lines.append(f"- 내용: {content[:1500]}")
+        lines.append("")
 
-        lines.append("\n## 요청")
-        lines.append("위 벤치마킹 사례를 분석하여 현재 To-Be Workflow를 개선해주세요.")
-        lines.append("각 benchmark_insight의 url 필드에는 위 검색 결과에 실제로 나온 URL만 기재하세요.")
-
-    else:
-        # ── 모드 B: 벤치마킹 부족 → Sonnet 지식 기반 AI 전환 설계 ──────────
-        l5_tasks = workflow_cache.get("l5_tasks", [])
-        _, _, _, l4_details = _extract_names_from_cache(workflow_cache)
-
-        from collections import defaultdict
-        l5_by_l4: dict = defaultdict(list)
-        for t in l5_tasks:
-            l5_by_l4[t.get("l4", "")].append(t)
-
-        l4_task_lines = []
-        for d in l4_details[:6]:
-            l4_name = d.get("name", "")
-            pain = ", ".join(d.get("pain_points", [])[:2])
-            l4_task_lines.append(f"\n### L4: {l4_name}" + (f" | Pain: {pain}" if pain else ""))
-            for t in l5_by_l4.get(l4_name, [])[:6]:
-                desc = t.get("description", "")
-                l4_task_lines.append(f"  - {t['name']}" + (f": {desc}" if desc else ""))
-        l4_task_str = "\n".join(l4_task_lines) or "  (정보 없음)"
-
-        lines.append(f"\n## ⚠️ 벤치마킹 검색 결과 부족 (URL 확인 {len(valid_results)}건)")
-        lines.append("실시간 벤치마킹에서 충분한 사례를 찾지 못했습니다.")
-        lines.append("아래 L4/L5 업무 상세를 분석하여 AI 전환 설계를 직접 수행하세요.\n")
-        lines.append("## L4 활동별 L5 Task 상세 (AI 전환 분석 근거)\n")
-        lines.append(l4_task_str)
-
-        lines.append("\n## 요청 (지식 기반 AI 전환 설계)")
-        lines.append(
-            "위 L5 Task 내용과 Pain Point를 근거로, 각 L4 활동에 대해:\n"
-            "1. 이 업무의 성격 분석 (반복적/규칙적 → AI 자동화 적합, 판단/창작 → AI 보조)\n"
-            "2. 적용 가능한 AI 기술 제안 (LLM, GenAI, RPA+AI, ML 분류 등)\n"
-            "3. 현실적인 자동화 수준 (fully_automated / ai_assisted / manual) 판단\n"
-            "벤치마킹 URL은 없으므로 benchmark_insights의 url은 빈 문자열로, "
-            "source는 '자체 분석 (벤치마킹 미확인)'으로 기재하세요."
-        )
-
+    lines.append("\n## 요청")
+    lines.append("위 벤치마킹 사례를 분석하여 현재 To-Be Workflow를 개선해주세요.")
+    lines.append("각 benchmark_insight의 url 필드에는 위 검색 결과에 실제로 나온 URL만 기재하세요.")
     return "\n".join(lines)
 
 
