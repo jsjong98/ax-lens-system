@@ -2191,8 +2191,8 @@ async def benchmark_workflow_step1(request: Request):
 
 ## 포함 기준 (4가지 모두 충족해야 포함)
 1. **기업명**: 고유 기업명(실명)이 검색 결과에 명확히 언급됨
-2. **URL**: 검색 결과에 실제 URL이 있음 — URL 없는 사례는 완전 제외
-3. **내용**: AI 적용 방법 또는 성과가 구체적으로 언급됨
+2. **내용**: AI 적용 방법 또는 성과가 구체적으로 언급됨
+3. **URL**: 검색 결과에 실제 URL이 있으면 기재, 없으면 빈 문자열 (URL 없어도 내용이 충분하면 포함 가능)
 4. **출처 유형**: 아래 허용 유형만 인정
    - ✅ 공식 기업 블로그 / 기술 블로그 (engineering.fb.com, cloud.google.com 등)
    - ✅ 공식 케이스 스터디 / 백서 / 연구 보고서
@@ -2258,7 +2258,7 @@ async def benchmark_workflow_step1(request: Request):
         bm_user += f"### [{i}] {r['title']}\n"
         if r.get("url"):
             bm_user += f"- URL: {r['url']}\n"
-        bm_user += f"- 내용: {content[:800]}\n\n"
+        bm_user += f"- 내용: {content[:2000]}\n\n"
 
     bm_user += (
         "\n위 검색 결과에서 벤치마킹 테이블을 작성해주세요.\n"
@@ -2285,13 +2285,14 @@ async def benchmark_workflow_step1(request: Request):
             if r.get("url")  # URL 없는 항목 제외
         ]
     else:
-        # URL 없음 / 뉴스 URL / 익명·금지 source 항목 후처리 제거
+        # 뉴스 URL / 익명·금지 source 항목 후처리 제거
+        # URL 없어도 use_case 내용이 있으면 통과 (Sonar Pro는 content에 내용이 있음)
         raw_table = result_data.get("benchmark_table", [])
         _wf_benchmark_table = [
             row for row in raw_table
-            if row.get("url")
+            if _is_valid_benchmark_source(row.get("source", ""))
             and not _is_news_url(row.get("url", ""))
-            and _is_valid_benchmark_source(row.get("source", ""))
+            and (row.get("use_case") or row.get("outcome"))
         ]
 
     # 채팅 이력에 기록
