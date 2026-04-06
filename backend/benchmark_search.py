@@ -417,39 +417,46 @@ def _extract_names_from_cache(workflow_cache: dict) -> tuple[list, list, list, l
 def _build_sonar_queries(workflow_cache: dict) -> list[str]:
     """
     Sonar Pro용 자연어 포괄 쿼리 생성 (LLM 불필요).
-    Sonar Pro의 Pro Search 모드가 각 쿼리를 멀티스텝으로 처리해 깊이 있는 결과를 반환.
+    process_name(상위 프로세스)을 중심으로 쿼리 구성,
+    L4 활동명은 부가 키워드로 활용.
     """
     process_name = workflow_cache.get("process_name", "HR process")
     _, _, l4_names, _ = _extract_names_from_cache(workflow_cache)
-    focus_kr = l4_names[0] if l4_names else process_name
-    focus_en = _translate_to_en(focus_kr)
+
+    # 상위 프로세스명을 중심으로 (L4 첫 번째가 아님)
+    process_en = _translate_to_en(process_name)
+    process_kr = process_name
+
+    # L4 활동들을 부가 키워드로 (최대 3개, 짧게)
+    l4_en_keywords = " ".join(_translate_to_en(n) for n in l4_names[:3])
+    l4_kr_keywords = " ".join(l4_names[:3]) if l4_names else process_kr
 
     queries = [
-        # SAP/Workday/ServiceNow 공식 고객 사례 페이지 직접 타겟
-        f"SAP SuccessFactors customer success story '{focus_en}' AI automation Fortune 500 "
-        f"results measurable outcome workforce",
+        # SAP/Workday 공식 고객 사례 — 프로세스 전체 범위
+        f"SAP SuccessFactors customer success story '{process_en}' AI automation Fortune 500 "
+        f"results measurable outcome {l4_en_keywords}",
 
-        f"Workday customer story '{focus_en}' AI machine learning HR automation "
-        f"enterprise results 2023 2024 2025",
+        f"Workday customer story '{process_en}' AI machine learning HR automation "
+        f"enterprise results 2024 2025",
 
         # 글로벌 非Tech 대기업 공식 사례
-        f"Unilever Siemens JPMorgan DHL Walmart GE Honeywell '{focus_en}' "
+        f"Unilever Siemens JPMorgan DHL Walmart GE Honeywell '{process_en}' "
         f"AI HR automation official case study results savings efficiency",
 
-        # WEF·SHRM·Gartner 리서치 인용 기업 사례 (리서치 기관이 특정 기업을 인용한 사례)
-        f"WEF SHRM Gartner '{focus_en}' AI automation enterprise case study "
+        # WEF·SHRM·Gartner 리서치 인용 기업 사례
+        f"WEF SHRM Gartner '{process_en}' AI automation enterprise case study "
         f"company implementation results 2024 2025",
 
         # ServiceNow/Oracle HCM 공식 사례
-        f"ServiceNow HR ServiceDelivery Oracle HCM '{focus_en}' customer case study "
+        f"ServiceNow HR ServiceDelivery Oracle HCM '{process_en}' customer case study "
         f"automation efficiency Fortune 500 2024",
 
-        # LinkedIn Engineering Blog + HBR + MIT Sloan 인용 기업 사례
-        f"site:engineering.linkedin.com OR site:hbr.org OR site:sloanreview.mit.edu "
-        f"'{focus_en}' AI automation enterprise case study results",
+        # HBR + MIT Sloan 인용 기업 사례
+        f"site:hbr.org OR site:sloanreview.mit.edu "
+        f"'{process_en}' AI automation enterprise case study results",
 
         # 한국 대기업
-        f"삼성전자 현대자동차 SK LG 포스코 '{focus_kr}' AI 자동화 도입 사례 성과 공식",
+        f"삼성전자 현대자동차 SK LG 포스코 '{process_kr}' {l4_kr_keywords} AI 자동화 도입 사례 성과",
     ]
 
     # extra_queries 있으면 앞에 추가
