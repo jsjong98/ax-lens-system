@@ -225,7 +225,7 @@ export default function WorkflowPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [activeSheet]);
 
   const handleChat = useCallback(async () => {
     if (!chatInput.trim()) return;
@@ -247,7 +247,7 @@ export default function WorkflowPage() {
     } finally {
       setLoading(false);
     }
-  }, [chatInput]);
+  }, [chatInput, activeSheet]);
 
   /* ── Step 3: Step 2 상세 설계 생성 ──────────────────────── */
   const handleGenerateStep2 = useCallback(async () => {
