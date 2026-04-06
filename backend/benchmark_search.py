@@ -401,7 +401,48 @@ def _extract_names_from_cache(workflow_cache: dict) -> tuple[list, list, list, l
     return l2_names, l3_names, l4_names, l4_details
 
 
-# ── Phase 1: 가설 기반 쿼리 생성 ─────────────────────────────────────────────
+# ── Sonar Pro용 포괄적 쿼리 빌더 (Haiku 불필요) ──────────────────────────────
+
+def _build_sonar_queries(workflow_cache: dict) -> list[str]:
+    """
+    Sonar Pro용 자연어 포괄 쿼리 생성 (LLM 불필요).
+    Sonar Pro의 Pro Search 모드가 각 쿼리를 멀티스텝으로 처리해 깊이 있는 결과를 반환.
+    """
+    process_name = workflow_cache.get("process_name", "HR process")
+    _, _, l4_names, _ = _extract_names_from_cache(workflow_cache)
+    focus_kr = l4_names[0] if l4_names else process_name
+    focus_en = _translate_to_en(focus_kr)
+    l4_en = " ".join(_translate_to_en(n) for n in l4_names[:3])
+
+    queries = [
+        # 글로벌 Tech 대기업 (소프트웨어·AI 도입 선도)
+        f"IBM Microsoft SAP Workday Oracle Salesforce AI automation '{focus_en}' HR process "
+        f"case study implementation results 2023 2024 2025 site:*.com",
+
+        # 글로벌 非Tech 대기업 (실제 운영 도입)
+        f"Unilever Siemens JPMorgan DHL Walmart GE Honeywell AI '{focus_en}' "
+        f"automation efficiency ROI official case study",
+
+        # L4 활동 기반 포괄 검색
+        f"Forbes Global 500 company AI automation '{l4_en}' process "
+        f"case study measurable outcome 2024 2025",
+
+        # 벤더 공식 케이스스터디 (SAP, Workday, ServiceNow 고객 사례)
+        f"SAP SuccessFactors Workday ServiceNow 'case study' '{focus_en}' "
+        f"Fortune 500 customer AI result site:sap.com OR site:workday.com OR site:servicenow.com",
+
+        # 한국 대기업
+        f"삼성전자 현대자동차 SK LG 포스코 '{focus_kr}' AI 자동화 도입 사례 성과",
+    ]
+
+    # extra_queries 있으면 앞에 추가
+    for eq in workflow_cache.get("extra_queries", [])[:2]:
+        queries.insert(0, eq)
+
+    return queries[:7]
+
+
+# ── Phase 1: 가설 기반 쿼리 생성 (Tavily/DuckDuckGo fallback용) ──────────────
 
 async def _plan_search_queries(
     workflow_cache: dict,
@@ -409,7 +450,7 @@ async def _plan_search_queries(
 ) -> list[str]:
     """
     Claude Haiku가 학습 지식을 활용해 가설 기반 검색 쿼리를 생성합니다.
-    Perplexity처럼 "GM + Paradox + 2M savings" 같은 구체적 쿼리를 만듭니다.
+    Perplexity(Sonar Pro) 사용 시에는 호출되지 않습니다.
     """
     api_key = os.getenv("ANTHROPIC_API_KEY", "")
     if not api_key:
@@ -569,8 +610,20 @@ async def search_benchmarks(workflow_cache: dict) -> dict:
     engine = "Perplexity" if use_pplx else ("Tavily" if use_tavily else "DuckDuckGo")
     search_log.append({"type": "engine", "text": f"검색 엔진: {engine}"})
 
-    # ── Phase 1: 가설 기반 쿼리 플래닝 ───────────────────────────────────────
-    queries_r1 = await _plan_search_queries(workflow_cache, search_log)
+    # ── Phase 1: 쿼리 생성 ────────────────────────────────────────────────────
+    # Perplexity(Sonar Pro): LLM 없이 포괄 쿼리 직접 빌드 → Sonar Pro가 알아서 멀티스텝 검색
+    # Tavily/DuckDuckGo: Haiku 기반 가설 쿼리 사용 (더 구체적인 쿼리 필요)
+    if use_pplx:
+        queries_r1 = _build_sonar_queries(workflow_cache)
+        search_log.append({
+            "type": "plan",
+            "hypotheses": [],
+            "query_count": len(queries_r1),
+            "queries": queries_r1,
+        })
+        print(f"[benchmark] Sonar Pro 쿼리 {len(queries_r1)}개 (Haiku 없음)")
+    else:
+        queries_r1 = await _plan_search_queries(workflow_cache, search_log)
 
     # ── Phase 2: Round 1 병렬 검색 ───────────────────────────────────────────
     search_log.append({"type": "round_start", "round": 1, "query_count": len(queries_r1)})
@@ -639,7 +692,12 @@ async def search_benchmarks(workflow_cache: dict) -> dict:
         all_results = await _rerank_by_embeddings(all_results, query_context, search_log)
 
     # ── Phase 4: Gap 분석 → Round 2 ──────────────────────────────────────────
-    queries_r2 = await _generate_followup_queries(workflow_cache, all_results, search_log)
+    # Sonar Pro는 Pro Search 모드로 1라운드에서 충분히 커버하므로 Round 2 skip
+    if use_pplx:
+        queries_r2 = []
+        search_log.append({"type": "gap", "text": "Sonar Pro Pro Search 모드 — Round 2 생략", "queries": []})
+    else:
+        queries_r2 = await _generate_followup_queries(workflow_cache, all_results, search_log)
 
     if queries_r2:
         search_log.append({"type": "round_start", "round": 2, "query_count": len(queries_r2)})
