@@ -448,6 +448,21 @@ async def _plan_search_queries(
     prompt = f"""당신은 글로벌 HR AI 벤치마킹 리서치 전문가입니다.
 아래 두산의 HR 프로세스 계층 전체를 이해한 뒤, 이 프로세스에서 AI로 자동화 가능한 선도 사례를 찾기 위한 가설 기반 검색 쿼리를 생성하세요.
 
+## ⚠️ 이 프로세스의 성격 — 반드시 이해하고 쿼리 생성
+이 프로세스는 **조직 개편이나 인사이동을 '결정'하는 전략 프로세스가 아닙니다.**
+조직개편·인사이동이 이미 결정된 후, 그 결과를:
+1. 시스템(SAP SuccessFactors, HASS, ERP, 그룹웨어)에 반영하고
+2. 발령품의서를 작성·결재 상신하여 승인받고
+3. 인사발령 내용을 Portal에 공지하고 이메일로 발송하는
+**후처리 행정 자동화(downstream administrative process)** 입니다.
+
+따라서 검색 대상은:
+- ✅ 인사 데이터 시스템 자동 업데이트 (SAP SuccessFactors Position Management, ERP 연계)
+- ✅ 발령 승인 워크플로우 자동화 (결재 라우팅, 전자결재)
+- ✅ 인사발령 공지 자동 발송 (Portal 게시, 이메일 자동화)
+- ✅ 그룹웨어·ERP Interface 자동 동기화
+- ❌ 조직 재설계(org design), 인력 재배치 전략, M&A 조직통합 — 제외
+
 ## 두산 HR 프로세스 계층 (전체 이해 필수)
 {l2_context}
 - L3 프로세스: {process_name}
@@ -460,18 +475,18 @@ async def _plan_search_queries(
 - BP = Business Partner (인사 담당 파트너), ER = Employee Relations
 
 ## 검색 쿼리 설계 원칙
-1. L5 Task의 실제 업무 내용(시스템명, 업무 단계, Pain)을 반영하여 구체적으로 작성
+1. L5 Task의 실제 업무(시스템 반영, 결재, 공지)에 집중한 구체적 쿼리 작성
 2. 이미 알고 있는 사실을 검증하는 가설 기반 쿼리 — 너무 일반적인 쿼리 금지
-   - ✅ "Siemens SAP SuccessFactors Employee Central position management automation AI case study"
-   - ✅ "JPMorgan approval workflow automation HR personnel action AI RPA results"
-   - ❌ "AI HR automation 2024" (너무 일반적)
+   - ✅ "SAP SuccessFactors Employee Central job information change approval workflow automation Fortune 500"
+   - ✅ "ServiceNow HR case management personnel action notification automation ERP sync results"
+   - ❌ "organizational restructuring AI automation" (전략 프로세스 — 제외)
 3. Forbes Global 500 / Fortune 500 수준 글로벌 대기업만 사용
 
 ## 쿼리 10개 생성 (구성)
-- **글로벌 대기업+시스템 가설 쿼리** 4개: L5 Task에서 파악한 시스템(SAP SuccessFactors, ERP 등) + 글로벌 대기업
-- **프로세스 전체 범위 쿼리** 3개: Workday/ServiceNow/Oracle HCM 공식 고객 사례 + L3 프로세스
-- **리서치·학술 기관** 1개: WEF/SHRM/Gartner/HBR 인용 기업 사례
-- **한국 대기업 사례** 2개: 삼성·현대·SK·LG + '{process_name}' AI 자동화 공식 사례
+- **글로벌 대기업+시스템 가설 쿼리** 4개: SAP SuccessFactors/Workday/ServiceNow + 결재·공지·시스템 동기화 자동화
+- **프로세스 전체 범위 쿼리** 3개: Workday/ServiceNow/Oracle HCM 공식 고객 사례 + 발령 후처리 행정
+- **리서치·학술 기관** 1개: WEF/SHRM/Gartner/HBR 인용 HR 행정 자동화 기업 사례
+- **한국 대기업 사례** 2개: 삼성·현대·SK·LG + 인사발령 시스템 자동화 공식 사례
 
 JSON만 출력:
 {{"queries": ["q1",...,"q10"], "hypotheses": ["가설1","가설2","가설3"]}}"""
@@ -751,6 +766,12 @@ _BENCHMARK_SYSTEM_PROMPT = """
 - **BP** = Business Partner (HR BP, 인사 담당 파트너) — 절대로 'British Petroleum'이 아님
 - **ER** = Employee Relations (노사관계/직원관계)
 - **발령** = 인사발령 (personnel assignment/job transfer)
+- **조직개편** (이 문맥에서) = 조직변경에 따른 인사발령 처리 — '전략적 조직 재설계'가 아님
+
+## ⚠️ 벤치마킹 범위 정의 (필수 이해)
+이 프로세스는 조직개편·인사이동이 **이미 결정된 후** 그 내용을 처리하는 후처리 행정 프로세스입니다:
+- ✅ 포함: 시스템 데이터 자동 업데이트(SAP SuccessFactors, ERP), 발령 승인 워크플로우 자동화, 인사발령 공지 자동 발송
+- ❌ 제외: 조직 재설계 전략, 인력 재배치 의사결정, M&A 조직통합 — 이런 사례는 분석에서 완전히 제외
 
 ## ⚠️ 최우선 원칙: 모르면 모른다고 명확히 표기
 - 검색 결과에 해당 기업명이 명확히 나오지 않으면 → source: "사례 미확인" 처리

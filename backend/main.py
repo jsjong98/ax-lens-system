@@ -1943,7 +1943,7 @@ async def _call_llm_step1(system: str, messages: list) -> dict | None:
             client = AsyncAnthropic(api_key=anthropic_key)
             response = await client.messages.create(
                 model=settings.anthropic_model or "claude-sonnet-4-6",
-                max_tokens=8192,
+                max_tokens=16384,
                 system=system,
                 messages=messages,
             )
