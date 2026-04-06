@@ -759,6 +759,8 @@ async def get_settings():
         masked.api_key = "sk-" + "*" * 20
     if masked.anthropic_api_key:
         masked.anthropic_api_key = "sk-ant-" + "*" * 20
+    if masked.perplexity_api_key:
+        masked.perplexity_api_key = "pplx-" + "*" * 20
     return masked
 
 
@@ -770,12 +772,16 @@ async def update_settings(settings: ClassifierSettings):
         settings.api_key = existing.api_key
     if "*" in settings.anthropic_api_key:
         settings.anthropic_api_key = existing.anthropic_api_key
+    if "*" in settings.perplexity_api_key:
+        settings.perplexity_api_key = existing.perplexity_api_key
     save_settings(settings)
     masked = settings.model_copy()
     if masked.api_key:
         masked.api_key = "sk-" + "*" * 20
     if masked.anthropic_api_key:
         masked.anthropic_api_key = "sk-ant-" + "*" * 20
+    if masked.perplexity_api_key:
+        masked.perplexity_api_key = "pplx-" + "*" * 20
     return masked
 
 

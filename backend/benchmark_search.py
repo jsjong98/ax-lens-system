@@ -28,6 +28,20 @@ import urllib.request
 from typing import Any
 
 
+# ── API 키 헬퍼 ──────────────────────────────────────────────────────────────
+
+def _get_perplexity_key() -> str:
+    """env var → settings.json 순으로 Perplexity API 키를 조회합니다."""
+    key = os.getenv("PERPLEXITY_API_KEY", "")
+    if key:
+        return key
+    try:
+        from settings_store import load_settings
+        return load_settings().perplexity_api_key or ""
+    except Exception:
+        return ""
+
+
 # ── Perplexity Search API ────────────────────────────────────────────────────
 
 # 뉴스 도메인 denylist — Perplexity search_domain_filter에 적용 (denylist: "-domain")
@@ -50,7 +64,7 @@ def _search_perplexity_sonar(query: str) -> list[dict]:
     - search_domain_filter: 뉴스 도메인 제외
     SSE 스트림을 파싱해 전체 content + citations 추출.
     """
-    api_key = os.getenv("PERPLEXITY_API_KEY", "")
+    api_key = _get_perplexity_key()
     if not api_key or not query:
         return []
 
@@ -158,7 +172,7 @@ def _get_embeddings(texts: list[str], model: str = "pplx-embed-v1-0.6b") -> list
     POST https://api.perplexity.ai/v1/embeddings
     최대 512개 텍스트, 120K 토큰 제한.
     """
-    api_key = os.getenv("PERPLEXITY_API_KEY", "")
+    api_key = _get_perplexity_key()
     if not api_key or not texts:
         return []
 
@@ -202,7 +216,7 @@ async def _rerank_by_embeddings(
     if not results:
         return results
 
-    api_key = os.getenv("PERPLEXITY_API_KEY", "")
+    api_key = _get_perplexity_key()
     if not api_key:
         return results
 
@@ -544,7 +558,7 @@ async def search_benchmarks(workflow_cache: dict) -> dict:
     반환: {"results": [...], "search_log": [...]}
     """
     search_log: list[dict] = []
-    use_pplx = bool(os.getenv("PERPLEXITY_API_KEY", ""))
+    use_pplx = bool(_get_perplexity_key())
     use_tavily = bool(os.getenv("TAVILY_API_KEY", ""))
 
     engine = "Perplexity" if use_pplx else ("Tavily" if use_tavily else "DuckDuckGo")

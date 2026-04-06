@@ -99,6 +99,7 @@ export default function SettingsPage() {
     model: "gpt-5.4",
     anthropic_api_key: "",
     anthropic_model: "claude-sonnet-4-6",
+    perplexity_api_key: "",
     batch_size: 1,
     temperature: 0.0,
   });
@@ -276,6 +277,30 @@ export default function SettingsPage() {
             <p className="text-xs text-gray-400">또는 <code className="bg-gray-100 rounded px-1">backend/.env</code>에 A 모델 API Key를 설정</p>
           </div>
         </div>
+
+        <div className="border-t border-gray-100" />
+
+        {/* P 모델 (Perplexity) */}
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <span className="rounded px-2 py-0.5 text-xs font-bold text-white" style={{ backgroundColor: "#6366f1" }}>P 모델</span>
+            <span className="text-sm font-medium text-gray-700">API Key</span>
+            <span className="rounded-full px-2 py-0.5 text-xs font-medium bg-indigo-50 text-indigo-700">벤치마킹 검색용</span>
+          </div>
+          <div className="space-y-1.5">
+            <label className="block text-xs font-medium text-gray-600">API Key</label>
+            <input
+              type="password"
+              value={form.perplexity_api_key}
+              onChange={(e) => set("perplexity_api_key", e.target.value)}
+              placeholder="pplx-..."
+              className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-mono focus:outline-none"
+              onFocus={(e) => { e.currentTarget.style.borderColor = "#6366f1"; e.currentTarget.style.boxShadow = "0 0 0 1px #6366f1"; }}
+              onBlur={(e) => { e.currentTarget.style.borderColor = ""; e.currentTarget.style.boxShadow = ""; }}
+            />
+            <p className="text-xs text-gray-400">벤치마킹 수행 시 Sonar Pro 검색에 사용됩니다. 또는 <code className="bg-gray-100 rounded px-1">backend/.env</code>에 설정</p>
+          </div>
+        </div>
       </section>
 
       {/* 분석 설정 */}
@@ -324,9 +349,10 @@ export default function SettingsPage() {
 
       <section className="rounded-xl border border-gray-100 bg-gray-50 p-5 text-xs text-gray-600 space-y-1">
         <p className="font-semibold text-gray-700">참고: backend/.env 파일 설정 예시</p>
-        <p>• O 모델: <code className="bg-gray-200 rounded px-1">O_MODEL_API_KEY=sk-...</code></p>
-        <p>• A 모델: <code className="bg-gray-200 rounded px-1">A_MODEL_API_KEY=sk-ant-...</code></p>
-        <p className="text-gray-400">앱 시작 시 자동으로 로드됩니다. 위 필드에 직접 입력해도 동일하게 동작합니다.</p>
+        <p>• O 모델: <code className="bg-gray-200 rounded px-1">OPENAI_API_KEY=sk-...</code></p>
+        <p>• A 모델: <code className="bg-gray-200 rounded px-1">ANTHROPIC_API_KEY=sk-ant-...</code></p>
+        <p>• P 모델: <code className="bg-gray-200 rounded px-1">PERPLEXITY_API_KEY=pplx-...</code></p>
+        <p className="text-gray-400 pt-1">앱 재배포 후에도 설정 페이지에 저장된 키는 유지됩니다. 환경변수가 있으면 환경변수가 우선 적용됩니다.</p>
       </section>
     </div>
   );
