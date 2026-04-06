@@ -66,9 +66,9 @@ def _search_perplexity_sonar(query: str) -> list[dict]:
         "messages": [{"role": "user", "content": query}],
         "max_tokens": 2000,
         "stream": True,
-        "search_context_size": "high",          # 상위 파라미터 (web_search_options 아님)
+        "search_context_size": "high",
         "search_domain_filter": _SONAR_DOMAIN_DENYLIST,
-        "return_citations": True,
+        # return_citations deprecated (Nov 2024) — citations now always included as search_results
     }).encode("utf-8")
 
     req = urllib.request.Request(
@@ -83,7 +83,8 @@ def _search_perplexity_sonar(query: str) -> list[dict]:
 
     try:
         content_parts: list[str] = []
-        citations: list[str] = []
+        # 2025 API: search_results 필드로 변경 (citations 필드 deprecated)
+        search_results: list[dict] = []
         usage_input = 0
         usage_output = 0
 
@@ -106,11 +107,14 @@ def _search_perplexity_sonar(query: str) -> list[dict]:
                     if delta.get("content"):
                         content_parts.append(delta["content"])
 
-                # citations — 마지막 청크에 포함될 수 있음
-                if chunk.get("citations"):
-                    citations = chunk["citations"]
+                # search_results (신규) 또는 citations (구버전 호환) 수집
+                if chunk.get("search_results"):
+                    search_results = chunk["search_results"]
+                elif chunk.get("citations"):
+                    # 구버전 citations 필드 호환 (URL 문자열 배열)
+                    search_results = [{"url": u, "title": ""} for u in chunk["citations"]]
 
-                # usage — 마지막 청크에 포함
+                # usage
                 if chunk.get("usage"):
                     usage_input = chunk["usage"].get("prompt_tokens", 0)
                     usage_output = chunk["usage"].get("completion_tokens", 0)
@@ -126,10 +130,12 @@ def _search_perplexity_sonar(query: str) -> list[dict]:
                 pass
 
         results = []
-        if citations:
-            for url in citations:
+        if search_results:
+            for sr in search_results:
+                url = sr.get("url", "")
+                title = sr.get("title", "") or query[:80]
                 results.append({
-                    "title": query[:80],
+                    "title": title,
                     "url": url,
                     "content": content,
                     "snippet": content[:500],
@@ -137,6 +143,7 @@ def _search_perplexity_sonar(query: str) -> list[dict]:
                     "query": query,
                 })
         else:
+            # citation 없는 경우 — content는 있으므로 URL 없이 추가
             results.append({
                 "title": query[:80],
                 "url": "",
@@ -146,7 +153,7 @@ def _search_perplexity_sonar(query: str) -> list[dict]:
                 "query": query,
             })
 
-        print(f"[benchmark] Sonar Pro '{query[:50]}' → {len(citations)}개 citation, {len(content)}자 (in:{usage_input}/out:{usage_output})")
+        print(f"[benchmark] Sonar Pro '{query[:50]}' → {len(search_results)}개 출처, {len(content)}자 (in:{usage_input}/out:{usage_output})")
         return results
 
     except Exception as e:
