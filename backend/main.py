@@ -2434,6 +2434,7 @@ async def chat_workflow_step1(request: Request):
 
     extra_bm_text = ""
     new_bm_entries: list[dict] = []
+    raw_search_context = ""   # 채팅 LLM에 직접 전달할 실제 검색 결과 텍스트
 
     # 엑셀 데이터가 로드된 경우 항상 추가 벤치마킹 검색 수행
     # (채팅의 핵심 목적: Excel/JSON/PPT 업무 내용 기반으로 추가 사례 발굴)
@@ -2498,7 +2499,28 @@ async def chat_workflow_step1(request: Request):
         raw = _bm_sr2.get("results", [])
 
         if raw:
-            # LLM으로 새 벤치마킹 분석
+            # 검색 결과를 쿼리별로 그룹핑 (LLM 추출 + 채팅 컨텍스트 공용)
+            from collections import defaultdict as _ddict
+            _qg: dict = _ddict(lambda: {"content": "", "urls": []})
+            for r in raw[:12]:
+                _q = r.get("query", r.get("title", ""))
+                if r.get("content") and not _qg[_q]["content"]:
+                    _qg[_q]["content"] = r.get("content", "")
+                if r.get("url"):
+                    _qg[_q]["urls"].append(r["url"])
+
+            # ── 채팅 LLM에 넘길 실제 검색 결과 텍스트 구성 ──
+            raw_search_context = "## ✅ Perplexity 실시간 검색 결과 (방금 백엔드에서 실행됨)\n"
+            raw_search_context += "※ 아래는 실제 웹에서 수집된 내용입니다. 이 내용을 기반으로 답변하세요.\n"
+            for idx, (_q, _g) in enumerate(_qg.items(), 1):
+                raw_search_context += f"\n### [{idx}] 검색 쿼리: {_q[:100]}\n"
+                if _g["urls"]:
+                    raw_search_context += "출처 URL:\n" + "\n".join(f"  - {u}" for u in _g["urls"][:5]) + "\n"
+                else:
+                    raw_search_context += "출처 URL: 없음\n"
+                raw_search_context += f"내용:\n{_g['content'][:1500]}\n"
+
+            # ── LLM으로 테이블 항목 추출 (URL 있는 것만 테이블에 추가) ──
             bm_sys = f"""벤치마킹 분석 전문가입니다. 검색 결과에서 '{process_name}' 프로세스 관련 사례를 추출합니다.
 L4 활동: {', '.join(bm_data['l4_names'][:4])}
 
@@ -2509,14 +2531,6 @@ L4 활동: {', '.join(bm_data['l4_names'][:4])}
 
 관련성 없는 사례는 제외. 출력 형식 (JSON만):
 {{"benchmark_table": [{{"source":"","company_type":"Tech 상한선|非Tech 실제 구현","industry":"","process_area":"","ai_adoption_goal":"","ai_technology":"","key_data":"","adoption_method":"","use_case":"","outcome":"","infrastructure":"","implication":"","url":"[검색결과URL만]"}}]}}"""
-            from collections import defaultdict as _ddict
-            _qg: dict = _ddict(lambda: {"content": "", "urls": []})
-            for r in raw[:10]:
-                _q = r.get("query", r.get("title", ""))
-                if r.get("content") and not _qg[_q]["content"]:
-                    _qg[_q]["content"] = r.get("content", "")
-                if r.get("url"):
-                    _qg[_q]["urls"].append(r["url"])
             bm_user_msg = "## 검색 결과\n"
             for idx, (_q, _g) in enumerate(_qg.items(), 1):
                 bm_user_msg += f"\n### [{idx}] {_q[:100]}\n"
@@ -2531,13 +2545,14 @@ L4 활동: {', '.join(bm_data['l4_names'][:4])}
                 for entry in new_bm_entries:
                     src = entry.get("source", "")
                     url = entry.get("url", "")
-                    if (url                              # URL 필수
+                    if (url
                             and src not in existing_sources
                             and not _is_news_url(url)
                             and _is_valid_benchmark_source(src)
                             and (entry.get("use_case") or entry.get("outcome"))):
                         _wf_benchmark_table.append(entry)
-                extra_bm_text = f"\n\n[추가 벤치마킹 — {len(new_bm_entries)}건 분석 완료]"
+            added = len(_wf_benchmark_table) - len(existing_sources if bm_result else [])
+            extra_bm_text = f"\n\n[✅ Perplexity 검색 완료 — {len(_qg)}개 쿼리 실행, {len(new_bm_entries)}건 사례 분석]"
 
     # 기존 설계 결과 or 벤치마킹 결과가 있으면 포함
     context = ""
@@ -2551,25 +2566,25 @@ L4 활동: {', '.join(bm_data['l4_names'][:4])}
     chat_system = f"""당신은 AI 기반 업무 혁신 벤치마킹 전문가입니다.
 현재 '{process_name}' 프로세스의 벤치마킹 리서치를 진행 중입니다.
 
-## ⚠️ 절대 원칙 — 반드시 준수
-1. **검색 결과 기반으로만 답변** — 아래 "현재 벤치마킹 테이블"과 검색으로 실제 확인된 내용만 사용
-2. **학습 지식으로 사례를 만들어내지 말 것** — 실제 검색되지 않은 사례는 절대 언급 금지
-   - "삼성전자 AI 전환 발표", "현대차 조직개편" 같은 내용을 지어내면 안 됨
-   - 확인되지 않은 사례는 "검색 결과에서 확인되지 않았습니다"라고 명시
-3. **URL 없는 사례는 출처 없음으로 명시** — URL 임의 생성 절대 금지
-4. **프로세스 범위는 '{process_name}'으로 고정**
+## ⚠️ 절대 원칙
+1. **아래 제공된 검색 결과만 사용** — 당신의 학습 지식으로 사례를 만들지 말 것
+2. **검색 결과에 없으면 솔직하게 "이번 검색에서 확인되지 않았습니다"라고 명시**
+3. **URL은 검색 결과에 나온 것만 인용** — 임의 생성 절대 금지
+4. **"저는 실시간 검색을 못 합니다" 같은 말 금지** — 아래에 이미 검색 결과가 제공됨
 
 {context}
+
+{raw_search_context}
 {extra_bm_text}
 
 ## 답변 방식
-- 매 대화마다 실제 웹 검색이 수행되어 새로운 사례가 추가됩니다
-- 기존 벤치마킹 테이블 + 이번 검색으로 새로 추가된 사례를 모두 종합하여 답변
-- 확인되지 않은 사례는 "검색 결과에서 확인되지 않았습니다"라고 명시
-- 사용자가 특정 기업을 언급하면 → 검색 결과에 있는 경우만 답변, 없으면 명시
+- 위 "Perplexity 실시간 검색 결과"에 있는 내용을 기반으로 답변
+- 기존 벤치마킹 테이블 + 이번 검색 결과를 종합하여 구체적으로 설명
+- 검색 결과에 URL이 있으면 반드시 출처 명시
+- 검색 결과에 없는 내용은 "이번 검색에서 확인되지 않았습니다"라고 명시
 
 ## 엑셀 기반 L5 Task 목록 (실제 업무 범위 참고)
-{task_summary[:2000]}
+{task_summary[:1500]}
 """
 
     global _wf_chat_history
