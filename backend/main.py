@@ -2423,7 +2423,7 @@ async def chat_workflow_step1(request: Request):
 
     process_name, task_summary, pain_summary = _build_task_and_pain_summary(sheet_id)
 
-    # 메시지에서 기업명 감지 → 추가 벤치마킹
+    # 메시지에서 기업명 감지 → 추가 쿼리에 포함
     import re as _re
     company_pattern = _re.findall(
         r'(?:Google|Amazon|Meta|Microsoft|Apple|Unilever|삼성|현대|SK|LG|두산|'
@@ -2431,14 +2431,13 @@ async def chat_workflow_step1(request: Request):
         r'[A-Z][a-z]+(?:\s[A-Z][a-z]+)*)',
         user_message,
     )
-    # 메시지에서 벤치마킹 관련 키워드 감지
-    bm_keywords = ["벤치마킹", "사례", "benchmark", "case study", "도입 사례", "적용 사례"]
-    wants_benchmark = any(kw in user_message.lower() for kw in bm_keywords) or bool(company_pattern)
 
     extra_bm_text = ""
     new_bm_entries: list[dict] = []
 
-    if company_pattern or wants_benchmark:
+    # 엑셀 데이터가 로드된 경우 항상 추가 벤치마킹 검색 수행
+    # (채팅의 핵심 목적: Excel/JSON/PPT 업무 내용 기반으로 추가 사례 발굴)
+    if _wf_excel_tasks:
         companies = list(set(company_pattern)) if company_pattern else []
 
         # sheet_id 기준으로 필터링된 Task 사용
@@ -2557,9 +2556,10 @@ L4 활동: {', '.join(bm_data['l4_names'][:4])}
 {extra_bm_text}
 
 ## 답변 방식
-- 사용자가 특정 기업 사례를 물으면 → 테이블에 있는 경우만 답변, 없으면 "검색 결과에 없음" 명시
-- 추가 기업 사례 요청 → 실제 검색이 수행된 경우만 결과 전달
-- 일반 질문 → 테이블 내용 기반으로 자연어 답변
+- 매 대화마다 실제 웹 검색이 수행되어 새로운 사례가 추가됩니다
+- 기존 벤치마킹 테이블 + 이번 검색으로 새로 추가된 사례를 모두 종합하여 답변
+- 확인되지 않은 사례는 "검색 결과에서 확인되지 않았습니다"라고 명시
+- 사용자가 특정 기업을 언급하면 → 검색 결과에 있는 경우만 답변, 없으면 명시
 
 ## 엑셀 기반 L5 Task 목록 (실제 업무 범위 참고)
 {task_summary[:2000]}
