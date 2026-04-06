@@ -31,15 +31,8 @@ from typing import Any
 # ── API 키 헬퍼 ──────────────────────────────────────────────────────────────
 
 def _get_perplexity_key() -> str:
-    """env var → settings.json 순으로 Perplexity API 키를 조회합니다."""
-    key = os.getenv("PERPLEXITY_API_KEY", "")
-    if key:
-        return key
-    try:
-        from settings_store import load_settings
-        return load_settings().perplexity_api_key or ""
-    except Exception:
-        return ""
+    """환경변수에서 Perplexity API 키를 조회합니다."""
+    return os.getenv("PERPLEXITY_API_KEY", "")
 
 
 # ── Perplexity Search API ────────────────────────────────────────────────────

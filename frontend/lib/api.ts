@@ -56,7 +56,6 @@ export interface ClassifierSettings {
   model: string;
   anthropic_api_key: string;
   anthropic_model: string;
-  perplexity_api_key: string;
   batch_size: number;
   temperature: number;
 }
