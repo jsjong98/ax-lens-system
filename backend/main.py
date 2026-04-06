@@ -2584,10 +2584,23 @@ async def chat_workflow_step1(request: Request):
             if name:
                 l4_details_chat.append({"name": name, "task_id": l4_id,
                     "pain_points": _get_pains_bm(tasks),
-                    "description": "", "task_names": []})
+                    "description": "; ".join(t.description for t in tasks[:3] if t.description),
+                    "task_names": [t.name for t in tasks[:5]]})
 
         # 범위 내 Task만으로 L3/L2 이름 구성
         scoped_tasks = [t for t in _wf_excel_tasks if not scoped_l4_ids or t.l4_id in scoped_l4_ids]
+
+        # L5 tasks — 채팅 경로도 동일하게 scope-filtered L5 context 전달
+        l5_tasks_chat = []
+        for d in l4_details_chat:
+            for t in excel_by_l4.get(d.get("task_id", ""), []):
+                if t.name:
+                    l5_tasks_chat.append({
+                        "name": t.name,
+                        "description": t.description or "",
+                        "l4": t.l4 or "",
+                    })
+
         bm_data = {
             "process_name": process_name,
             "agents": [],
@@ -2596,6 +2609,7 @@ async def chat_workflow_step1(request: Request):
             "l3_names": list({t.l3 for t in scoped_tasks if t.l3})[:4],
             "l2_names": list({t.l2 for t in scoped_tasks if t.l2})[:2],
             "l3_details": [], "l2_details": [],
+            "l5_tasks": l5_tasks_chat[:30],
             "blueprint_summary": f"{' '.join(companies) + ' ' if companies else ''}{process_name} AI 적용",
         }
         if companies:
