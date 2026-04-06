@@ -2,14 +2,14 @@
 benchmark_search.py — Perplexity Sonar Pro 기반 벤치마킹
 
 파이프라인:
-  Phase 1. Claude Haiku가 가설 기반 검색 쿼리 10개 직접 생성
+  Phase 1. Claude Sonnet이 L2→L3→L4→L5 전 계층 맥락을 이해하여 가설 기반 쿼리 생성
   Phase 2. Sonar Pro (streaming) 병렬 검색
            - model: sonar-pro
            - search_type: auto → 복잡한 쿼리는 Pro Search (multi-step + fetch_url_content)
            - search_context_size: high
            - search_domain_filter: 뉴스 도메인 제외
   Phase 3. Perplexity Embedding API로 의미 기반 재랭킹
-  Phase 4. Claude Haiku가 Gap 분석 → Round 2 후속 쿼리 4개 생성
+  Phase 4. Gap 분석 → Round 2 후속 쿼리 생성
   Phase 5. Round 2 병렬 검색
 
 * search_log: 검색 과정 전체를 기록 → 프론트에 "생각 과정" 표시용
@@ -412,58 +412,6 @@ def _extract_names_from_cache(workflow_cache: dict) -> tuple[list, list, list, l
     return l2_names, l3_names, l4_names, l4_details
 
 
-# ── Sonar Pro용 포괄적 쿼리 빌더 (Haiku 불필요) ──────────────────────────────
-
-def _build_sonar_queries(workflow_cache: dict) -> list[str]:
-    """
-    Sonar Pro용 자연어 포괄 쿼리 생성 (LLM 불필요).
-    process_name(상위 프로세스)을 중심으로 쿼리 구성,
-    L4 활동명은 부가 키워드로 활용.
-    """
-    process_name = workflow_cache.get("process_name", "HR process")
-    _, _, l4_names, _ = _extract_names_from_cache(workflow_cache)
-
-    # 상위 프로세스명을 중심으로 (L4 첫 번째가 아님)
-    process_en = _translate_to_en(process_name)
-    process_kr = process_name
-
-    # L4 활동들을 부가 키워드로 (최대 3개, 짧게)
-    l4_en_keywords = " ".join(_translate_to_en(n) for n in l4_names[:3])
-    l4_kr_keywords = " ".join(l4_names[:3]) if l4_names else process_kr
-
-    queries = [
-        # SAP/Workday 공식 고객 사례 — 프로세스 전체 범위
-        f"SAP SuccessFactors customer success story '{process_en}' AI automation Fortune 500 "
-        f"results measurable outcome {l4_en_keywords}",
-
-        f"Workday customer story '{process_en}' AI machine learning HR automation "
-        f"enterprise results 2024 2025",
-
-        # 글로벌 非Tech 대기업 공식 사례
-        f"Unilever Siemens JPMorgan DHL Walmart GE Honeywell '{process_en}' "
-        f"AI HR automation official case study results savings efficiency",
-
-        # WEF·SHRM·Gartner 리서치 인용 기업 사례
-        f"WEF SHRM Gartner '{process_en}' AI automation enterprise case study "
-        f"company implementation results 2024 2025",
-
-        # ServiceNow/Oracle HCM 공식 사례
-        f"ServiceNow HR ServiceDelivery Oracle HCM '{process_en}' customer case study "
-        f"automation efficiency Fortune 500 2024",
-
-        # HBR + MIT Sloan 인용 기업 사례
-        f"site:hbr.org OR site:sloanreview.mit.edu "
-        f"'{process_en}' AI automation enterprise case study results",
-
-        # 한국 대기업
-        f"삼성전자 현대자동차 SK LG 포스코 '{process_kr}' {l4_kr_keywords} AI 자동화 도입 사례 성과",
-    ]
-
-    # extra_queries 있으면 앞에 추가
-    for eq in workflow_cache.get("extra_queries", [])[:2]:
-        queries.insert(0, eq)
-
-    return queries[:7]
 
 
 # ── Phase 1: 가설 기반 쿼리 생성 (Tavily/DuckDuckGo fallback용) ──────────────
@@ -473,46 +421,57 @@ async def _plan_search_queries(
     search_log: list[dict],
 ) -> list[str]:
     """
-    Claude Haiku가 학습 지식을 활용해 가설 기반 검색 쿼리를 생성합니다.
-    Perplexity(Sonar Pro) 사용 시에는 호출되지 않습니다.
+    Claude Sonnet이 L2→L3→L4→L5 전 계층 맥락을 이해하여 가설 기반 쿼리를 생성합니다.
+    Perplexity(Sonar Pro) 및 Tavily/DuckDuckGo fallback 모두 이 함수를 사용합니다.
     """
     api_key = os.getenv("ANTHROPIC_API_KEY", "")
     if not api_key:
         return _fallback_queries(workflow_cache)
 
     process_name = workflow_cache.get("process_name", "")
+    l2_names = workflow_cache.get("l2_names", [])
     _, _, l4_names, l4_details = _extract_names_from_cache(workflow_cache)
+    l5_tasks = workflow_cache.get("l5_tasks", [])
+
     pain_points = []
-    for d in l4_details[:3]:
+    for d in l4_details[:4]:
         pain_points.extend(d.get("pain_points", [])[:2])
 
-    focus_kr = l4_names[0] if l4_names else process_name
+    # L5 Task 상세 목록 (name + description)
+    l5_lines = "\n".join(
+        f"  - {t['name']}: {t['description']}" if t.get("description") else f"  - {t['name']}"
+        for t in l5_tasks[:20]
+    )
+
+    l2_context = f"기능 단위: {', '.join(l2_names[:2])} (BP = Business Partner, HR 파트너 기능)" if l2_names else ""
 
     prompt = f"""당신은 글로벌 HR AI 벤치마킹 리서치 전문가입니다.
-당신의 학습 지식을 사용하여 구체적인 기업·도구 조합을 타겟하는 가설 기반 쿼리를 생성하세요.
+아래 두산의 HR 프로세스 계층 전체를 이해한 뒤, 이 프로세스에서 AI로 자동화 가능한 선도 사례를 찾기 위한 가설 기반 검색 쿼리를 생성하세요.
 
-## 조사 대상
-- 프로세스: {process_name}
+## 두산 HR 프로세스 계층 (전체 이해 필수)
+{l2_context}
+- L3 프로세스: {process_name}
 - L4 활동: {', '.join(l4_names[:6])}
-- Pain Point: {', '.join(pain_points[:4]) if pain_points else '없음'}
+- L5 Task 상세:
+{l5_lines if l5_lines else '  (정보 없음)'}
+- Pain Point: {', '.join(list(dict.fromkeys(pain_points))[:5]) if pain_points else '없음'}
 
-## 기업 선정 기준 (쿼리에 포함할 기업)
-- **Forbes Global 500 또는 Fortune 500 수준의 글로벌 대기업**만 사용
-- 해당 프로세스와 관련성이 높은 산업의 선도 기업 우선
-- 구체적인 AI 도입 사례가 알려진 기업 우선 (당신의 학습 지식 활용)
-- 스타트업·중소기업·국내 중소IT기업 사용 금지
+## 약어 정의
+- BP = Business Partner (인사 담당 파트너), ER = Employee Relations
 
-## 가설 기반 검색 전략
-이미 알고 있는 사실을 검증하는 쿼리를 만드세요:
-- ✅ "Unilever HireVue AI video interview screening automation results"
-- ✅ "Siemens SAP SuccessFactors AI workforce planning ROI case study"
-- ✅ "General Motors Paradox AI recruiting chatbot 2 million savings"
-- ❌ "AI HR automation enterprise 2024" (너무 일반적)
+## 검색 쿼리 설계 원칙
+1. L5 Task의 실제 업무 내용(시스템명, 업무 단계, Pain)을 반영하여 구체적으로 작성
+2. 이미 알고 있는 사실을 검증하는 가설 기반 쿼리 — 너무 일반적인 쿼리 금지
+   - ✅ "Siemens SAP SuccessFactors Employee Central position management automation AI case study"
+   - ✅ "JPMorgan approval workflow automation HR personnel action AI RPA results"
+   - ❌ "AI HR automation 2024" (너무 일반적)
+3. Forbes Global 500 / Fortune 500 수준 글로벌 대기업만 사용
 
-## 쿼리 10개 생성 (아래 구성으로)
-- **글로벌 대기업+도구 가설 쿼리** 5개: 관련성 높은 글로벌 대기업 + HR AI 도구 조합
-- **벤더 공식 케이스 스터디** 3개: Paradox, Eightfold, HireVue, SAP, Workday 공식 사이트
-- **한국 대기업 사례** 2개: 삼성·현대·SK·LG + '{focus_kr}' AI 도입 공식 사례
+## 쿼리 10개 생성 (구성)
+- **글로벌 대기업+시스템 가설 쿼리** 4개: L5 Task에서 파악한 시스템(SAP SuccessFactors, ERP 등) + 글로벌 대기업
+- **프로세스 전체 범위 쿼리** 3개: Workday/ServiceNow/Oracle HCM 공식 고객 사례 + L3 프로세스
+- **리서치·학술 기관** 1개: WEF/SHRM/Gartner/HBR 인용 기업 사례
+- **한국 대기업 사례** 2개: 삼성·현대·SK·LG + '{process_name}' AI 자동화 공식 사례
 
 JSON만 출력:
 {{"queries": ["q1",...,"q10"], "hypotheses": ["가설1","가설2","가설3"]}}"""
@@ -522,8 +481,8 @@ JSON만 출력:
         from usage_store import add_usage as _add_usage_plan
         client = AsyncAnthropic(api_key=api_key)
         resp = await client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=700,
+            model="claude-sonnet-4-6",
+            max_tokens=1200,
             messages=[{"role": "user", "content": prompt}],
         )
         if resp.usage:
@@ -608,8 +567,8 @@ JSON만: {{"queries": ["q1","q2","q3","q4"], "gap": "부족한 점 한 줄"}}"""
         from usage_store import add_usage as _add_usage_gap
         client = AsyncAnthropic(api_key=api_key)
         resp = await client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=400,
+            model="claude-sonnet-4-6",
+            max_tokens=600,
             messages=[{"role": "user", "content": prompt}],
         )
         if resp.usage:
@@ -645,19 +604,9 @@ async def search_benchmarks(workflow_cache: dict) -> dict:
     search_log.append({"type": "engine", "text": f"검색 엔진: {engine}"})
 
     # ── Phase 1: 쿼리 생성 ────────────────────────────────────────────────────
-    # Perplexity(Sonar Pro): LLM 없이 포괄 쿼리 직접 빌드 → Sonar Pro가 알아서 멀티스텝 검색
-    # Tavily/DuckDuckGo: Haiku 기반 가설 쿼리 사용 (더 구체적인 쿼리 필요)
-    if use_pplx:
-        queries_r1 = _build_sonar_queries(workflow_cache)
-        search_log.append({
-            "type": "plan",
-            "hypotheses": [],
-            "query_count": len(queries_r1),
-            "queries": queries_r1,
-        })
-        print(f"[benchmark] Sonar Pro 쿼리 {len(queries_r1)}개 (Haiku 없음)")
-    else:
-        queries_r1 = await _plan_search_queries(workflow_cache, search_log)
+    # Sonnet이 L2→L3→L4→L5 전 계층을 이해하여 가설 기반 쿼리 생성
+    # Sonar Pro / Tavily / DuckDuckGo 모두 동일한 쿼리 플래닝 사용
+    queries_r1 = await _plan_search_queries(workflow_cache, search_log)
 
     # ── Phase 2: Round 1 병렬 검색 ───────────────────────────────────────────
     search_log.append({"type": "round_start", "round": 1, "query_count": len(queries_r1)})
@@ -797,6 +746,11 @@ async def search_benchmarks(workflow_cache: dict) -> dict:
 _BENCHMARK_SYSTEM_PROMPT = """
 당신은 글로벌 AI 업무 혁신 벤치마킹 전문가입니다.
 영어·한국어 검색 결과를 모두 엄격하게 분석하여, 실제 근거가 있는 AI 적용 선도 사례만 추출합니다.
+
+## 두산 HR 전문 약어 정의 (반드시 준수)
+- **BP** = Business Partner (HR BP, 인사 담당 파트너) — 절대로 'British Petroleum'이 아님
+- **ER** = Employee Relations (노사관계/직원관계)
+- **발령** = 인사발령 (personnel assignment/job transfer)
 
 ## ⚠️ 최우선 원칙: 모르면 모른다고 명확히 표기
 - 검색 결과에 해당 기업명이 명확히 나오지 않으면 → source: "사례 미확인" 처리

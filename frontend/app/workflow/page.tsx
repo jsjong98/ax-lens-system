@@ -1019,7 +1019,7 @@ export default function WorkflowPage() {
                         ? "bg-blue-50 text-blue-700 border border-blue-200 italic"
                         : "bg-white text-gray-700 border border-gray-200"
                     }`}>
-                      <div className="whitespace-pre-wrap">{msg.content.length > 500 ? msg.content.slice(0, 500) + "..." : msg.content}</div>
+                      <div className="whitespace-pre-wrap">{msg.content}</div>
                     </div>
                   </div>
                 ))}

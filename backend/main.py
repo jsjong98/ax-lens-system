@@ -1836,8 +1836,8 @@ def _build_task_and_pain_summary(sheet_id: str = "") -> tuple[str, str, str]:
         if filtered:
             relevant_tasks = filtered
 
-    l2_names = list({t.l2 for t in relevant_tasks if t.l2})
-    process_name = l2_names[0] if l2_names else "HR 프로세스"
+    l3_names = list({t.l3 for t in relevant_tasks if t.l3})
+    process_name = l3_names[0] if l3_names else "HR 프로세스"
 
     task_lines = []
     for t in relevant_tasks:
@@ -2118,6 +2118,17 @@ async def benchmark_workflow_step1(request: Request):
     l3_names = [d["name"] for d in l3_details]
     l4_names = [d["name"] for d in l4_details]
 
+    # L5 task 전체 (name + description) — 쿼리 빌드 시 시스템명/Pain 추출에 활용
+    l5_tasks = []
+    for tasks in excel_by_l4.values():
+        for t in tasks:
+            if t.name:
+                l5_tasks.append({
+                    "name": t.name,
+                    "description": t.description or "",
+                    "l4": t.l4 or "",
+                })
+
     bm_data = {
         "process_name": process_name,
         "agents": [],
@@ -2127,6 +2138,7 @@ async def benchmark_workflow_step1(request: Request):
         "l4_details": l4_details,
         "l3_details": l3_details,
         "l2_details": l2_details,
+        "l5_tasks": l5_tasks[:30],
         "blueprint_summary": (
             f"{process_name} 프로세스 (L3: {', '.join(l3_names[:3])}, L4: {', '.join(l4_names[:3])}) "
             f"AI 적용 벤치마킹"
@@ -2572,6 +2584,12 @@ L4 활동: {', '.join(bm_data['l4_names'][:4])}
 
     chat_system = f"""당신은 AI 기반 업무 혁신 벤치마킹 전문가입니다.
 현재 '{process_name}' 프로세스의 벤치마킹 리서치를 진행 중입니다.
+
+## 두산 HR 전문 약어 정의 (반드시 준수)
+- **BP** = Business Partner (HR BP, 인사 담당 파트너) — 절대로 'British Petroleum'이 아님
+- **ER** = Employee Relations (노사관계/직원관계)
+- **L2/L3/L4/L5** = 두산 프로세스 계층 레벨 (L2: 대분류, L3: 프로세스, L4: 활동, L5: Task)
+- **발령** = 인사발령 (personnel assignment/job transfer) — 석유화학 용어 아님
 
 ## ⚠️ 절대 원칙
 1. **아래 제공된 검색 결과만 사용** — 당신의 학습 지식으로 사례를 만들지 말 것
@@ -3605,8 +3623,8 @@ async def generate_new_workflow(
 
     # 프로세스명 자동 추론
     if not process_name:
-        l2_names = list({t.l2 for t in tasks if t.l2})
-        process_name = l2_names[0] if l2_names else "HR 프로세스"
+        l3_names = list({t.l3 for t in tasks if t.l3})
+        process_name = l3_names[0] if l3_names else "HR 프로세스"
 
     # 설정에서 API 키 로드
     settings = load_settings()
@@ -4042,8 +4060,8 @@ async def generate_project_definition(
 
     # 프로세스명 자동 추론
     if not process_name:
-        l2_names = list({t.l2 for t in tasks if t.l2})
-        process_name = l2_names[0] if l2_names else "HR 프로세스"
+        l3_names = list({t.l3 for t in tasks if t.l3})
+        process_name = l3_names[0] if l3_names else "HR 프로세스"
 
     # To-Be 데이터 (있으면 활용)
     tobe_data = None
@@ -4214,8 +4232,8 @@ async def generate_project_design(
             }
 
     if not process_name:
-        l2_names = list({t.l2 for t in tasks if t.l2})
-        process_name = l2_names[0] if l2_names else "HR 프로세스"
+        l3_names = list({t.l3 for t in tasks if t.l3})
+        process_name = l3_names[0] if l3_names else "HR 프로세스"
 
     tobe_data = _new_workflow_cache if _new_workflow_cache else None
     project_title = _project_definition_cache.get("project_title", f"{process_name} AI 자동화")
