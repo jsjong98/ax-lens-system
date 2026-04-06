@@ -2192,7 +2192,7 @@ async def benchmark_workflow_step1(request: Request):
 ## 포함 기준 (4가지 모두 충족해야 포함)
 1. **기업명**: 고유 기업명(실명)이 검색 결과에 명확히 언급됨
 2. **내용**: AI 적용 방법 또는 성과가 구체적으로 언급됨
-3. **URL**: 검색 결과에 실제 URL이 있으면 기재, 없으면 빈 문자열 (URL 없어도 내용이 충분하면 포함 가능)
+3. **URL**: 검색 결과에 실제 URL이 있어야만 포함 — URL이 없으면 해당 항목 DROP (출처 없는 사례 불인정)
 4. **출처 유형**: 아래 허용 유형만 인정
    - ✅ 공식 기업 블로그 / 기술 블로그 (engineering.fb.com, cloud.google.com 등)
    - ✅ 공식 케이스 스터디 / 백서 / 연구 보고서
@@ -2244,7 +2244,7 @@ async def benchmark_workflow_step1(request: Request):
       "outcome": "성과/효과 (수치 포함, 없으면 '수치 미확인 — 정성적 효과: ...'로 기술)",
       "infrastructure": "인프라/시스템 기반",
       "implication": "두산 향 시사점 — 해당 L4 활동에 어떻게 적용할 수 있는지",
-      "url": "검색 결과에 실제 존재하는 URL (없으면 빈 문자열, 절대 임의 생성 금지)"
+      "url": "검색 결과 출처 URL 목록에 있는 것만 — URL이 없으면 이 항목 자체를 benchmark_table에서 제외"
     }}
   ],
   "no_cases_note": "관련 사례가 없을 때만 이유 기재 (예: '검색 결과에 해당 프로세스 직접 사례 없음'). 사례가 있으면 빈 문자열.",
@@ -2297,12 +2297,12 @@ async def benchmark_workflow_step1(request: Request):
             if r.get("url")  # URL 없는 항목 제외
         ]
     else:
-        # 뉴스 URL / 익명·금지 source 항목 후처리 제거
-        # URL 없어도 use_case 내용이 있으면 통과 (Sonar Pro는 content에 내용이 있음)
+        # URL 없는 사례 제거 (출처 없는 사례는 테이블에 포함 불가)
         raw_table = result_data.get("benchmark_table", [])
         _wf_benchmark_table = [
             row for row in raw_table
-            if _is_valid_benchmark_source(row.get("source", ""))
+            if row.get("url")
+            and _is_valid_benchmark_source(row.get("source", ""))
             and not _is_news_url(row.get("url", ""))
             and (row.get("use_case") or row.get("outcome"))
         ]
@@ -2501,8 +2501,14 @@ async def chat_workflow_step1(request: Request):
             # LLM으로 새 벤치마킹 분석
             bm_sys = f"""벤치마킹 분석 전문가입니다. 검색 결과에서 '{process_name}' 프로세스 관련 사례를 추출합니다.
 L4 활동: {', '.join(bm_data['l4_names'][:4])}
+
+⚠️ 절대 규칙:
+1. url 필드는 위 검색 결과의 "출처 URL" 목록에 있는 것만 사용. URL 임의 생성 금지.
+2. url이 없으면 해당 항목을 benchmark_table에 포함하지 말 것.
+3. 학습 지식으로 사례를 만들어내지 말 것. 검색 결과 텍스트에 근거한 내용만.
+
 관련성 없는 사례는 제외. 출력 형식 (JSON만):
-{{"benchmark_table": [{{"source":"","company_type":"Tech 상한선|非Tech 실제 구현","industry":"","process_area":"","ai_adoption_goal":"","ai_technology":"","key_data":"","adoption_method":"","use_case":"","outcome":"","infrastructure":"","implication":"","url":""}}]}}"""
+{{"benchmark_table": [{{"source":"","company_type":"Tech 상한선|非Tech 실제 구현","industry":"","process_area":"","ai_adoption_goal":"","ai_technology":"","key_data":"","adoption_method":"","use_case":"","outcome":"","infrastructure":"","implication":"","url":"[검색결과URL만]"}}]}}"""
             from collections import defaultdict as _ddict
             _qg: dict = _ddict(lambda: {"content": "", "urls": []})
             for r in raw[:10]:
@@ -2520,12 +2526,13 @@ L4 활동: {', '.join(bm_data['l4_names'][:4])}
             bm_result = await _call_llm_step1(bm_sys, [{"role":"user","content":bm_user_msg}])
             if bm_result and bm_result.get("benchmark_table"):
                 new_bm_entries = bm_result["benchmark_table"]
-                # 기존 테이블에 없는 기업 사례만 추가 (실명 source 검증, URL은 optional)
+                # URL 없는 항목은 절대 추가 불가 (출처 없는 사례 = 불인정)
                 existing_sources = {b.get("source","") for b in _wf_benchmark_table}
                 for entry in new_bm_entries:
                     src = entry.get("source", "")
                     url = entry.get("url", "")
-                    if (src not in existing_sources
+                    if (url                              # URL 필수
+                            and src not in existing_sources
                             and not _is_news_url(url)
                             and _is_valid_benchmark_source(src)
                             and (entry.get("use_case") or entry.get("outcome"))):
