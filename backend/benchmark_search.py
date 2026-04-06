@@ -27,59 +27,69 @@ from typing import Any
 
 # ── Perplexity Search API ────────────────────────────────────────────────────
 
-def _search_perplexity_batch(queries: list[str], max_results: int = 8) -> list[dict]:
+def _search_perplexity_sonar(query: str) -> list[dict]:
     """
-    Perplexity Search API — 최대 5개 쿼리를 한 번에 전송.
-    POST https://api.perplexity.ai/search
+    Perplexity Sonar API — 쿼리 1개를 Sonar 모델로 검색.
+    AI가 웹을 읽고 종합한 답변 + citations URL 반환.
+    POST https://api.perplexity.ai/chat/completions (model=sonar)
     """
     api_key = os.getenv("PERPLEXITY_API_KEY", "")
-    if not api_key or not queries:
+    if not api_key or not query:
         return []
 
-    all_results: list[dict] = []
-    seen_urls: set[str] = set()
+    payload = json.dumps({
+        "model": "sonar",
+        "messages": [{"role": "user", "content": query}],
+        "max_tokens": 1500,
+        "return_citations": True,
+    }).encode("utf-8")
 
-    # 5개씩 배치
-    for i in range(0, len(queries), 5):
-        batch = queries[i : i + 5]
-        query_val = batch if len(batch) > 1 else batch[0]
+    req = urllib.request.Request(
+        "https://api.perplexity.ai/chat/completions",
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        },
+        method="POST",
+    )
 
-        payload = json.dumps({
-            "query": query_val,
-            "max_results": max_results,
-            "max_tokens_per_page": 2500,
-        }).encode("utf-8")
+    try:
+        with urllib.request.urlopen(req, timeout=45) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
 
-        req = urllib.request.Request(
-            "https://api.perplexity.ai/search",
-            data=payload,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {api_key}",
-            },
-            method="POST",
-        )
+        content = data["choices"][0]["message"]["content"]
+        citations = data.get("citations", [])
 
-        try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
+        results = []
+        # 각 citation URL을 개별 결과로 변환, content는 공유
+        if citations:
+            for url in citations:
+                results.append({
+                    "title": query[:80],
+                    "url": url,
+                    "content": content,
+                    "snippet": content[:400],
+                    "source": "perplexity-sonar",
+                    "query": query,
+                })
+        else:
+            # citation 없어도 content 자체를 결과로 보존
+            results.append({
+                "title": query[:80],
+                "url": "",
+                "content": content,
+                "snippet": content[:400],
+                "source": "perplexity-sonar",
+                "query": query,
+            })
 
-            for r in data.get("results", []):
-                url = r.get("url", "")
-                title = r.get("title", "")
-                if url and url not in seen_urls:
-                    seen_urls.add(url)
-                    all_results.append({
-                        "title": title,
-                        "url": url,
-                        "content": r.get("snippet", ""),
-                        "snippet": r.get("snippet", ""),
-                        "source": "perplexity",
-                    })
-        except Exception as e:
-            print(f"[benchmark] Perplexity Search 실패 ({batch[0][:40]}): {e}")
+        print(f"[benchmark] Sonar '{query[:50]}' → {len(citations)}개 citation")
+        return results
 
-    return all_results
+    except Exception as e:
+        print(f"[benchmark] Sonar 실패 ({query[:40]}): {e}")
+        return []
 
 
 # ── Perplexity Embedding API ─────────────────────────────────────────────────
@@ -507,24 +517,23 @@ async def search_benchmarks(workflow_cache: dict) -> dict:
     seen_keys: set[str] = set()
 
     if use_pplx:
-        # Perplexity: 5개씩 배치 (동기 함수를 스레드에서 실행)
-        batches = [queries_r1[i:i+5] for i in range(0, len(queries_r1), 5)]
-        batch_tasks = [asyncio.to_thread(_search_perplexity_batch, batch, 8) for batch in batches]
-        batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
+        # Sonar: 쿼리별 병렬 호출 (각 쿼리가 AI 종합 답변 + citations 반환)
+        sonar_tasks = [asyncio.to_thread(_search_perplexity_sonar, q) for q in queries_r1]
+        sonar_results = await asyncio.gather(*sonar_tasks, return_exceptions=True)
 
-        for _, batch_r in zip(batches, batch_results):
+        for q, batch_r in zip(queries_r1, sonar_results):
             if isinstance(batch_r, Exception):
+                search_log.append({"type": "query", "round": 1, "q": q, "found": 0})
                 continue
+            cnt = 0
             for r in batch_r:
-                key = r.get("url") or r.get("title", "")
+                key = r.get("url") or r.get("query", q)
                 if key and key not in seen_keys:
                     seen_keys.add(key)
                     r["round"] = 1
                     all_results.append(r)
-
-        # 쿼리별 로그
-        for q in queries_r1:
-            search_log.append({"type": "query", "round": 1, "q": q, "found": "?"})
+                    cnt += 1
+            search_log.append({"type": "query", "round": 1, "q": q, "found": cnt})
 
     elif use_tavily:
         tasks = [asyncio.to_thread(_search_tavily, q, 5) for q in queries_r1]
@@ -574,17 +583,21 @@ async def search_benchmarks(workflow_cache: dict) -> dict:
         search_log.append({"type": "round_start", "round": 2, "query_count": len(queries_r2)})
 
         if use_pplx:
-            r2_batch = await asyncio.to_thread(_search_perplexity_batch, queries_r2, 8)
-            r2_added = 0
-            for r in r2_batch:
-                key = r.get("url") or r.get("title", "")
-                if key and key not in seen_keys:
-                    seen_keys.add(key)
-                    r["round"] = 2
-                    all_results.append(r)
-                    r2_added += 1
-            for q in queries_r2:
-                search_log.append({"type": "query", "round": 2, "q": q, "found": "?"})
+            sonar_tasks2 = [asyncio.to_thread(_search_perplexity_sonar, q) for q in queries_r2]
+            sonar_results2 = await asyncio.gather(*sonar_tasks2, return_exceptions=True)
+            for q, batch_r in zip(queries_r2, sonar_results2):
+                if isinstance(batch_r, Exception):
+                    search_log.append({"type": "query", "round": 2, "q": q, "found": 0})
+                    continue
+                cnt = 0
+                for r in batch_r:
+                    key = r.get("url") or r.get("query", q)
+                    if key and key not in seen_keys:
+                        seen_keys.add(key)
+                        r["round"] = 2
+                        all_results.append(r)
+                        cnt += 1
+                search_log.append({"type": "query", "round": 2, "q": q, "found": cnt})
         elif use_tavily:
             tasks2 = [asyncio.to_thread(_search_tavily, q, 5) for q in queries_r2]
             raw2 = await asyncio.gather(*tasks2, return_exceptions=True)
