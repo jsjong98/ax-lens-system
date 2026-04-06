@@ -1836,8 +1836,11 @@ def _build_task_and_pain_summary(sheet_id: str = "") -> tuple[str, str, str]:
         if filtered:
             relevant_tasks = filtered
 
-    l3_names = list({t.l3 for t in relevant_tasks if t.l3})
+    # set은 순서 미보장 → dict.fromkeys로 삽입 순서 보존
+    l3_names = list(dict.fromkeys(t.l3 for t in relevant_tasks if t.l3))
     process_name = l3_names[0] if l3_names else "HR 프로세스"
+    if len(l3_names) > 1:
+        print(f"[build_summary] ⚠️ 복수 L3 감지 ({len(l3_names)}개): {l3_names} → process_name='{process_name}' (sheet_id='{sheet_id}')")
 
     task_lines = []
     for t in relevant_tasks:
@@ -2606,8 +2609,8 @@ async def chat_workflow_step1(request: Request):
             "agents": [],
             "l4_details": l4_details_chat,
             "l4_names": [d["name"] for d in l4_details_chat],
-            "l3_names": list({t.l3 for t in scoped_tasks if t.l3})[:4],
-            "l2_names": list({t.l2 for t in scoped_tasks if t.l2})[:2],
+            "l3_names": list(dict.fromkeys(t.l3 for t in scoped_tasks if t.l3))[:4],
+            "l2_names": list(dict.fromkeys(t.l2 for t in scoped_tasks if t.l2))[:2],
             "l3_details": [], "l2_details": [],
             "l5_tasks": l5_tasks_chat[:30],
             "blueprint_summary": f"{' '.join(companies) + ' ' if companies else ''}{process_name} AI 적용",
@@ -3729,7 +3732,7 @@ async def generate_new_workflow(
 
     # 프로세스명 자동 추론
     if not process_name:
-        l3_names = list({t.l3 for t in tasks if t.l3})
+        l3_names = list(dict.fromkeys(t.l3 for t in tasks if t.l3))
         process_name = l3_names[0] if l3_names else "HR 프로세스"
 
     # 설정에서 API 키 로드
@@ -4166,7 +4169,7 @@ async def generate_project_definition(
 
     # 프로세스명 자동 추론
     if not process_name:
-        l3_names = list({t.l3 for t in tasks if t.l3})
+        l3_names = list(dict.fromkeys(t.l3 for t in tasks if t.l3))
         process_name = l3_names[0] if l3_names else "HR 프로세스"
 
     # To-Be 데이터 (있으면 활용)
@@ -4338,7 +4341,7 @@ async def generate_project_design(
             }
 
     if not process_name:
-        l3_names = list({t.l3 for t in tasks if t.l3})
+        l3_names = list(dict.fromkeys(t.l3 for t in tasks if t.l3))
         process_name = l3_names[0] if l3_names else "HR 프로세스"
 
     tobe_data = _new_workflow_cache if _new_workflow_cache else None
