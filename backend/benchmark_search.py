@@ -65,10 +65,15 @@ def _search_perplexity_sonar(query: str) -> list[dict]:
         "model": "sonar-pro",
         "messages": [{"role": "user", "content": query}],
         "max_tokens": 2000,
-        "stream": True,
-        "search_context_size": "high",
+        "stream": True,                        # Pro Search 필수 조건
+        "search_type": "pro",                  # Pro Search 활성화 (multi-step + URL fetch)
         "search_domain_filter": _SONAR_DOMAIN_DENYLIST,
-        # return_citations deprecated (Nov 2024) — citations now always included as search_results
+        "search_recency_filter": "year",       # 최근 1년 결과 우선
+        "search_language_filter": ["en", "ko"],# 영어 + 한국어
+        "enable_search_classifier": True,      # 더 정확한 검색 분류
+        "web_search_options": {
+            "search_context_size": "high",     # 공식 문서 기준 위치
+        },
     }).encode("utf-8")
 
     req = urllib.request.Request(
