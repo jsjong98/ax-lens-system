@@ -1432,13 +1432,14 @@ async def upload_workflow_excel(file: UploadFile = File(...)):
     tasks = load_tasks(str(save_path), sheet_name=recommended)
 
     global _wf_excel_tasks, _wf_excel_path, _wf_classification, _wf_chat_history
-    global _wf_step1_cache, _wf_step2_cache
+    global _wf_step1_cache, _wf_step2_cache, _wf_benchmark_table
     _wf_excel_tasks = tasks
     _wf_excel_path = str(save_path)   # 현재 파일 경로 고정
     _wf_classification = {}
     _wf_step1_cache = {}
     _wf_step2_cache = {}
     _wf_chat_history = []
+    _wf_benchmark_table = {}
 
     # 분류 결과 추출 (최종 > 두산 > 1차 순 fallback)
     has_classification = False
@@ -1569,7 +1570,7 @@ async def get_workflow_excel_tasks():
 
 
 _wf_benchmark_results: list = []   # 벤치마킹 검색 결과 (raw)
-_wf_benchmark_table: list = []     # 벤치마킹 결과 테이블 (LLM 분석 후)
+_wf_benchmark_table: dict = {}     # 시트별 벤치마킹 결과 테이블 {sheet_id: [rows]}
 _wf_search_log: list = []          # 벤치마킹 검색 로그 (thinking process)
 
 # ── 벤치마킹 source / URL 검증 필터 ─────────────────────────────────────────
@@ -2012,7 +2013,7 @@ def _save_step1_result(result_data: dict) -> dict:
         # Step2 호환용 빈 필드
         "agents": [],
         "execution_flow": [],
-        "benchmark_table": list(_wf_benchmark_table),
+        "benchmark_table": {k: v for k, v in _wf_benchmark_table.items()},
     }
 
     global _wf_step1_cache
@@ -2030,7 +2031,8 @@ async def export_benchmark_table_xlsx():
 
     _KST = timezone(timedelta(hours=9))
 
-    if not _wf_benchmark_table:
+    all_export_rows = [r for rows in _wf_benchmark_table.values() for r in rows]
+    if not all_export_rows:
         raise HTTPException(400, "벤치마킹 결과가 없습니다. 먼저 벤치마킹을 실행하세요.")
 
     wb = openpyxl.Workbook()
@@ -2063,7 +2065,7 @@ async def export_benchmark_table_xlsx():
     row_fill_even = PatternFill("solid", fgColor="EEF2FF")
     data_align = Alignment(vertical="top", wrap_text=True)
 
-    for row_idx, entry in enumerate(_wf_benchmark_table, 2):
+    for row_idx, entry in enumerate(all_export_rows, 2):
         fill = row_fill_even if row_idx % 2 == 0 else None
         for col_idx, key in enumerate(field_keys, 1):
             val = entry.get(key, "") or ""
@@ -2390,9 +2392,10 @@ async def benchmark_workflow_step1(request: Request):
 
     result_data = await _call_llm_step1(bm_analysis_system, [{"role": "user", "content": bm_user}])
 
+    sheet_key = sheet_id_bm or "__default__"
+
     if not result_data:
-        # fallback: URL 있는 raw 결과만 테이블화
-        _wf_benchmark_table = [
+        sheet_rows = [
             {
                 "source": r.get("title", "")[:30],
                 "industry": "",
@@ -2404,12 +2407,11 @@ async def benchmark_workflow_step1(request: Request):
                 "url": r.get("url", ""),
             }
             for r in raw_results[:10]
-            if r.get("url")  # URL 없는 항목 제외
+            if r.get("url")
         ]
     else:
-        # URL + source + 내용 확인 (한국 저품질 뉴스만 차단)
         raw_table = result_data.get("benchmark_table", [])
-        _wf_benchmark_table = [
+        sheet_rows = [
             row for row in raw_table
             if row.get("url")
             and _is_valid_benchmark_source(row.get("source", ""))
@@ -2417,19 +2419,25 @@ async def benchmark_workflow_step1(request: Request):
             and (row.get("use_case") or row.get("outcome"))
         ]
 
+    # 시트별로 저장 (기존 결과에 덮어쓰기)
+    _wf_benchmark_table[sheet_key] = sheet_rows
+
     # 채팅 이력에 기록
     global _wf_chat_history
     summary_text = result_data.get("summary", "") if result_data else f"벤치마킹 검색 완료: {len(raw_results)}개 결과"
-    _wf_chat_history.append({"role": "assistant", "content": f"[벤치마킹 완료] {summary_text}"})
+    _wf_chat_history.append({"role": "assistant", "content": f"[벤치마킹 완료 — {process_name}] {summary_text}"})
 
-    # 이미 Step1 결과가 있으면 벤치마킹 테이블 추가
+    # 이미 Step1 결과가 있으면 전체 벤치마킹 테이블 갱신
     if _wf_step1_cache:
-        _wf_step1_cache["benchmark_table"] = list(_wf_benchmark_table)
+        all_rows = [r for rows in _wf_benchmark_table.values() for r in rows]
+        _wf_step1_cache["benchmark_table"] = all_rows
 
     return {
         "ok": True,
         "result_count": len(raw_results),
-        "benchmark_table": _wf_benchmark_table,
+        "sheet_id": sheet_key,
+        "benchmark_table": sheet_rows,           # 현재 시트 결과
+        "all_benchmark_table": {k: v for k, v in _wf_benchmark_table.items()},  # 전체
         "summary": summary_text,
         "search_log": _bm_search_log,
     }
@@ -2446,8 +2454,9 @@ async def generate_workflow_step1(request: Request):
     if not _wf_excel_tasks:
         raise HTTPException(400, "엑셀을 먼저 업로드하세요.")
 
-    # 벤치마킹 결과표가 없으면 기본 설계 차단
-    if not _wf_benchmark_table:
+    # 어느 시트라도 벤치마킹 결과가 있어야 기본 설계 가능
+    all_bm_rows = [r for rows in _wf_benchmark_table.values() for r in rows]
+    if not all_bm_rows:
         raise HTTPException(400, "벤치마킹을 먼저 수행해주세요. 벤치마킹 결과표가 있어야 기본 설계를 생성할 수 있습니다.")
 
     body = await request.json()
@@ -2459,13 +2468,16 @@ async def generate_workflow_step1(request: Request):
     if process_name_override:
         process_name = process_name_override
 
-    # 벤치마킹 결과표를 설계 컨텍스트로 포함
-    benchmark_text = "## 벤치마킹 결과 (선도사례 기반 설계 근거)\n"
-    for bm in _wf_benchmark_table[:8]:
-        benchmark_text += (
-            f"- **{bm.get('source', '')}** ({bm.get('industry', '')}): "
-            f"{bm.get('use_case', '')} → {bm.get('outcome', '')}\n"
-        )
+    # 전체 시트 벤치마킹 결과 합산 — L3 단위 설계에 사용
+    benchmark_text = f"## 벤치마킹 결과 (전체 {len(_wf_benchmark_table)}개 시트, 총 {len(all_bm_rows)}건)\n"
+    for sheet_key, rows in _wf_benchmark_table.items():
+        if rows:
+            benchmark_text += f"\n### 시트: {sheet_key}\n"
+            for bm in rows[:5]:
+                benchmark_text += (
+                    f"- **{bm.get('source', '')}** ({bm.get('industry', '')}): "
+                    f"{bm.get('use_case', '')} → {bm.get('outcome', '')}\n"
+                )
 
     # As-Is + 엑셀 매핑 컨텍스트
     asis_context = _build_mapped_asis_context(sheet_id)
@@ -2643,7 +2655,10 @@ L4 활동: {', '.join(bm_data['l4_names'][:4])}
             bm_result = await _call_llm_step1(bm_sys, [{"role":"user","content":bm_user_msg}])
             if bm_result and bm_result.get("benchmark_table"):
                 new_bm_entries = bm_result["benchmark_table"]
-                existing_sources = {b.get("source", "") for b in _wf_benchmark_table}
+                chat_sheet_key = sheet_id or "__chat__"
+                existing_sources = {b.get("source", "") for rows in _wf_benchmark_table.values() for b in rows}
+                if chat_sheet_key not in _wf_benchmark_table:
+                    _wf_benchmark_table[chat_sheet_key] = []
                 for entry in new_bm_entries:
                     src = entry.get("source", "")
                     url = entry.get("url", "")
@@ -2652,16 +2667,17 @@ L4 활동: {', '.join(bm_data['l4_names'][:4])}
                             and not _is_news_url(url)
                             and _is_valid_benchmark_source(src)
                             and (entry.get("use_case") or entry.get("outcome"))):
-                        _wf_benchmark_table.append(entry)
+                        _wf_benchmark_table[chat_sheet_key].append(entry)
             extra_bm_text = f"\n\n[✅ Perplexity 검색 완료 — 3라운드 {len(sorted_qg)}개 쿼리 실행, {len(new_bm_entries)}건 사례 분석]"
 
     # 기존 설계 결과 or 벤치마킹 결과가 있으면 포함
     context = ""
     if _wf_step1_cache:
         context = f"현재 설계 결과:\n{json.dumps(_wf_step1_cache, ensure_ascii=False, indent=2)[:3000]}"
-    if _wf_benchmark_table:
-        context += "\n\n현재 벤치마킹 테이블:\n"
-        for bm in _wf_benchmark_table[:8]:
+    all_bm_for_context = [r for rows in _wf_benchmark_table.values() for r in rows]
+    if all_bm_for_context:
+        context += "\n\n현재 벤치마킹 테이블 (전체 시트 합산):\n"
+        for bm in all_bm_for_context[:8]:
             context += f"- [{bm.get('company_type','?')}] {bm.get('source','')}: {bm.get('use_case','')}\n"
 
     chat_system = f"""당신은 AI 기반 업무 혁신 벤치마킹 전문가입니다.
@@ -2757,7 +2773,7 @@ L4 활동: {', '.join(bm_data['l4_names'][:4])}
         result_dict = result_to_dict(parsed)
         result_dict["benchmark_insights"] = data.get("benchmark_insights", _wf_step1_cache.get("benchmark_insights", []))
         result_dict["l2_restructure"] = data.get("l2_restructure", _wf_step1_cache.get("l2_restructure", ""))
-        result_dict["benchmark_table"] = list(_wf_benchmark_table)
+        result_dict["benchmark_table"] = [r for rows in _wf_benchmark_table.values() for r in rows]
         _wf_step1_cache.clear()
         _wf_step1_cache.update(result_dict)
         updated = True
@@ -2770,7 +2786,7 @@ L4 활동: {', '.join(bm_data['l4_names'][:4])}
         "updated": updated,
         "result": _wf_step1_cache if updated else None,
         "benchmark_updated": len(new_bm_entries) > 0,
-        "benchmark_table": list(_wf_benchmark_table),
+        "benchmark_table": {k: v for k, v in _wf_benchmark_table.items()},  # 전체 시트별
     }
 
 

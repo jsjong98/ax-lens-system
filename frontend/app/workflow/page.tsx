@@ -64,7 +64,8 @@ export default function WorkflowPage() {
   const [step1Result, setStep1Result] = useState<WorkflowStepResult | null>(null);
   const [chatMessages, setChatMessages] = useState<Array<{ role: string; content: string }>>([]);
   const [chatInput, setChatInput] = useState("");
-  const [benchmarkTable, setBenchmarkTable] = useState<BenchmarkTableRow[]>([]);
+  // 시트별 벤치마킹 결과 {sheet_id: rows[]}
+  const [benchmarkTableBySheet, setBenchmarkTableBySheet] = useState<Record<string, BenchmarkTableRow[]>>({});
   const [benchmarkSummary, setBenchmarkSummary] = useState("");
   const [bmLoading, setBmLoading] = useState(false);
   const [searchLog, setSearchLog] = useState<SearchLogItem[]>([]);
@@ -190,7 +191,9 @@ export default function WorkflowPage() {
     setChatMessages((prev) => [...prev, { role: "system", content: loadingMsg }]);
     try {
       const result = await benchmarkWorkflowStep1({ companies, sheet_id: activeSheet ?? undefined });
-      setBenchmarkTable(result.benchmark_table);
+      // 현재 시트 결과를 시트별 dict에 저장
+      const sheetKey = result.sheet_id ?? activeSheet ?? "__default__";
+      setBenchmarkTableBySheet((prev) => ({ ...prev, [sheetKey]: result.benchmark_table }));
       setBenchmarkSummary(result.summary);
       if (result.search_log) setSearchLog(result.search_log);
       setChatMessages((prev) => [
@@ -239,8 +242,8 @@ export default function WorkflowPage() {
       if (result.updated && result.result) {
         setStep1Result(result.result);
       }
-      if (result.benchmark_table && result.benchmark_table.length > 0) {
-        setBenchmarkTable(result.benchmark_table);
+      if (result.benchmark_table && Object.keys(result.benchmark_table).length > 0) {
+        setBenchmarkTableBySheet((prev) => ({ ...prev, ...result.benchmark_table }));
       }
     } catch (e) {
       setChatMessages((prev) => [...prev, { role: "assistant", content: `오류: ${(e as Error).message}` }]);
@@ -267,6 +270,10 @@ export default function WorkflowPage() {
 
   const hasAsIs = summary || pptResult;
   const currentSheet = summary?.sheets.find((s) => s.sheet_id === activeSheet);
+  // 현재 시트의 벤치마킹 결과 (테이블 표시용)
+  const benchmarkTable = activeSheet ? (benchmarkTableBySheet[activeSheet] ?? []) : [];
+  // 전체 시트 벤치마킹 건수 합산 (기본 설계 활성화 조건)
+  const totalBenchmarkCount = Object.values(benchmarkTableBySheet).reduce((s, r) => s + r.length, 0);
 
   return (
     <div className="space-y-6">
@@ -600,7 +607,14 @@ export default function WorkflowPage() {
                               : "border-transparent text-gray-500 hover:text-gray-700"
                           }`}
                         >
-                          {s.sheet_name || s.sheet_id}
+                          <span className="flex items-center gap-1.5">
+                            {s.sheet_name || s.sheet_id}
+                            {(benchmarkTableBySheet[s.sheet_id]?.length ?? 0) > 0 && (
+                              <span className="inline-flex items-center justify-center px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-green-100 text-green-700">
+                                {benchmarkTableBySheet[s.sheet_id].length}
+                              </span>
+                            )}
+                          </span>
                         </button>
                       ))}
                     </div>
@@ -843,13 +857,13 @@ export default function WorkflowPage() {
                       검색 중...
                     </span>
                   ) : benchmarkTable.length > 0 ? (
-                    `\u2713 벤치마킹 완료 (${benchmarkTable.length}건)`
+                    `✓ 벤치마킹 완료 (${benchmarkTable.length}건)${totalBenchmarkCount > benchmarkTable.length ? ` / 전체 ${totalBenchmarkCount}건` : ""}`
                   ) : (
                     "\uD83D\uDD0D 벤치마킹 수행"
                   )}
                 </button>
                 {/* 기본 설계 생성 버튼 — 벤치마킹 있으면 Top-down, 없으면 Step 2로 이동 */}
-                {benchmarkTable.length > 0 ? (
+                {totalBenchmarkCount > 0 ? (
                   <button
                     onClick={() => handleGenerateStep1()}
                     disabled={loading || bmLoading}

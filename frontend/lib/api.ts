@@ -900,7 +900,7 @@ export interface WorkflowChatResponse {
   updated: boolean;
   result: WorkflowStepResult | null;
   benchmark_updated?: boolean;
-  benchmark_table?: BenchmarkTableRow[];
+  benchmark_table?: Record<string, BenchmarkTableRow[]>;
 }
 
 export async function uploadWorkflowExcel(file: File): Promise<WorkflowExcelUploadResult> {
@@ -976,7 +976,9 @@ export interface SearchLogItem {
 export interface BenchmarkStep1Result {
   ok: boolean;
   result_count: number;
+  sheet_id?: string;
   benchmark_table: BenchmarkTableRow[];
+  all_benchmark_table?: Record<string, BenchmarkTableRow[]>;
   summary: string;
   search_log?: SearchLogItem[];
 }
