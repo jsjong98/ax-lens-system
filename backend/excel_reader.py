@@ -64,13 +64,7 @@ _HEADER_PATTERNS: list[tuple[str, list[str]]] = [
     ("logic_human_judgment", ["사람 판단"]),
     ("logic_mixed",          ["혼합"]),
 
-    # ── Output (E-2) — "시스템 반영"을 먼저 잡아서 Pain의 "시스템/도구"와 구분 ──
-    ("output_system",        ["시스템 반영"]),
-    ("output_document",      ["문서/보고서"]),
-    ("output_communication", ["커뮤니케이션"]),
-    ("output_decision",      ["의사결정"]),
-
-    # ── Pain Point (D-1) — "시스템/도구"는 구체적 키워드 사용 ──
+    # ── Pain Point (D-1) — Output보다 먼저 매칭 (열 순서: D열이 E열보다 앞) ──
     ("pain_time",           ["시간/속도"]),
     ("pain_accuracy",       ["정확성"]),
     ("pain_repetition",     ["반복/수작업"]),
@@ -78,8 +72,14 @@ _HEADER_PATTERNS: list[tuple[str, list[str]]] = [
     ("pain_system",         ["시스템/도구"]),
     ("pain_communication",  ["의사소통/협업"]),
 
-    # ── 수행주체 (A-1) ──
-    ("performer_executive", ["임원"]),
+    # ── Output (E-2) — Pain 이후 매칭, "시스템 반영"으로 pain_system과 구분 ──
+    ("output_system",        ["시스템 반영"]),
+    ("output_document",      ["문서/보고서"]),
+    ("output_communication", ["커뮤니케이션"]),
+    ("output_decision",      ["Output 의사결정", "E-2 의사결정", "의사결정 산출"]),
+
+    # ── 수행주체 (A-1) — 수행주체 헤더 아래의 서브 열만 매칭 ──
+    ("performer_executive", ["A-1", "수행주체"]),  # 수행주체 그룹 헤더 열
     ("performer_manager",   ["현업 팀장"]),
     ("performer_member",    ["현업 구성원"]),
 ]

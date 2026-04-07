@@ -1442,15 +1442,23 @@ async def upload_workflow_excel(file: UploadFile = File(...)):
     _wf_benchmark_table = {}
 
     # 분류 결과 추출 (최종 > 두산 > 1차 순 fallback)
+    # '-'(대시)는 "두산 검토: 변경 불필요" 표시이므로 실제 label이 아님 → skip
+    def _resolve_label(*candidates: str) -> str:
+        for c in candidates:
+            v = (c or "").strip()
+            if v and v != "-":
+                return v
+        return ""
+
     has_classification = False
     for t in tasks:
-        label = (t.cls_final_label or t.cls_doosan_label or t.cls_1st_label).strip()
+        label = _resolve_label(t.cls_final_label, t.cls_doosan_label, t.cls_1st_label)
         if label:
             has_classification = True
             reason = t.cls_1st_reason or ""
             knockout = t.cls_1st_knockout or ""
             ai_prereq = t.cls_1st_ai_prereq or ""
-            feedback = t.cls_final_feedback or t.cls_doosan_feedback or ""
+            feedback = next((v for x in [t.cls_final_feedback, t.cls_doosan_feedback] if (v := (x or "").strip()) and v != "-"), "")
             _wf_classification[t.id] = {
                 "label": label,
                 "reason": reason,
@@ -1521,15 +1529,22 @@ async def select_workflow_excel_sheet(request: Request):
     _tasks_cache = tasks
     _wf_classification = {}
 
+    def _resolve_lbl(*candidates: str) -> str:
+        for c in candidates:
+            v = (c or "").strip()
+            if v and v != "-":
+                return v
+        return ""
+
     for t in tasks:
-        label = (t.cls_final_label or t.cls_doosan_label or t.cls_1st_label).strip()
+        label = _resolve_lbl(t.cls_final_label, t.cls_doosan_label, t.cls_1st_label)
         if label:
             _wf_classification[t.id] = {
                 "label": label,
                 "reason": t.cls_1st_reason or "",
                 "criterion": t.cls_1st_knockout or "",
                 "ai_prerequisites": t.cls_1st_ai_prereq or "",
-                "feedback": t.cls_final_feedback or t.cls_doosan_feedback or "",
+                "feedback": next((v for x in [t.cls_final_feedback, t.cls_doosan_feedback] if (v := (x or "").strip()) and v != "-"), ""),
                 "task_name": t.name,
                 "hybrid_note": "",
                 "input_types": "",
@@ -2146,12 +2161,26 @@ async def benchmark_workflow_step1(request: Request):
         target_sheets = (
             [s for s in parsed.sheets if s.sheet_id == sheet_id_bm] or parsed.sheets[:1]
         ) if sheet_id_bm else parsed.sheets[:1]
+
+        # 현재 sheet에서 실제로 L5 자식이 있는 L4 task_id만 수집
+        # (L3 단위 JSON은 모든 L4 헤더를 첫 sheet에 선언하므로, L5 없는 phantom L4 제외)
+        valid_l4_tids: set[str] = set()
+        for s in target_sheets:
+            for node in s.nodes.values():
+                if node.level == "L5" and node.task_id:
+                    parts = node.task_id.split(".")
+                    if len(parts) >= 3:
+                        valid_l4_tids.add(".".join(parts[:3]))
+
         for s in target_sheets:
             for node in s.nodes.values():
                 lv, lbl, tid = node.level, node.label.strip(), node.task_id.strip()
                 if not lbl:
                     continue
                 if lv == "L4" and lbl not in seen_l4:
+                    # L5 자식이 없는 phantom L4는 벤치마킹 컨텍스트에서 제외
+                    if valid_l4_tids and tid not in valid_l4_tids:
+                        continue
                     seen_l4.add(lbl)
                     matched = excel_by_l4.get(tid, [])
                     l4_details.append({"name": lbl, "task_id": tid,
@@ -3331,9 +3360,11 @@ def _run_mapping_check() -> dict:
         for s in sheets_result
         for g in s["l3_groups"]
     )
+    # L5 자식이 없는 phantom L4 (다른 sheet의 L4가 헤더로만 참조된 경우)는 통계에서 제외
     total_l4 = sum(
-        sum(len(g["l4_nodes"]) for g in s["l3_groups"])
+        sum(1 for n in g["l4_nodes"] if n["total_l5"] > 0)
         for s in sheets_result
+        for g in s["l3_groups"]
     )
     matched_l4 = sum(
         sum(1 for n in g["l4_nodes"] if n["matched_l5"] > 0)
@@ -3838,8 +3869,9 @@ async def benchmark_new_workflow():
             "blueprint_summary": refined_data.get("blueprint_summary", ""),
             "process_name": refined_data.get("process_name", _new_workflow_cache.get("process_name", "")),
             "redesigned_process": refined_data.get("redesigned_process", []),
-            "agents": [],
-            "execution_flow": [],
+            # 원본 agents/execution_flow 보존 — 벤치마킹이 redesigned_process를 업데이트해도 AI Service Flow는 유지
+            "agents": _new_workflow_cache.get("agents", []),
+            "execution_flow": _new_workflow_cache.get("execution_flow", []),
         }
     else:
         refined_result = _parse_freeform_result(refined_data)
@@ -4628,13 +4660,14 @@ async def _restore_task():
                 _tasks_cache = tasks
                 _wf_classification = {}
                 for t in tasks:
-                    label = (t.cls_final_label or t.cls_doosan_label or t.cls_1st_label or "").strip()
+                    _candidates = [t.cls_final_label, t.cls_doosan_label, t.cls_1st_label]
+                    label = next((v.strip() for c in _candidates if (v := (c or "").strip()) and v != "-"), "")
                     if label:
                         _wf_classification[t.id] = {
                             "label": label, "reason": t.cls_1st_reason or "",
                             "criterion": t.cls_1st_knockout or "",
                             "ai_prerequisites": t.cls_1st_ai_prereq or "",
-                            "feedback": t.cls_final_feedback or t.cls_doosan_feedback or "",
+                            "feedback": next((v for x in [t.cls_final_feedback, t.cls_doosan_feedback] if (v := (x or "").strip()) and v != "-"), ""),
                             "task_name": t.name, "hybrid_note": "", "input_types": "", "output_types": "",
                         }
                 print(f"[STARTUP] Workflow Excel 복구 완료: {excel_files[-1].name} ({len(tasks)}개)", flush=True)

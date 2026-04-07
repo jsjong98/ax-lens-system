@@ -448,7 +448,9 @@ export default function MappingCheckPanel({ hasExcel, hasAsIs, activeSheetId }: 
                           </span>
                         </div>
                       )}
-                      {g.l4_nodes.map((n) => (
+                      {g.l4_nodes
+                        .filter((n) => n.total_l5 > 0)  // phantom L4 (L5 자식 없는 cross-sheet 참조) 숨김
+                        .map((n) => (
                         <L4Row
                           key={n.task_id}
                           node={n}
