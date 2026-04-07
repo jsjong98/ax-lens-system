@@ -944,13 +944,25 @@ export default function WorkflowPage() {
                     {benchmarkSummary && (
                       <div className="text-[10px] text-gray-500 max-w-[50%] text-right">{benchmarkSummary.slice(0, 150)}</div>
                     )}
-                    <a
-                      href="/api/workflow/benchmark-table/export"
-                      download
+                    <button
+                      onClick={async () => {
+                        const base = process.env.NEXT_PUBLIC_BACKEND_URL || "";
+                        const res = await fetch(`${base}/api/workflow/benchmark-table/export`);
+                        if (!res.ok) return;
+                        const blob = await res.blob();
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement("a");
+                        const cd = res.headers.get("content-disposition") || "";
+                        const match = cd.match(/filename\*?=(?:UTF-8'')?([^;]+)/i);
+                        a.href = url;
+                        a.download = match ? decodeURIComponent(match[1].replace(/"/g, "")) : "벤치마킹_결과.xlsx";
+                        a.click();
+                        URL.revokeObjectURL(url);
+                      }}
                       className="flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-bold text-green-700 border border-green-300 bg-green-50 hover:bg-green-100 transition whitespace-nowrap"
                     >
                       ⬇ xlsx
-                    </a>
+                    </button>
                   </div>
                 </div>
                 <div className="max-h-[340px] overflow-y-auto overflow-x-auto rounded-lg border border-blue-200">
