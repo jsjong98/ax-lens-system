@@ -13,12 +13,14 @@ import {
   chatWorkflowStep1,
   generateWorkflowStep2,
   getWorkflowStepResults,
+  generateGapAnalysis,
   type WorkflowSummary,
   type WorkflowExcelTask,
   type WorkflowExcelUploadResult,
   type WorkflowStepResult,
   type BenchmarkTableRow,
   type SearchLogItem,
+  type GapAnalysisResult,
 } from "@/lib/api";
 import WorkflowEditor from "@/components/WorkflowEditor";
 import ToBeWorkflowModal from "@/components/ToBeWorkflowModal";
@@ -74,6 +76,13 @@ export default function WorkflowPage() {
   // Step 3: Step 2 상세 설계
   const [step2Result, setStep2Result] = useState<WorkflowStepResult | null>(null);
   const [showToBeModal, setShowToBeModal] = useState(false);
+
+  // Gap 분석
+  const [gapAnalysis, setGapAnalysis] = useState<GapAnalysisResult | null>(null);
+  const [gapLoading, setGapLoading] = useState(false);
+
+  // L3/L4 스코프 선택
+  const [bmScope, setBmScope] = useState<"l3" | "l4">("l4");
 
   // 공통
   const [loading, setLoading] = useState(false);
@@ -190,7 +199,7 @@ export default function WorkflowPage() {
     const loadingMsg = `벤치마킹 수행 중...${companies ? ` (기업: ${companies})` : " (Big Tech / Industry 선도사)"}`;
     setChatMessages((prev) => [...prev, { role: "system", content: loadingMsg }]);
     try {
-      const result = await benchmarkWorkflowStep1({ companies, sheet_id: activeSheet ?? undefined });
+      const result = await benchmarkWorkflowStep1({ companies, sheet_id: activeSheet ?? undefined, scope: bmScope });
       // 현재 시트 결과를 시트별 dict에 저장
       const sheetKey = result.sheet_id ?? activeSheet ?? "__default__";
       setBenchmarkTableBySheet((prev) => ({ ...prev, [sheetKey]: result.benchmark_table }));
@@ -251,6 +260,20 @@ export default function WorkflowPage() {
       setLoading(false);
     }
   }, [chatInput, activeSheet]);
+
+  /* ── Gap 분석 ───────────────────────────────────────────── */
+  const handleGapAnalysis = useCallback(async () => {
+    setGapLoading(true);
+    setError(null);
+    try {
+      const result = await generateGapAnalysis();
+      setGapAnalysis(result);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setGapLoading(false);
+    }
+  }, []);
 
   /* ── Step 3: Step 2 상세 설계 생성 ──────────────────────── */
   const handleGenerateStep2 = useCallback(async () => {
@@ -838,8 +861,30 @@ export default function WorkflowPage() {
                   </div>
                 </div>
               </div>
-              {/* 버튼 그룹 — 벤치마킹 · 기본 설계 생성 */}
+              {/* 버튼 그룹 — 스코프 토글 · 벤치마킹 · 기본 설계 생성 */}
               <div className="flex items-center gap-2 flex-shrink-0 ml-4">
+                {/* L3/L4 스코프 토글 */}
+                <div
+                  className="flex items-center rounded-lg border border-gray-200 bg-gray-100 p-0.5"
+                  title="L3: JSON 파일 전체 프로세스 | L4: 현재 탭 하나"
+                >
+                  <button
+                    onClick={() => setBmScope("l3")}
+                    className={`px-3 py-1 rounded-md text-xs font-semibold transition ${
+                      bmScope === "l3" ? "bg-white text-blue-700 shadow-sm" : "text-gray-500 hover:text-gray-700"
+                    }`}
+                  >
+                    L3 전체
+                  </button>
+                  <button
+                    onClick={() => setBmScope("l4")}
+                    className={`px-3 py-1 rounded-md text-xs font-semibold transition ${
+                      bmScope === "l4" ? "bg-white text-blue-700 shadow-sm" : "text-gray-500 hover:text-gray-700"
+                    }`}
+                  >
+                    L4 단위
+                  </button>
+                </div>
                 {/* 벤치마킹 버튼 */}
                 <button
                   onClick={() => handleBenchmark()}
@@ -1035,6 +1080,146 @@ export default function WorkflowPage() {
                       ))}
                     </tbody>
                   </table>
+                </div>
+              </div>
+            )}
+
+            {/* Gap 분석 섹션 */}
+            {totalBenchmarkCount > 0 && (
+              <div className="mb-5">
+                <div className="border-t border-gray-200 pt-4 mt-2">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-gray-700">Gap 분석</span>
+                      <span className="text-[10px] text-gray-400">— 선도사 To-Be vs 두산 As-Is 비교</span>
+                    </div>
+                    <button
+                      onClick={handleGapAnalysis}
+                      disabled={gapLoading || bmLoading || loading}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border-2 transition disabled:opacity-50 whitespace-nowrap"
+                      style={{
+                        borderColor: gapAnalysis ? "#16A34A" : "#7C3AED",
+                        color: gapAnalysis ? "#16A34A" : "#7C3AED",
+                        backgroundColor: gapAnalysis ? "#F0FDF4" : "#F5F3FF",
+                      }}
+                    >
+                      {gapLoading ? (
+                        <span className="flex items-center gap-1.5">
+                          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-purple-300 border-t-purple-600" />
+                          분석 중...
+                        </span>
+                      ) : gapAnalysis ? (
+                        "↺ Gap 분석 재수행"
+                      ) : (
+                        "⚡ Gap 분석 수행"
+                      )}
+                    </button>
+                  </div>
+
+                  {gapAnalysis && (
+                    <div className="space-y-4">
+                      {/* Executive Summary 카드 */}
+                      <div className="rounded-lg border border-purple-200 bg-purple-50 px-4 py-3">
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <span className="text-xs font-bold text-purple-800">종합 요약</span>
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            gapAnalysis.overall_gap_level === "높음"
+                              ? "bg-red-100 text-red-700"
+                              : gapAnalysis.overall_gap_level === "중간"
+                              ? "bg-amber-100 text-amber-700"
+                              : "bg-green-100 text-green-700"
+                          }`}>
+                            전체 Gap: {gapAnalysis.overall_gap_level}
+                          </span>
+                        </div>
+                        <p className="text-xs text-purple-900 leading-relaxed">{gapAnalysis.executive_summary}</p>
+                      </div>
+
+                      {/* Gap 테이블 */}
+                      {gapAnalysis.gap_items && gapAnalysis.gap_items.length > 0 && (
+                        <div className="overflow-x-auto rounded-lg border border-gray-200">
+                          <table className="w-full text-xs" style={{ minWidth: "1000px" }}>
+                            <thead className="sticky top-0 bg-gray-50 border-b border-gray-200">
+                              <tr>
+                                <th className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">L4 활동</th>
+                                <th className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">As-Is (두산)</th>
+                                <th className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">To-Be (선도사)</th>
+                                <th className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">Gap 수준</th>
+                                <th className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">근본 원인</th>
+                                <th className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">Action Plan</th>
+                                <th className="text-center px-3 py-2 font-medium text-gray-600 whitespace-nowrap">우선순위</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {[...gapAnalysis.gap_items]
+                                .sort((a, b) => a.priority - b.priority)
+                                .map((item, i) => (
+                                <tr key={i} className="border-b border-gray-100 hover:bg-gray-50/50">
+                                  <td className="px-3 py-2 font-medium text-gray-800 max-w-[120px]">{item.l4_activity}</td>
+                                  <td className="px-3 py-2 text-gray-600 max-w-[160px]">{item.as_is}</td>
+                                  <td className="px-3 py-2 text-blue-700 max-w-[160px]">{item.to_be}</td>
+                                  <td className="px-3 py-2 whitespace-nowrap">
+                                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                      item.gap_level === "높음"
+                                        ? "bg-red-100 text-red-700"
+                                        : item.gap_level === "중간"
+                                        ? "bg-amber-100 text-amber-700"
+                                        : "bg-green-100 text-green-700"
+                                    }`}>
+                                      {item.gap_level}
+                                    </span>
+                                  </td>
+                                  <td className="px-3 py-2 text-gray-500 max-w-[140px]">{item.root_cause}</td>
+                                  <td className="px-3 py-2 text-gray-600 max-w-[200px]">{item.action_plan}</td>
+                                  <td className="px-3 py-2 text-center">
+                                    <span className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold ${
+                                      item.priority === 1
+                                        ? "bg-red-100 text-red-700"
+                                        : item.priority === 2
+                                        ? "bg-amber-100 text-amber-700"
+                                        : "bg-gray-100 text-gray-500"
+                                    }`}>
+                                      {item.priority}
+                                    </span>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+
+                      {/* Quick Wins & Strategic Actions */}
+                      <div className="grid grid-cols-2 gap-3">
+                        {gapAnalysis.quick_wins && gapAnalysis.quick_wins.length > 0 && (
+                          <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3">
+                            <div className="text-xs font-bold text-green-800 mb-2">Quick Wins (즉시 시행)</div>
+                            <ul className="space-y-1">
+                              {gapAnalysis.quick_wins.map((w, i) => (
+                                <li key={i} className="flex items-start gap-1.5 text-xs text-green-900">
+                                  <span className="text-green-500 shrink-0 mt-0.5">✓</span>
+                                  <span>{w}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        {gapAnalysis.strategic_actions && gapAnalysis.strategic_actions.length > 0 && (
+                          <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3">
+                            <div className="text-xs font-bold text-blue-800 mb-2">Strategic Actions (중장기)</div>
+                            <ul className="space-y-1">
+                              {gapAnalysis.strategic_actions.map((a, i) => (
+                                <li key={i} className="flex items-start gap-1.5 text-xs text-blue-900">
+                                  <span className="text-blue-500 shrink-0 mt-0.5">→</span>
+                                  <span>{a}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             )}

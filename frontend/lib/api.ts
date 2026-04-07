@@ -986,11 +986,37 @@ export interface BenchmarkStep1Result {
 export async function benchmarkWorkflowStep1(params?: {
   companies?: string;
   sheet_id?: string;
+  scope?: "l3" | "l4";
 }): Promise<BenchmarkStep1Result> {
   return apiFetch("/workflow/benchmark-step1", {
     method: "POST",
     body: JSON.stringify(params || {}),
   });
+}
+
+export interface GapItem {
+  l4_activity: string;
+  as_is: string;
+  to_be: string;
+  gap_description: string;
+  gap_level: "높음" | "중간" | "낮음";
+  root_cause: string;
+  action_plan: string;
+  priority: number;
+}
+
+export interface GapAnalysisResult {
+  ok: boolean;
+  process_name: string;
+  overall_gap_level: string;
+  executive_summary: string;
+  gap_items: GapItem[];
+  quick_wins: string[];
+  strategic_actions: string[];
+}
+
+export async function generateGapAnalysis(): Promise<GapAnalysisResult> {
+  return apiFetch("/workflow/gap-analysis", { method: "POST", body: "{}" });
 }
 
 export async function generateWorkflowStep1(params: {

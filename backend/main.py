@@ -1587,6 +1587,7 @@ async def get_workflow_excel_tasks():
 _wf_benchmark_results: list = []   # 벤치마킹 검색 결과 (raw)
 _wf_benchmark_table: dict = {}     # 시트별 벤치마킹 결과 테이블 {sheet_id: [rows]}
 _wf_search_log: list = []          # 벤치마킹 검색 로그 (thinking process)
+_wf_gap_analysis: dict = {}        # Gap 분석 결과 캐시
 
 # ── 벤치마킹 source / URL 검증 필터 ─────────────────────────────────────────
 
@@ -2133,7 +2134,8 @@ async def benchmark_workflow_step1(request: Request):
 
     body = await request.json()
     extra_companies = body.get("companies", "")  # 추가 검색 기업명
-    sheet_id_bm = body.get("sheet_id", "")
+    scope = body.get("scope", "l4")  # "l3" = 전체 시트, "l4" = 현재 시트만
+    sheet_id_bm = body.get("sheet_id", "") if scope != "l3" else ""
 
     process_name, task_summary, pain_summary = _build_task_and_pain_summary(sheet_id_bm)
 
@@ -2163,9 +2165,12 @@ async def benchmark_workflow_step1(request: Request):
 
     if "parsed" in _workflow_cache:
         parsed = _workflow_cache["parsed"]
-        target_sheets = (
-            [s for s in parsed.sheets if s.sheet_id == sheet_id_bm] or parsed.sheets[:1]
-        ) if sheet_id_bm else parsed.sheets[:1]
+        if scope == "l3":
+            target_sheets = parsed.sheets  # 전체 시트 (L3 스코프)
+        elif sheet_id_bm:
+            target_sheets = [s for s in parsed.sheets if s.sheet_id == sheet_id_bm] or parsed.sheets[:1]
+        else:
+            target_sheets = parsed.sheets[:1]
 
         # 현재 sheet에서 실제로 L5 자식이 있는 L4 task_id만 수집
         # (L3 단위 JSON은 모든 L4 헤더를 첫 sheet에 선언하므로, L5 없는 phantom L4 제외)
@@ -2475,6 +2480,87 @@ async def benchmark_workflow_step1(request: Request):
         "summary": summary_text,
         "search_log": _bm_search_log,
     }
+
+
+# ── Gap 분석 ─────────────────────────────────────────────────
+
+@app.post("/api/workflow/gap-analysis", tags=["Workflow"])
+async def generate_gap_analysis(request: Request):
+    """
+    벤치마킹 결과(선도사 To-Be) vs 두산 현재(As-Is)를 비교하여 Gap 분석 수행.
+    벤치마킹이 먼저 수행되어 있어야 합니다.
+    """
+    global _wf_gap_analysis
+
+    all_bm_rows = [r for rows in _wf_benchmark_table.values() for r in rows]
+    if not all_bm_rows:
+        raise HTTPException(400, "벤치마킹을 먼저 수행해주세요.")
+
+    process_name, task_summary, pain_summary = _build_task_and_pain_summary("")
+    asis_context = _build_mapped_asis_context("")
+
+    # 벤치마킹 요약 (선도사 To-Be)
+    benchmark_summary_text = f"## 벤치마킹 결과 (전체 {len(all_bm_rows)}건)\n"
+    for bm in all_bm_rows[:20]:
+        benchmark_summary_text += (
+            f"- **{bm.get('source', '')}** ({bm.get('industry', '')}) | "
+            f"L4: {bm.get('process_area', '')} | "
+            f"기술: {bm.get('ai_technology', '')} | "
+            f"사례: {bm.get('use_case', '')} | "
+            f"성과: {bm.get('outcome', '')}\n"
+        )
+
+    gap_system = f"""당신은 경영 혁신 전문가입니다. 두산 HR 프로세스의 As-Is 현황과 글로벌 선도사 벤치마킹 결과를 비교하여 Gap 분석을 수행합니다.
+
+## 벤치마킹 결과 (선도사 To-Be)
+{benchmark_summary_text}
+
+## 두산 As-Is 현황
+{task_summary}
+
+{pain_summary}
+
+{asis_context[:3000]}
+
+## Gap 분석 지침
+- 각 L4 Activity 단위로 As-Is vs To-Be Gap 분석
+- Gap Level: "높음" / "중간" / "낮음"
+- Action Plan: 구체적인 AI 전환 실행 방향
+- 실제 벤치마킹 데이터에 근거한 분석만 수행
+- 벤치마킹 사례에서 기업명 구체적으로 인용
+
+## 출력 형식 (JSON만, 마크다운 없음)
+{{
+  "process_name": "{process_name}",
+  "overall_gap_level": "높음/중간/낮음",
+  "executive_summary": "경영진 요약 (3-5문장)",
+  "gap_items": [
+    {{
+      "l4_activity": "L4 활동명",
+      "as_is": "두산 현재 수준 (구체적)",
+      "to_be": "선도사 수준 (기업명 포함)",
+      "gap_description": "차이 설명",
+      "gap_level": "높음/중간/낮음",
+      "root_cause": "Gap 원인",
+      "action_plan": "단계별 개선 방향",
+      "priority": 1
+    }}
+  ],
+  "quick_wins": ["즉시 시행 가능한 액션 (3개 이내)"],
+  "strategic_actions": ["중장기 전략 과제 (3개 이내)"]
+}}"""
+
+    gap_user = "위 데이터를 기반으로 Gap 분석을 수행해주세요. JSON 형식으로만 응답하세요."
+
+    result_data = await _call_llm_step1(gap_system, [{"role": "user", "content": gap_user}])
+
+    if not result_data:
+        raise HTTPException(500, "Gap 분석 생성에 실패했습니다.")
+
+    _wf_gap_analysis = result_data
+    _wf_gap_analysis["ok"] = True
+
+    return _wf_gap_analysis
 
 
 # ── Step 1 프롬프트 기반 기본 설계 ──────────────────────────
