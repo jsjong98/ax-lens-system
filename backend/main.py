@@ -1821,13 +1821,18 @@ def _build_mapped_asis_context(sheet_id: str = "") -> str:
 
 def _build_task_and_pain_summary(sheet_id: str = "") -> tuple[str, str, str]:
     """엑셀 Task 데이터로 task_summary, pain_summary, process_name을 만든다.
-    sheet_id가 주어지면 해당 JSON 시트에 등장하는 task_id 범위로 엑셀 Task를 필터링한다."""
+    - sheet_id 지정 시: 해당 시트(L4 단위)의 task_id 범위로 필터링
+    - sheet_id="" + JSON 있음: JSON의 모든 시트를 합산 (= L3 전체 스코프)
+    - sheet_id="" + JSON 없음: 엑셀 전체 반환"""
 
-    # JSON 시트 기반 필터링 — 선택된 시트의 task_id 집합 추출
     relevant_tasks = _wf_excel_tasks
-    if sheet_id and "parsed" in _workflow_cache:
+    if "parsed" in _workflow_cache:
         parsed = _workflow_cache["parsed"]
-        target_sheets = [s for s in parsed.sheets if s.sheet_id == sheet_id] or parsed.sheets[:1]
+        # sheet_id 지정 시 해당 시트만, 아니면 JSON의 전체 시트
+        if sheet_id:
+            target_sheets = [s for s in parsed.sheets if s.sheet_id == sheet_id] or parsed.sheets[:1]
+        else:
+            target_sheets = parsed.sheets  # L3 전체: 모든 L4 시트 합산
 
         # JSON 노드의 task_id 및 l4_id/l3_id 접두사 수집
         json_tids: set[str] = set()
@@ -2491,9 +2496,9 @@ async def generate_workflow_step1(request: Request):
     body = await request.json()
     user_prompt = body.get("prompt", "")
     process_name_override = body.get("process_name", "")
-    sheet_id = body.get("sheet_id", "")
 
-    process_name, task_summary, pain_summary = _build_task_and_pain_summary(sheet_id)
+    # 기본 설계는 JSON/PPT 전체(L3 단위) 기준 — sheet_id 무관하게 모든 시트 합산
+    process_name, task_summary, pain_summary = _build_task_and_pain_summary("")
     if process_name_override:
         process_name = process_name_override
 
@@ -2508,8 +2513,8 @@ async def generate_workflow_step1(request: Request):
                     f"{bm.get('use_case', '')} → {bm.get('outcome', '')}\n"
                 )
 
-    # As-Is + 엑셀 매핑 컨텍스트
-    asis_context = _build_mapped_asis_context(sheet_id)
+    # As-Is + 엑셀 매핑 컨텍스트 — 모든 시트 합산 (sheet_id="" → 전체)
+    asis_context = _build_mapped_asis_context("")
 
     system = _step1_system_prompt(process_name, task_summary, pain_summary, benchmark_text + "\n\n" + asis_context)
 
@@ -2545,7 +2550,8 @@ async def chat_workflow_step1(request: Request):
     if not user_message:
         raise HTTPException(400, "메시지가 필요합니다.")
 
-    process_name, task_summary, pain_summary = _build_task_and_pain_summary(sheet_id)
+    # 채팅도 L3 전체 기준 (JSON의 모든 시트 합산)
+    process_name, task_summary, pain_summary = _build_task_and_pain_summary("")
 
     # 메시지에서 기업명 감지 → 추가 쿼리에 포함
     import re as _re
@@ -2565,15 +2571,14 @@ async def chat_workflow_step1(request: Request):
     if _wf_excel_tasks:
         companies = list(set(company_pattern)) if company_pattern else []
 
-        # sheet_id 기준으로 필터링된 Task 사용
-        _, task_sum_txt, _ = _build_task_and_pain_summary(sheet_id)
+        # JSON 전체 시트 기준 L4 ID 수집
+        _, task_sum_txt, _ = _build_task_and_pain_summary("")
         _, excel_by_l4, excel_by_l3, excel_by_l2 = _build_excel_index()
 
-        # JSON 시트 기준 L4 ID 집합 추출 (같은 방식)
         scoped_l4_ids: set[str] = set()
-        if sheet_id and "parsed" in _workflow_cache:
+        if "parsed" in _workflow_cache:
             parsed_tmp = _workflow_cache["parsed"]
-            for s in [ss for ss in parsed_tmp.sheets if ss.sheet_id == sheet_id] or parsed_tmp.sheets[:1]:
+            for s in parsed_tmp.sheets:  # 모든 시트
                 for n in s.nodes.values():
                     if n.task_id:
                         parts = n.task_id.split(".")
@@ -2830,13 +2835,31 @@ async def generate_workflow_step2(request: Request):
 
     body = await request.json() if True else {}
     additional_context = body.get("additional_context", "") if body else ""
-    sheet_id = body.get("sheet_id", "") if body else ""
 
     process_name = _wf_step1_cache.get("process_name", "HR 프로세스")
 
-    # 상세 Pain Point 분석
+    # 상세 설계도 JSON 전체 스코프 — 선택 시트 무관
+    _, _, _ = _build_task_and_pain_summary("")  # 스코프 확인용 (실제 사용은 pain_detail 직접 구성)
+    scoped_tasks_step2 = _wf_excel_tasks  # 기본: 전체
+    if "parsed" in _workflow_cache:
+        # JSON 전체 시트의 task_id 범위로 필터
+        _p2 = _workflow_cache["parsed"]
+        _tids2, _l4ids2, _l3ids2 = set(), set(), set()
+        for _s2 in _p2.sheets:
+            for _n2 in _s2.nodes.values():
+                if _n2.task_id:
+                    _tids2.add(_n2.task_id)
+                    _pts2 = _n2.task_id.split(".")
+                    if len(_pts2) >= 3: _l4ids2.add(".".join(_pts2[:3]))
+                    if len(_pts2) >= 2: _l3ids2.add(".".join(_pts2[:2]))
+        _filtered2 = [t for t in _wf_excel_tasks if t.id in _tids2]
+        if not _filtered2: _filtered2 = [t for t in _wf_excel_tasks if t.l4_id in _l4ids2]
+        if not _filtered2: _filtered2 = [t for t in _wf_excel_tasks if t.l3_id in _l3ids2]
+        if _filtered2: scoped_tasks_step2 = _filtered2
+
+    # 상세 Pain Point 분석 (JSON 스코프 내 tasks만)
     pain_detail_lines = []
-    for t in _wf_excel_tasks:
+    for t in scoped_tasks_step2:
         pains = []
         if t.pain_time: pains.append(f"시간/속도: {t.pain_time}")
         if t.pain_accuracy: pains.append(f"정확성: {t.pain_accuracy}")
@@ -2854,8 +2877,8 @@ async def generate_workflow_step2(request: Request):
 
     pain_detail = "\n".join(pain_detail_lines) if pain_detail_lines else "상세 Pain Point 정보 없음"
 
-    # As-Is + 엑셀 매핑 컨텍스트 (Step 1과 동일한 함수 사용)
-    asis_info = _build_mapped_asis_context(sheet_id)
+    # As-Is + 엑셀 매핑 컨텍스트 — 모든 시트 합산 (sheet_id="" → 전체)
+    asis_info = _build_mapped_asis_context("")
 
     step2_system = f"""당신은 AI 기반 업무 혁신 설계 전문가입니다.
 Step 1에서 도출된 기본 설계를 기반으로, 두산에 최적화된 **AI 기반 To-Be Workflow 상세 설계**를 수행합니다.
