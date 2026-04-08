@@ -49,8 +49,8 @@ _HEADER_PATTERNS: list[tuple[str, list[str]]] = [
     # 두산 검토 ("Feedback"은 PwC 뒤에 매칭되므로 "두산"이 필수)
     ("cls_doosan_feedback", ["두산 Feedback", "두산 피드백"]),
     ("cls_doosan_label",    ["변경 필요", "두산 검토"]),
-    # 1차 평가
-    ("cls_1st_label",      ["1차 분류결과", "1차 분류"]),
+    # 1차 평가 — "1차 분류결과" / "1차 분류" / "AI 기반 평가" (v7 보상 파일 등 다단 헤더 대응)
+    ("cls_1st_label",      ["1차 분류결과", "1차 분류", "AI 기반 평가"]),
     ("cls_1st_knockout",   ["적용기준", "Knock-out", "Knockout"]),
     ("cls_1st_reason",     ["1차 판단", "판단 근거", "판단근거"]),
     ("cls_1st_ai_prereq",  ["AI 수행 필요", "필요여건", "필요 여건"]),

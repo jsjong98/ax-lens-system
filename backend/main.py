@@ -951,6 +951,119 @@ _WF_DIR = _PERSIST_ROOT / "workflow"
 _WF_DIR.mkdir(exist_ok=True)
 _current_excel_path: Path | None = None
 
+# ── 멀티 세션 지원 ────────────────────────────────────────────────────────────
+_SESSIONS_DIR = _WF_DIR / "sessions"
+_SESSIONS_DIR.mkdir(exist_ok=True)
+_current_session_id: str = ""   # 현재 활성 세션 ID (JSON 파일명 기반)
+_sessions_manifest: dict = {}   # {session_id: {name, created_at, updated_at, excel_file, json_file, ppt_file}}
+
+
+def _get_session_dir(sid: str) -> Path:
+    """세션 디렉토리 경로 반환 (없으면 생성)."""
+    import re
+    safe = re.sub(r'[^\w가-힣\-]', '_', sid)[:80] or "default"
+    d = _SESSIONS_DIR / safe
+    d.mkdir(exist_ok=True)
+    return d
+
+
+def _load_sessions_manifest() -> dict:
+    global _sessions_manifest
+    p = _WF_DIR / "sessions.json"
+    if p.exists():
+        try:
+            _sessions_manifest = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            _sessions_manifest = {}
+    return _sessions_manifest
+
+
+def _save_sessions_manifest() -> None:
+    p = _WF_DIR / "sessions.json"
+    p.write_text(json.dumps(_sessions_manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _save_session_data(sid: str) -> None:
+    """현재 메모리 상태를 세션 디렉토리의 session_data.json에 저장."""
+    if not sid:
+        return
+    import datetime as _dt
+
+    def _ser(obj):
+        """JSON 직렬화 불가 객체 처리."""
+        try:
+            return json.dumps(obj, ensure_ascii=False)
+        except Exception:
+            return "{}"
+
+    data = {
+        "classification": _wf_classification,
+        "benchmark_table": _wf_benchmark_table,
+        "step1": _wf_step1_cache,
+        "step2": _wf_step2_cache,
+        "gap_analysis": _wf_gap_analysis,
+        "saved_at": _dt.datetime.now().isoformat(),
+    }
+    try:
+        d = _get_session_dir(sid)
+        (d / "session_data.json").write_text(
+            json.dumps(data, ensure_ascii=False, indent=2, default=str),
+            encoding="utf-8",
+        )
+        # manifest 업데이트
+        if sid in _sessions_manifest:
+            _sessions_manifest[sid]["updated_at"] = _dt.datetime.now().isoformat()
+            _save_sessions_manifest()
+    except Exception as e:
+        print(f"[SESSION] session_data 저장 실패({sid}): {e}", flush=True)
+
+
+def _load_session_data(sid: str) -> bool:
+    """세션 디렉토리에서 state를 메모리에 복구. 성공 시 True 반환."""
+    global _wf_classification, _wf_benchmark_table, _wf_step1_cache, _wf_step2_cache, _wf_gap_analysis
+    global _workflow_cache, _wf_excel_tasks, _wf_excel_path
+    from workflow_parser import parse_workflow_json, get_workflow_summary
+    from excel_reader import load_tasks
+
+    d = _get_session_dir(sid)
+
+    # JSON 복구
+    jp = d / "workflow.json"
+    if jp.exists():
+        try:
+            raw = json.loads(jp.read_text(encoding="utf-8"))
+            parsed = parse_workflow_json(raw)
+            summary = get_workflow_summary(parsed)
+            _workflow_cache = {"filename": jp.name, "parsed": parsed, "summary": summary, "raw": raw}
+        except Exception as e:
+            print(f"[SESSION] JSON 복구 실패({sid}): {e}", flush=True)
+
+    # Excel 복구
+    xls = list(d.glob("*.xlsx"))
+    if xls:
+        try:
+            tasks = load_tasks(str(xls[-1]))
+            _wf_excel_tasks = tasks
+            _wf_excel_path = str(xls[-1])
+            # 분류 결과는 session_data.json에서 복구하므로 여기서는 비움
+        except Exception as e:
+            print(f"[SESSION] Excel 복구 실패({sid}): {e}", flush=True)
+
+    # session_data.json 복구 (classification, benchmark, step1, step2, gap)
+    dp = d / "session_data.json"
+    if dp.exists():
+        try:
+            sd = json.loads(dp.read_text(encoding="utf-8"))
+            _wf_classification = sd.get("classification", {})
+            _wf_benchmark_table = sd.get("benchmark_table", {})
+            _wf_step1_cache = sd.get("step1", {})
+            _wf_step2_cache = sd.get("step2", {})
+            _wf_gap_analysis = sd.get("gap_analysis", {})
+        except Exception as e:
+            print(f"[SESSION] session_data 복구 실패({sid}): {e}", flush=True)
+
+    return jp.exists() or bool(xls)
+
 
 @app.get("/api/upload/current", tags=["Upload"])
 async def get_current_file():
@@ -1114,22 +1227,46 @@ async def upload_workflow(file: UploadFile = File(...)):
     parsed = parse_workflow_json(data)
     summary = get_workflow_summary(parsed)
 
-    # 캐시에 저장
-    global _workflow_cache
+    # 세션 ID = JSON 파일명 stem (e.g. "발령관리.json" → "발령관리")
+    import datetime as _dt
+    raw_fname = file.filename or "workflow.json"
+    sid = Path(raw_fname).stem or "default"
+
+    global _workflow_cache, _current_session_id
     _workflow_cache = {
-        "filename": file.filename,
+        "filename": raw_fname,
         "parsed": parsed,
         "summary": summary,
         "raw": data,
     }
+    _current_session_id = sid
 
-    # 워크플로우 JSON도 파일로 저장 (persist 볼륨)
-    save_path = _WF_DIR / "workflow.json"
-    save_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    # 세션 디렉토리에 JSON 저장
+    sess_dir = _get_session_dir(sid)
+    json_path = sess_dir / "workflow.json"
+    json_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    # 하위 호환: 기존 단일 파일도 유지
+    (_WF_DIR / "workflow.json").write_text(
+        json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+    # manifest 등록/갱신
+    _load_sessions_manifest()
+    now = _dt.datetime.now().isoformat()
+    if sid not in _sessions_manifest:
+        _sessions_manifest[sid] = {"id": sid, "name": sid, "created_at": now}
+    _sessions_manifest[sid].update({
+        "updated_at": now,
+        "json_file": "workflow.json",
+    })
+    _sessions_manifest["_current"] = sid
+    _save_sessions_manifest()
 
     return {
         "ok": True,
-        "filename": file.filename,
+        "filename": raw_fname,
+        "session_id": sid,
         **_enrich_summary_with_cls(summary),
     }
 
@@ -1301,11 +1438,26 @@ async def upload_ppt_workflow(file: UploadFile = File(...)):
     """PPT 파일을 업로드하여 슬라이드별 노드를 추출하고 태스크와 매칭합니다."""
     from ppt_parser import parse_ppt, match_nodes_to_tasks, ppt_slide_to_react_flow, ppt_to_parsed_workflow
 
+    import datetime as _dt
     content = await file.read()
-    # PPT 파일을 persist 볼륨에 저장
     safe_ppt_name = Path(file.filename or "workflow.pptx").name
-    ppt_save_path = _WF_DIR / safe_ppt_name
+
+    # 세션 디렉토리에 저장
+    _load_sessions_manifest()
+    sid = _current_session_id or _sessions_manifest.get("_current", "default")
+    sess_dir = _get_session_dir(sid)
+    ppt_save_path = sess_dir / safe_ppt_name
     ppt_save_path.write_bytes(content)
+
+    # 하위 호환: _WF_DIR 루트에도 저장
+    (_WF_DIR / safe_ppt_name).write_bytes(content)
+
+    # manifest 갱신
+    now = _dt.datetime.now().isoformat()
+    if sid not in _sessions_manifest:
+        _sessions_manifest[sid] = {"id": sid, "name": sid, "created_at": now}
+    _sessions_manifest[sid].update({"updated_at": now, "ppt_file": safe_ppt_name})
+    _save_sessions_manifest()
 
     try:
         parsed = parse_ppt(content)
@@ -1410,19 +1562,37 @@ async def upload_workflow_excel(file: UploadFile = File(...)):
     """
     from excel_reader import load_tasks, list_sheets
 
+    import datetime as _dt
     content = await file.read()
     _WF_DIR.mkdir(exist_ok=True)
 
-    # 기존 엑셀 파일 전부 삭제 (이전 파일 혼재 방지)
+    safe_wf_excel_name = Path(file.filename or "workflow_excel.xlsx").name
+
+    # 세션 디렉토리에 저장 (현재 세션 없으면 파일명 stem을 세션 ID로)
+    _load_sessions_manifest()
+    sid = _current_session_id or _sessions_manifest.get("_current", "")
+    if not sid:
+        sid = Path(safe_wf_excel_name).stem or "default"
+        global _current_session_id
+        _current_session_id = sid
+    sess_dir = _get_session_dir(sid)
+
+    # 세션 내 기존 엑셀 삭제 후 저장
+    for old in sess_dir.glob("*.xlsx"):
+        try:
+            old.unlink()
+        except Exception:
+            pass
+    save_path = sess_dir / safe_wf_excel_name
+    save_path.write_bytes(content)
+
+    # 하위 호환: _WF_DIR 루트에도 복사 (기존 코드 + startup restore)
     for old in _WF_DIR.glob("*.xlsx"):
         try:
             old.unlink()
         except Exception:
             pass
-
-    safe_wf_excel_name = Path(file.filename or "workflow_excel.xlsx").name
-    save_path = _WF_DIR / safe_wf_excel_name
-    save_path.write_bytes(content)
+    (_WF_DIR / safe_wf_excel_name).write_bytes(content)
 
     # 시트 목록
     sheets = list_sheets(str(save_path))
@@ -1435,6 +1605,14 @@ async def upload_workflow_excel(file: UploadFile = File(...)):
     global _wf_step1_cache, _wf_step2_cache, _wf_benchmark_table
     _wf_excel_tasks = tasks
     _wf_excel_path = str(save_path)   # 현재 파일 경로 고정
+
+    # manifest 갱신
+    now = _dt.datetime.now().isoformat()
+    if sid not in _sessions_manifest:
+        _sessions_manifest[sid] = {"id": sid, "name": sid, "created_at": now}
+    _sessions_manifest[sid].update({"updated_at": now, "excel_file": safe_wf_excel_name})
+    _sessions_manifest["_current"] = sid
+    _save_sessions_manifest()
     _wf_classification = {}
     _wf_step1_cache = {}
     _wf_step2_cache = {}
@@ -1484,6 +1662,7 @@ async def upload_workflow_excel(file: UploadFile = File(...)):
     return {
         "ok": True,
         "filename": file.filename,
+        "session_id": sid,
         "task_count": len(tasks),
         "has_classification": has_classification,
         "classified_count": len(_wf_classification),
@@ -2039,6 +2218,8 @@ def _save_step1_result(result_data: dict) -> dict:
 
     global _wf_step1_cache
     _wf_step1_cache = result_dict
+    if _current_session_id:
+        _save_session_data(_current_session_id)
     return result_dict
 
 
@@ -2470,6 +2651,10 @@ async def benchmark_workflow_step1(request: Request):
     if _wf_step1_cache:
         all_rows = [r for rows in _wf_benchmark_table.values() for r in rows]
         _wf_step1_cache["benchmark_table"] = all_rows
+
+    # 세션 데이터 저장
+    if _current_session_id:
+        _save_session_data(_current_session_id)
 
     return {
         "ok": True,
@@ -3099,6 +3284,8 @@ Step 1에서 도출된 기본 설계를 기반으로, 두산에 최적화된 **A
 
     global _wf_step2_cache
     _wf_step2_cache = result_dict
+    if _current_session_id:
+        _save_session_data(_current_session_id)
 
     # New Workflow 캐시에도 반영 (과제 정의서/설계서 생성에 활용)
     _new_workflow_cache.clear()
@@ -4550,6 +4737,105 @@ async def export_project_ppt():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Workflow 세션 관리 API
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.get("/api/workflow/sessions", tags=["Workflow"])
+async def list_workflow_sessions():
+    """저장된 Workflow 세션 목록을 반환합니다."""
+    _load_sessions_manifest()
+    sessions = [
+        v for k, v in _sessions_manifest.items()
+        if k != "_current" and isinstance(v, dict)
+    ]
+    # updated_at 기준 최신순 정렬
+    sessions.sort(key=lambda s: s.get("updated_at", s.get("created_at", "")), reverse=True)
+    return {
+        "ok": True,
+        "current": _sessions_manifest.get("_current", _current_session_id),
+        "sessions": sessions,
+    }
+
+
+@app.post("/api/workflow/sessions/{session_id}/load", tags=["Workflow"])
+async def load_workflow_session(session_id: str):
+    """다른 세션을 로드합니다 (파일 + 상태 전환)."""
+    import asyncio
+
+    _load_sessions_manifest()
+    if session_id not in _sessions_manifest:
+        raise HTTPException(404, f"세션 '{session_id}'을 찾을 수 없습니다.")
+
+    global _current_session_id, _wf_excel_tasks, _wf_chat_history
+    global _wf_step1_cache, _wf_step2_cache, _wf_benchmark_table, _wf_gap_analysis
+
+    # 현재 세션 저장 후 전환
+    if _current_session_id:
+        _save_session_data(_current_session_id)
+
+    # 메모리 초기화
+    _wf_chat_history = []
+    _wf_step1_cache = {}
+    _wf_step2_cache = {}
+    _wf_benchmark_table = {}
+    _wf_gap_analysis = {}
+
+    # 새 세션 로드
+    ok = await asyncio.to_thread(_load_session_data, session_id)
+    if not ok:
+        raise HTTPException(500, f"세션 '{session_id}' 로드에 실패했습니다.")
+
+    _current_session_id = session_id
+    _sessions_manifest["_current"] = session_id
+    _save_sessions_manifest()
+
+    # 응답: summary + 분류 현황
+    from workflow_parser import get_workflow_summary
+    summary = get_workflow_summary(_workflow_cache["parsed"]) if "parsed" in _workflow_cache else {}
+    enriched = _enrich_summary_with_cls(summary)
+
+    return {
+        "ok": True,
+        "session_id": session_id,
+        "has_step1": bool(_wf_step1_cache),
+        "has_step2": bool(_wf_step2_cache),
+        "has_benchmark": bool(_wf_benchmark_table),
+        "has_gap": bool(_wf_gap_analysis),
+        "classified_count": len(_wf_classification),
+        **enriched,
+    }
+
+
+@app.delete("/api/workflow/sessions/{session_id}", tags=["Workflow"])
+async def delete_workflow_session(session_id: str):
+    """세션과 연관 파일을 삭제합니다."""
+    import shutil
+
+    _load_sessions_manifest()
+    if session_id not in _sessions_manifest:
+        raise HTTPException(404, f"세션 '{session_id}'을 찾을 수 없습니다.")
+
+    # 디렉토리 삭제
+    try:
+        import re
+        safe = re.sub(r'[^\w가-힣\-]', '_', session_id)[:80] or "default"
+        sess_dir = _SESSIONS_DIR / safe
+        if sess_dir.exists():
+            shutil.rmtree(sess_dir)
+    except Exception as e:
+        print(f"[SESSION] 디렉토리 삭제 실패({session_id}): {e}", flush=True)
+
+    # manifest에서 제거
+    _sessions_manifest.pop(session_id, None)
+    if _sessions_manifest.get("_current") == session_id:
+        remaining = [k for k in _sessions_manifest if k != "_current" and isinstance(_sessions_manifest[k], dict)]
+        _sessions_manifest["_current"] = remaining[0] if remaining else ""
+    _save_sessions_manifest()
+
+    return {"ok": True, "deleted": session_id}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Admin 전용 API
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -4672,10 +4958,50 @@ async def admin_list_uploads_all(request: Request):
     # Task 분류 엑셀
     task_excel = _dir_files(_UPLOAD_DIR, {".xlsx", ".xls"})
 
-    # Workflow 파일들
-    wf_excel = _dir_files(_WF_DIR, {".xlsx", ".xls"})
-    wf_json = [_file_info(_WF_DIR / "workflow.json")] if (_WF_DIR / "workflow.json").exists() else []
-    wf_ppt = _dir_files(_WF_DIR, {".pptx", ".ppt"})
+    # Workflow 파일들 — 세션별로 수집
+    _load_sessions_manifest()
+    wf_excel, wf_json, wf_ppt = [], [], []
+    sessions_with_data = [
+        (sid, meta) for sid, meta in _sessions_manifest.items()
+        if sid != "_current" and isinstance(meta, dict)
+    ]
+    sessions_with_data.sort(key=lambda x: x[1].get("updated_at", x[1].get("created_at", "")), reverse=True)
+
+    for sid, meta in sessions_with_data:
+        import re as _re
+        safe_sid = _re.sub(r'[^\w가-힣\-]', '_', sid)[:80] or "default"
+        sess_dir = _SESSIONS_DIR / safe_sid
+
+        # Excel
+        for xf in sorted(sess_dir.glob("*.xlsx"), key=lambda f: f.stat().st_mtime, reverse=True)[:1]:
+            entry = _file_info(xf)
+            entry["session_id"] = sid
+            entry["display_name"] = f"[{sid}] {xf.name}"
+            wf_excel.append(entry)
+
+        # JSON
+        jf = sess_dir / "workflow.json"
+        if jf.exists():
+            entry = _file_info(jf)
+            entry["session_id"] = sid
+            entry["display_name"] = f"[{sid}] workflow.json"
+            wf_json.append(entry)
+
+        # PPT
+        for pf in sorted(sess_dir.glob("*.pptx"), key=lambda f: f.stat().st_mtime, reverse=True)[:1]:
+            entry = _file_info(pf)
+            entry["session_id"] = sid
+            entry["display_name"] = f"[{sid}] {pf.name}"
+            wf_ppt.append(entry)
+
+    # 레거시: 세션 없는 경우 루트 파일 표시
+    if not wf_excel:
+        wf_excel = _dir_files(_WF_DIR, {".xlsx", ".xls"})
+    if not wf_json:
+        if (_WF_DIR / "workflow.json").exists():
+            wf_json = [_file_info(_WF_DIR / "workflow.json")]
+    if not wf_ppt:
+        wf_ppt = _dir_files(_WF_DIR, {".pptx", ".ppt"})
 
     # New Workflow 결과 JSON들
     nw_files = []
@@ -4703,6 +5029,41 @@ async def admin_list_uploads_all(request: Request):
             "new_workflow": nw_files,
         },
     }
+
+
+@app.delete("/api/admin/workflow-session/{session_id}", tags=["Admin"])
+async def admin_delete_workflow_session(session_id: str, request: Request):
+    """Admin: Workflow 세션 삭제 (파일 + 상태 전체)."""
+    import shutil, re as _re
+    _require_admin(request)
+    _load_sessions_manifest()
+
+    safe_sid = _re.sub(r'[^\w가-힣\-]', '_', session_id)[:80] or "default"
+    sess_dir = _SESSIONS_DIR / safe_sid
+    if sess_dir.exists():
+        try:
+            shutil.rmtree(sess_dir)
+        except Exception as e:
+            raise HTTPException(500, f"세션 디렉토리 삭제 실패: {e}")
+
+    _sessions_manifest.pop(session_id, None)
+    if _sessions_manifest.get("_current") == session_id:
+        remaining = [k for k in _sessions_manifest if k != "_current" and isinstance(_sessions_manifest[k], dict)]
+        _sessions_manifest["_current"] = remaining[0] if remaining else ""
+    _save_sessions_manifest()
+    return {"ok": True, "deleted": session_id}
+
+
+@app.delete("/api/admin/upload/{filename}", tags=["Admin"])
+async def admin_delete_upload(filename: str, request: Request):
+    """Admin: Task 분류용 엑셀 파일 삭제."""
+    _require_admin(request)
+    safe_name = Path(filename).name
+    file_path = _UPLOAD_DIR / safe_name
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(404, f"파일을 찾을 수 없습니다: {safe_name}")
+    file_path.unlink()
+    return {"ok": True, "deleted": safe_name}
 
 
 @app.get("/api/admin/download/{filename}", tags=["Admin"])
@@ -4741,12 +5102,38 @@ async def _restore_task():
     """실제 복구 작업 — 블로킹 I/O를 스레드풀에서 실행."""
     import asyncio
     global _wf_excel_tasks, _wf_classification, _tasks_cache, _current_excel_path
+    global _current_session_id
     _load_manual_matches()
 
     from workflow_parser import parse_workflow_json, get_workflow_summary
     from excel_reader import load_tasks
 
-    # 1) Workflow JSON 복구 (JSON 파싱은 빠르므로 직접 실행)
+    # 0) 세션 manifest 로드 후 마지막 사용 세션 복구 (있으면 세션 기반으로 복구)
+    _load_sessions_manifest()
+    last_sid = _sessions_manifest.get("_current", "")
+    if last_sid and last_sid in _sessions_manifest:
+        try:
+            ok = await asyncio.to_thread(_load_session_data, last_sid)
+            if ok:
+                _current_session_id = last_sid
+                print(f"[STARTUP] 세션 '{last_sid}' 복구 완료", flush=True)
+
+                # Task 분류 엑셀 복구 (별도 경로)
+                if not _tasks_cache:
+                    task_excels = sorted(_UPLOAD_DIR.glob("*.xlsx"), key=lambda x: x.stat().st_mtime)
+                    if task_excels:
+                        try:
+                            _tasks_cache = await asyncio.to_thread(load_tasks, str(task_excels[-1]))
+                            _current_excel_path = task_excels[-1]
+                        except Exception:
+                            pass
+                return  # 세션 복구 성공 → 이하 레거시 복구 불필요
+        except Exception as e:
+            print(f"[STARTUP] 세션 복구 실패({last_sid}): {e}", flush=True)
+
+    # ── 레거시 단일 파일 복구 (sessions.json 없는 구버전 환경) ──────────────
+
+    # 1) Workflow JSON 복구
     json_path = _WF_DIR / "workflow.json"
     if json_path.exists() and "parsed" not in _workflow_cache:
         try:
@@ -4755,11 +5142,11 @@ async def _restore_task():
             summary = get_workflow_summary(parsed)
             _workflow_cache.update({"filename": "workflow.json", "parsed": parsed,
                                     "summary": summary, "raw": data})
-            print(f"[STARTUP] Workflow JSON 복구 완료", flush=True)
+            print(f"[STARTUP] Workflow JSON 복구 완료 (레거시)", flush=True)
         except Exception as e:
             print(f"[STARTUP] Workflow JSON 복구 실패: {e}", flush=True)
 
-    # 2) Workflow Excel 복구 (openpyxl 블로킹 → 스레드풀)
+    # 2) Workflow Excel 복구
     if not _wf_excel_tasks:
         excel_files = sorted(_WF_DIR.glob("*.xlsx"), key=lambda x: x.stat().st_mtime)
         if excel_files:
@@ -4779,7 +5166,7 @@ async def _restore_task():
                             "feedback": next((v for x in [t.cls_final_feedback, t.cls_doosan_feedback] if (v := (x or "").strip()) and v != "-"), ""),
                             "task_name": t.name, "hybrid_note": "", "input_types": "", "output_types": "",
                         }
-                print(f"[STARTUP] Workflow Excel 복구 완료: {excel_files[-1].name} ({len(tasks)}개)", flush=True)
+                print(f"[STARTUP] Workflow Excel 복구 완료 (레거시): {excel_files[-1].name} ({len(tasks)}개)", flush=True)
             except Exception as e:
                 print(f"[STARTUP] Workflow Excel 복구 실패: {e}", flush=True)
 

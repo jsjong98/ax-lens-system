@@ -14,6 +14,9 @@ import {
   generateWorkflowStep2,
   getWorkflowStepResults,
   generateGapAnalysis,
+  listWorkflowSessions,
+  loadWorkflowSession,
+  deleteWorkflowSession,
   type WorkflowSummary,
   type WorkflowExcelTask,
   type WorkflowExcelUploadResult,
@@ -21,6 +24,7 @@ import {
   type BenchmarkTableRow,
   type SearchLogItem,
   type GapAnalysisResult,
+  type WorkflowSession,
 } from "@/lib/api";
 import WorkflowEditor from "@/components/WorkflowEditor";
 import ToBeWorkflowModal from "@/components/ToBeWorkflowModal";
@@ -84,6 +88,11 @@ export default function WorkflowPage() {
   // L3/L4 스코프 선택
   const [bmScope, setBmScope] = useState<"l3" | "l4">("l4");
 
+  // 멀티 세션
+  const [sessions, setSessions] = useState<WorkflowSession[]>([]);
+  const [currentSessionId, setCurrentSessionId] = useState<string>("");
+  const [sessionLoading, setSessionLoading] = useState(false);
+
   // 공통
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -95,8 +104,83 @@ export default function WorkflowPage() {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatMessages]);
 
+  // 세션 목록 로드
+  const loadSessions = useCallback(async () => {
+    try {
+      const res = await listWorkflowSessions();
+      setSessions(res.sessions);
+      setCurrentSessionId(res.current || "");
+    } catch (_) {}
+  }, []);
+
+  // 세션 전환
+  const handleLoadSession = useCallback(async (sessionId: string) => {
+    setSessionLoading(true);
+    setError(null);
+    try {
+      await loadWorkflowSession(sessionId);
+      setCurrentSessionId(sessionId);
+      // 상태 초기화 후 새 세션 데이터 로드
+      setExcelResult(null);
+      setExcelTasks([]);
+      setSummary(null);
+      setStep1Result(null);
+      setStep2Result(null);
+      setBenchmarkTableBySheet({});
+      setGapAnalysis(null);
+      setChatMessages([]);
+      setCurrentStep(0);
+      // 복구된 세션의 워크플로우 + 태스크 불러오기
+      const [ws, et, sr] = await Promise.allSettled([
+        getWorkflowSummary(),
+        getWorkflowExcelTasks(),
+        getWorkflowStepResults(),
+      ]);
+      if (ws.status === "fulfilled") {
+        setSummary(ws.value);
+        if (ws.value.sheets.length > 0) setActiveSheet(ws.value.sheets[0].sheet_id);
+        setCurrentStep(1);
+      }
+      if (et.status === "fulfilled" && et.value.total > 0) {
+        setExcelTasks(et.value.tasks);
+        setExcelResult({
+          ok: true, filename: sessionId,
+          task_count: et.value.total,
+          has_classification: et.value.classified > 0,
+          classified_count: et.value.classified,
+          sheets: [],
+        });
+      }
+      if (sr.status === "fulfilled") {
+        const r = sr.value;
+        if (r.has_step1 && r.step1) { setStep1Result(r.step1); setChatMessages(r.chat_history || []); setCurrentStep(2); }
+        if (r.has_step2 && r.step2) { setStep2Result(r.step2); setCurrentStep(3); }
+      }
+      await loadSessions();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSessionLoading(false);
+    }
+  }, [loadSessions]);
+
+  // 세션 삭제
+  const handleDeleteSession = useCallback(async (sessionId: string) => {
+    if (!confirm(`"${sessionId}" 세션을 삭제할까요?`)) return;
+    try {
+      await deleteWorkflowSession(sessionId);
+      if (sessionId === currentSessionId) {
+        setCurrentSessionId("");
+      }
+      await loadSessions();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }, [currentSessionId, loadSessions]);
+
   // 이전 상태 복원
   useEffect(() => {
+    loadSessions();
     getWorkflowStepResults()
       .then((r) => {
         if (r.has_step2 && r.step2) {
@@ -309,6 +393,46 @@ export default function WorkflowPage() {
           엑셀 업로드 → As-Is 워크플로우 연결 → 벤치마킹 기본 설계 → 상세 설계
         </p>
       </div>
+
+      {/* ═══ 세션 바 ═══ */}
+      {sessions.length > 0 && (
+        <div className="flex items-center gap-3 p-3 rounded-xl border border-gray-200 bg-gray-50 flex-wrap">
+          <span className="text-xs font-semibold text-gray-500 shrink-0">저장된 프로세스</span>
+          <div className="flex gap-2 flex-wrap flex-1">
+            {sessions.map((s) => (
+              <div
+                key={s.id}
+                className="flex items-center gap-1 rounded-full border text-xs px-3 py-1"
+                style={{
+                  background: s.id === currentSessionId ? PWC.bg : "#fff",
+                  borderColor: s.id === currentSessionId ? PWC.primary : "#d1d5db",
+                  color: s.id === currentSessionId ? PWC.primary : "#374151",
+                  fontWeight: s.id === currentSessionId ? 700 : 400,
+                }}
+              >
+                <button
+                  onClick={() => handleLoadSession(s.id)}
+                  disabled={sessionLoading || s.id === currentSessionId}
+                  className="hover:underline disabled:opacity-50"
+                >
+                  {s.name}
+                  {s.id === currentSessionId && " ●"}
+                </button>
+                {s.id !== currentSessionId && (
+                  <button
+                    onClick={() => handleDeleteSession(s.id)}
+                    className="ml-1 text-gray-400 hover:text-red-500 leading-none"
+                    title="삭제"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+          {sessionLoading && <span className="text-xs text-gray-400 animate-pulse">불러오는 중…</span>}
+        </div>
+      )}
 
       {/* 스텝 인디케이터 */}
       <div className="flex items-center gap-1">

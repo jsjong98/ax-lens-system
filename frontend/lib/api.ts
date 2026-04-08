@@ -1019,6 +1019,45 @@ export async function generateGapAnalysis(): Promise<GapAnalysisResult> {
   return apiFetch("/workflow/gap-analysis", { method: "POST", body: "{}" });
 }
 
+// ── 멀티 세션 ────────────────────────────────────────────────────────────────
+
+export interface WorkflowSession {
+  id: string;
+  name: string;
+  created_at: string;
+  updated_at?: string;
+  excel_file?: string;
+  json_file?: string;
+  ppt_file?: string;
+}
+
+export interface WorkflowSessionsResult {
+  ok: boolean;
+  current: string;
+  sessions: WorkflowSession[];
+}
+
+export async function listWorkflowSessions(): Promise<WorkflowSessionsResult> {
+  return apiFetch("/workflow/sessions");
+}
+
+export async function loadWorkflowSession(sessionId: string): Promise<{
+  ok: boolean;
+  session_id: string;
+  has_step1: boolean;
+  has_step2: boolean;
+  has_benchmark: boolean;
+  has_gap: boolean;
+  classified_count: number;
+  sheets?: WorkflowSummary["sheets"];
+}> {
+  return apiFetch(`/workflow/sessions/${encodeURIComponent(sessionId)}/load`, { method: "POST", body: "{}" });
+}
+
+export async function deleteWorkflowSession(sessionId: string): Promise<{ ok: boolean; deleted: string }> {
+  return apiFetch(`/workflow/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
+}
+
 export async function generateWorkflowStep1(params: {
   prompt?: string;
   process_name?: string;
@@ -1660,6 +1699,8 @@ export interface UploadedFile {
   size_kb: number;
   modified: string;
   path?: string;
+  session_id?: string;
+  display_name?: string;
 }
 
 export async function getAdminUploads(): Promise<{ ok: boolean; directory: string; files: UploadedFile[] }> {
@@ -1693,4 +1734,12 @@ export async function downloadAdminFile(filename: string): Promise<void> {
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+export async function deleteAdminWorkflowSession(sessionId: string): Promise<{ ok: boolean; deleted: string }> {
+  return apiFetch(`/admin/workflow-session/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
+}
+
+export async function deleteAdminUpload(filename: string): Promise<{ ok: boolean; deleted: string }> {
+  return apiFetch(`/admin/upload/${encodeURIComponent(filename)}`, { method: "DELETE" });
 }

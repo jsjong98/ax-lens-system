@@ -8,6 +8,8 @@ import {
   getAdminUploads,
   getAdminUploadsAll,
   downloadAdminFile,
+  deleteAdminWorkflowSession,
+  deleteAdminUpload,
   type AdminUser,
   type AdminSession,
   type AuditLogEntry,
@@ -505,6 +507,19 @@ export default function AdminPage() {
                                               (uploadsAll?.new_workflow ?? [])
             }
             onDownload={downloadAdminFile}
+            onDelete={async (file) => {
+              const sid = (file as { session_id?: string }).session_id;
+              if (fileSubTab === "task_excel") {
+                if (!confirm(`"${file.filename}" 파일을 삭제할까요?`)) return;
+                await deleteAdminUpload(file.filename);
+                await loadFiles();
+              } else if (sid && ["wf_excel", "wf_json", "wf_ppt"].includes(fileSubTab)) {
+                if (!confirm(`세션 "${sid}" 전체 (Excel + JSON + PPT + 설계 결과)를 삭제할까요?`)) return;
+                await deleteAdminWorkflowSession(sid);
+                await loadFiles();
+              }
+            }}
+            showDelete={fileSubTab === "task_excel" || ["wf_excel", "wf_json", "wf_ppt"].includes(fileSubTab)}
           />
         </div>
       )}
@@ -521,7 +536,16 @@ function Stat({ label, value, accent }: { label: string; value: number; accent?:
   );
 }
 
-function FileTable({ files, onDownload }: { files: { filename: string; size_kb: number; modified: string }[]; onDownload: (name: string) => Promise<void> }) {
+type FileRow = { filename: string; size_kb: number; modified: string; display_name?: string; session_id?: string };
+
+function FileTable({
+  files, onDownload, onDelete, showDelete,
+}: {
+  files: FileRow[];
+  onDownload: (name: string) => Promise<void>;
+  onDelete?: (file: FileRow) => Promise<void>;
+  showDelete?: boolean;
+}) {
   if (files.length === 0) {
     return <div className="text-center py-10 text-gray-400 text-sm bg-white rounded-xl border border-gray-200">파일이 없습니다.</div>;
   }
@@ -534,12 +558,15 @@ function FileTable({ files, onDownload }: { files: { filename: string; size_kb: 
             <th className="text-right px-4 py-2 font-medium text-gray-600">크기</th>
             <th className="text-left px-4 py-2 font-medium text-gray-600">수정일</th>
             <th className="text-center px-4 py-2 font-medium text-gray-600">다운로드</th>
+            {showDelete && <th className="text-center px-4 py-2 font-medium text-gray-600">삭제</th>}
           </tr>
         </thead>
         <tbody>
           {files.map((f) => (
             <tr key={f.filename} className="border-b border-gray-100 hover:bg-gray-50">
-              <td className="px-4 py-2 text-xs font-medium text-gray-800 font-mono">{f.filename}</td>
+              <td className="px-4 py-2 text-xs font-medium text-gray-800 font-mono">
+                {f.display_name || f.filename}
+              </td>
               <td className="px-4 py-2 text-xs text-gray-500 text-right">{f.size_kb.toLocaleString()} KB</td>
               <td className="px-4 py-2 text-xs text-gray-500">{f.modified.replace("T", " ").slice(0, 19)}</td>
               <td className="px-4 py-2 text-center">
@@ -550,6 +577,20 @@ function FileTable({ files, onDownload }: { files: { filename: string; size_kb: 
                   다운로드
                 </button>
               </td>
+              {showDelete && (
+                <td className="px-4 py-2 text-center">
+                  <button
+                    onClick={async () => {
+                      try {
+                        if (onDelete) await onDelete(f);
+                      } catch (e) { alert((e as Error).message); }
+                    }}
+                    className="text-xs text-red-500 hover:text-red-700 underline"
+                  >
+                    삭제
+                  </button>
+                </td>
+              )}
             </tr>
           ))}
         </tbody>
