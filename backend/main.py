@@ -1562,6 +1562,7 @@ async def upload_workflow_excel(file: UploadFile = File(...)):
     """
     from excel_reader import load_tasks, list_sheets
 
+    global _current_session_id
     import datetime as _dt
     content = await file.read()
     _WF_DIR.mkdir(exist_ok=True)
@@ -1573,7 +1574,6 @@ async def upload_workflow_excel(file: UploadFile = File(...)):
     sid = _current_session_id or _sessions_manifest.get("_current", "")
     if not sid:
         sid = Path(safe_wf_excel_name).stem or "default"
-        global _current_session_id
         _current_session_id = sid
     sess_dir = _get_session_dir(sid)
 
