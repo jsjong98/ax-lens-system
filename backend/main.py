@@ -5073,6 +5073,19 @@ async def admin_delete_upload(filename: str, request: Request):
     return {"ok": True, "deleted": safe_name}
 
 
+@app.delete("/api/admin/workflow-file/{filename}", tags=["Admin"])
+async def admin_delete_workflow_file(filename: str, request: Request):
+    """Admin: Workflow 루트 디렉토리의 단일 파일 삭제 (세션 미존재 레거시 파일용)."""
+    _require_admin(request)
+    safe_name = Path(filename).name
+    # 경로 순회 방지: _WF_DIR 직속 파일만 허용
+    file_path = _WF_DIR / safe_name
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(404, f"파일을 찾을 수 없습니다: {safe_name}")
+    file_path.unlink()
+    return {"ok": True, "deleted": safe_name}
+
+
 @app.get("/api/admin/download/{filename}", tags=["Admin"])
 async def admin_download_file(filename: str, request: Request):
     """업로드된 파일 다운로드 (Task 분류 엑셀 또는 Workflow 파일)."""

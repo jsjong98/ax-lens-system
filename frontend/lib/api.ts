@@ -1743,3 +1743,7 @@ export async function deleteAdminWorkflowSession(sessionId: string): Promise<{ o
 export async function deleteAdminUpload(filename: string): Promise<{ ok: boolean; deleted: string }> {
   return apiFetch(`/admin/upload/${encodeURIComponent(filename)}`, { method: "DELETE" });
 }
+
+export async function deleteAdminWorkflowFile(filename: string): Promise<{ ok: boolean; deleted: string }> {
+  return apiFetch(`/admin/workflow-file/${encodeURIComponent(filename)}`, { method: "DELETE" });
+}

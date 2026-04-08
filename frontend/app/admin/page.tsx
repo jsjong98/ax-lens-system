@@ -10,6 +10,7 @@ import {
   downloadAdminFile,
   deleteAdminWorkflowSession,
   deleteAdminUpload,
+  deleteAdminWorkflowFile,
   type AdminUser,
   type AdminSession,
   type AuditLogEntry,
@@ -509,14 +510,25 @@ export default function AdminPage() {
             onDownload={downloadAdminFile}
             onDelete={async (file) => {
               const sid = (file as { session_id?: string }).session_id;
-              if (fileSubTab === "task_excel") {
-                if (!confirm(`"${file.filename}" 파일을 삭제할까요?`)) return;
-                await deleteAdminUpload(file.filename);
+              const isWfTab = ["wf_excel", "wf_json", "wf_ppt"].includes(fileSubTab);
+              try {
+                if (fileSubTab === "task_excel") {
+                  if (!confirm(`"${file.filename}" 파일을 삭제할까요?`)) return;
+                  await deleteAdminUpload(file.filename);
+                } else if (isWfTab && sid) {
+                  // 세션 기반 파일 → 세션 전체 삭제
+                  if (!confirm(`세션 "${sid}" 전체 (Excel + JSON + PPT + 설계 결과)를 삭제할까요?`)) return;
+                  await deleteAdminWorkflowSession(sid);
+                } else if (isWfTab && !sid) {
+                  // 세션 없는 레거시 파일 → 단일 파일만 삭제
+                  if (!confirm(`"${file.filename}" 파일을 삭제할까요?`)) return;
+                  await deleteAdminWorkflowFile(file.filename);
+                } else {
+                  return;
+                }
                 await loadFiles();
-              } else if (sid && ["wf_excel", "wf_json", "wf_ppt"].includes(fileSubTab)) {
-                if (!confirm(`세션 "${sid}" 전체 (Excel + JSON + PPT + 설계 결과)를 삭제할까요?`)) return;
-                await deleteAdminWorkflowSession(sid);
-                await loadFiles();
+              } catch (e) {
+                alert(`삭제 실패: ${(e as Error).message}`);
               }
             }}
             showDelete={fileSubTab === "task_excel" || ["wf_excel", "wf_json", "wf_ppt"].includes(fileSubTab)}
