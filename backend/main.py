@@ -4958,50 +4958,57 @@ async def admin_list_uploads_all(request: Request):
     # Task 분류 엑셀
     task_excel = _dir_files(_UPLOAD_DIR, {".xlsx", ".xls"})
 
-    # Workflow 파일들 — 세션별로 수집
+    # Workflow 파일들 — 세션 디렉토리 직접 스캔 + manifest 보완
+    import re as _re
     _load_sessions_manifest()
     wf_excel, wf_json, wf_ppt = [], [], []
-    sessions_with_data = [
-        (sid, meta) for sid, meta in _sessions_manifest.items()
-        if sid != "_current" and isinstance(meta, dict)
-    ]
-    sessions_with_data.sort(key=lambda x: x[1].get("updated_at", x[1].get("created_at", "")), reverse=True)
+    seen_sess: set[str] = set()  # 중복 방지
 
-    for sid, meta in sessions_with_data:
-        import re as _re
-        safe_sid = _re.sub(r'[^\w가-힣\-]', '_', sid)[:80] or "default"
-        sess_dir = _SESSIONS_DIR / safe_sid
+    # 1) _SESSIONS_DIR 직접 스캔 (manifest 없어도 파일 표시)
+    if _SESSIONS_DIR.exists():
+        for sess_dir in sorted(_SESSIONS_DIR.iterdir(), key=lambda d: d.stat().st_mtime, reverse=True):
+            if not sess_dir.is_dir():
+                continue
+            sid = _sessions_manifest.get(sess_dir.name, {}).get("id", "") or sess_dir.name
+            seen_sess.add(sess_dir.name)
 
-        # Excel
-        for xf in sorted(sess_dir.glob("*.xlsx"), key=lambda f: f.stat().st_mtime, reverse=True)[:1]:
-            entry = _file_info(xf)
-            entry["session_id"] = sid
-            entry["display_name"] = f"[{sid}] {xf.name}"
-            wf_excel.append(entry)
+            for xf in sorted(sess_dir.glob("*.xlsx"), key=lambda f: f.stat().st_mtime, reverse=True)[:1]:
+                entry = _file_info(xf)
+                entry["session_id"] = sid
+                entry["display_name"] = f"[{sid}] {xf.name}"
+                wf_excel.append(entry)
 
-        # JSON
-        jf = sess_dir / "workflow.json"
-        if jf.exists():
-            entry = _file_info(jf)
-            entry["session_id"] = sid
-            entry["display_name"] = f"[{sid}] workflow.json"
-            wf_json.append(entry)
+            jf = sess_dir / "workflow.json"
+            if jf.exists():
+                entry = _file_info(jf)
+                entry["session_id"] = sid
+                entry["display_name"] = f"[{sid}] workflow.json"
+                wf_json.append(entry)
 
-        # PPT
-        for pf in sorted(sess_dir.glob("*.pptx"), key=lambda f: f.stat().st_mtime, reverse=True)[:1]:
+            for pf in sorted(sess_dir.glob("*.pptx"), key=lambda f: f.stat().st_mtime, reverse=True)[:1]:
+                entry = _file_info(pf)
+                entry["session_id"] = sid
+                entry["display_name"] = f"[{sid}] {pf.name}"
+                wf_ppt.append(entry)
+
+    # 2) 레거시 루트 파일 — 세션이 없거나 루트에만 파일이 있는 경우 항상 표시
+    root_excels = [f for f in _WF_DIR.glob("*.xlsx") if f.is_file()]
+    for xf in sorted(root_excels, key=lambda f: f.stat().st_mtime, reverse=True):
+        entry = _file_info(xf)
+        entry["display_name"] = f"[미분류] {xf.name}"
+        wf_excel.append(entry)
+
+    root_json = _WF_DIR / "workflow.json"
+    if root_json.exists():
+        entry = _file_info(root_json)
+        entry["display_name"] = "[미분류] workflow.json"
+        wf_json.append(entry)
+
+    for pf in sorted(_WF_DIR.glob("*.pptx"), key=lambda f: f.stat().st_mtime, reverse=True):
+        if pf.is_file():
             entry = _file_info(pf)
-            entry["session_id"] = sid
-            entry["display_name"] = f"[{sid}] {pf.name}"
+            entry["display_name"] = f"[미분류] {pf.name}"
             wf_ppt.append(entry)
-
-    # 레거시: 세션 없는 경우 루트 파일 표시
-    if not wf_excel:
-        wf_excel = _dir_files(_WF_DIR, {".xlsx", ".xls"})
-    if not wf_json:
-        if (_WF_DIR / "workflow.json").exists():
-            wf_json = [_file_info(_WF_DIR / "workflow.json")]
-    if not wf_ppt:
-        wf_ppt = _dir_files(_WF_DIR, {".pptx", ".ppt"})
 
     # New Workflow 결과 JSON들
     nw_files = []

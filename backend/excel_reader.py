@@ -218,11 +218,14 @@ def _detect_columns(ws, scan_rows: int = 15) -> dict[str, int]:
 # 데이터가 없는 가이드/설명 시트 식별 키워드
 _GUIDE_KEYWORDS = {
     "가이드", "guide", "작성", "설명", "manual", "instruction", "readme", "index",
-    "backup", "백업", "template", "템플릿",  # 백업/템플릿 시트
+    "backup", "백업",                        # 백업 시트
+    # ※ "template"/"템플릿"은 제외 — "As-Is 분석_템플릿_통합" 같은 실데이터 시트가 걸리므로
+    #    빈 템플릿 시트는 score=0으로 자연히 비추천됨
     "count", "집계", "통계",                 # 집계용 시트
     "sheet1", "sheet2", "sheet3",           # 기본 빈 시트
     "lv3", "lv4", "lv5",                    # 계층 목록 시트
     "task별", "정보 요청",                   # 기타 보조 시트
+    "old",                                   # (old)로 표시된 구버전 시트
 }
 
 # L5 ID 패턴: "1.1.1", "1.1.1.1", "2.3.4.5" 등 숫자.숫자.숫자로 시작
