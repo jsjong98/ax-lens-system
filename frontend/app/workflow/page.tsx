@@ -17,6 +17,8 @@ import {
   listWorkflowSessions,
   loadWorkflowSession,
   deleteWorkflowSession,
+  listSessionFiles,
+  selectWorkflowFile,
   type WorkflowSummary,
   type WorkflowExcelTask,
   type WorkflowExcelUploadResult,
@@ -25,6 +27,7 @@ import {
   type SearchLogItem,
   type GapAnalysisResult,
   type WorkflowSession,
+  type SessionFileInfo,
 } from "@/lib/api";
 import WorkflowEditor from "@/components/WorkflowEditor";
 import ToBeWorkflowModal from "@/components/ToBeWorkflowModal";
@@ -92,6 +95,11 @@ export default function WorkflowPage() {
   const [sessions, setSessions] = useState<WorkflowSession[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string>("");
   const [sessionLoading, setSessionLoading] = useState(false);
+
+  // 파일 피커
+  const [sessionFiles, setSessionFiles] = useState<SessionFileInfo[]>([]);
+  const [showFilePicker, setShowFilePicker] = useState(false);
+  const [filePickerLoading, setFilePickerLoading] = useState(false);
 
   // 공통
   const [loading, setLoading] = useState(false);
@@ -177,6 +185,40 @@ export default function WorkflowPage() {
       setError((e as Error).message);
     }
   }, [currentSessionId, loadSessions]);
+
+  // 파일 피커 열기: 현재 세션의 Excel 목록 조회
+  const handleOpenFilePicker = useCallback(async () => {
+    if (!currentSessionId) return;
+    setFilePickerLoading(true);
+    try {
+      const res = await listSessionFiles(currentSessionId);
+      setSessionFiles(res.excels);
+      setShowFilePicker(true);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setFilePickerLoading(false);
+    }
+  }, [currentSessionId]);
+
+  // 파일 선택: 명시적으로 특정 Excel 로드
+  const handleSelectFile = useCallback(async (filename: string) => {
+    if (!currentSessionId) return;
+    setLoading(true);
+    setError(null);
+    setShowFilePicker(false);
+    try {
+      const result = await selectWorkflowFile(currentSessionId, filename);
+      setExcelResult(result);
+      setExcelSheets(result.sheets);
+      const tasks = await getWorkflowExcelTasks();
+      setExcelTasks(tasks.tasks);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }, [currentSessionId]);
 
   // 이전 상태 복원
   useEffect(() => {
@@ -631,6 +673,56 @@ export default function WorkflowPage() {
                   다음: As-Is 워크플로우 연결 &rarr;
                 </button>
               </div>
+            </div>
+          )}
+
+          {/* 이전 파일 불러오기 (세션이 있을 때만) */}
+          {!excelResult && currentSessionId && (
+            <div className="mt-2">
+              {!showFilePicker ? (
+                <button
+                  onClick={handleOpenFilePicker}
+                  disabled={filePickerLoading}
+                  className="w-full py-2.5 rounded-lg border border-dashed border-gray-300 text-sm text-gray-500 hover:border-red-300 hover:text-red-600 hover:bg-red-50 transition disabled:opacity-50"
+                >
+                  {filePickerLoading ? "파일 목록 불러오는 중…" : "↑ 이 세션에 저장된 파일 불러오기"}
+                </button>
+              ) : (
+                <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+                  <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50">
+                    <span className="text-sm font-semibold text-gray-700">
+                      [{currentSessionId}] 저장된 파일
+                    </span>
+                    <button
+                      onClick={() => setShowFilePicker(false)}
+                      className="text-gray-400 hover:text-gray-600 text-lg leading-none"
+                    >
+                      ×
+                    </button>
+                  </div>
+                  {sessionFiles.length === 0 ? (
+                    <p className="px-4 py-6 text-sm text-gray-400 text-center">저장된 Excel 파일이 없습니다.</p>
+                  ) : (
+                    <ul className="divide-y divide-gray-100">
+                      {sessionFiles.map((f) => (
+                        <li key={f.filename} className="flex items-center justify-between px-4 py-3 hover:bg-gray-50">
+                          <div>
+                            <p className="text-sm font-medium text-gray-800">{f.filename}</p>
+                            <p className="text-xs text-gray-400">{f.size_kb} KB · {f.modified}</p>
+                          </div>
+                          <button
+                            onClick={() => handleSelectFile(f.filename)}
+                            className="px-3 py-1.5 rounded-lg text-xs font-bold text-white transition"
+                            style={{ backgroundColor: f.is_current ? "#6b7280" : PWC.primary }}
+                          >
+                            {f.is_current ? "현재 파일" : "선택"}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
