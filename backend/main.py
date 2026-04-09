@@ -10,8 +10,20 @@ import io
 import json
 import os
 import shutil
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
+
+# KST 시간대 (UTC+9)
+_KST = timezone(timedelta(hours=9))
+
+def _now_kst() -> str:
+    """현재 KST 시각을 ISO 8601 문자열로 반환."""
+    return datetime.now(_KST).isoformat()
+
+def _mtime_kst(path) -> str:
+    """파일 수정 시각을 KST ISO 8601 문자열로 반환."""
+    return datetime.fromtimestamp(path.stat().st_mtime, tz=_KST).isoformat()
 
 
 def _natural_key(s: str) -> list[int | str]:
@@ -987,7 +999,7 @@ def _save_session_data(sid: str) -> None:
     """현재 메모리 상태를 세션 디렉토리의 session_data.json에 저장."""
     if not sid:
         return
-    import datetime as _dt
+
 
     def _ser(obj):
         """JSON 직렬화 불가 객체 처리."""
@@ -1002,7 +1014,7 @@ def _save_session_data(sid: str) -> None:
         "step1": _wf_step1_cache,
         "step2": _wf_step2_cache,
         "gap_analysis": _wf_gap_analysis,
-        "saved_at": _dt.datetime.now().isoformat(),
+        "saved_at": _now_kst(),
     }
     try:
         d = _get_session_dir(sid)
@@ -1012,7 +1024,7 @@ def _save_session_data(sid: str) -> None:
         )
         # manifest 업데이트
         if sid in _sessions_manifest:
-            _sessions_manifest[sid]["updated_at"] = _dt.datetime.now().isoformat()
+            _sessions_manifest[sid]["updated_at"] = _now_kst()
             _save_sessions_manifest()
     except Exception as e:
         print(f"[SESSION] session_data 저장 실패({sid}): {e}", flush=True)
@@ -1228,7 +1240,7 @@ async def upload_workflow(file: UploadFile = File(...)):
     summary = get_workflow_summary(parsed)
 
     # 세션 ID = JSON 파일명 stem (e.g. "발령관리.json" → "발령관리")
-    import datetime as _dt
+
     raw_fname = file.filename or "workflow.json"
     sid = Path(raw_fname).stem or "default"
 
@@ -1253,7 +1265,7 @@ async def upload_workflow(file: UploadFile = File(...)):
 
     # manifest 등록/갱신
     _load_sessions_manifest()
-    now = _dt.datetime.now().isoformat()
+    now = _now_kst()
     if sid not in _sessions_manifest:
         _sessions_manifest[sid] = {"id": sid, "name": sid, "created_at": now}
     _sessions_manifest[sid].update({
@@ -1438,7 +1450,7 @@ async def upload_ppt_workflow(file: UploadFile = File(...)):
     """PPT 파일을 업로드하여 슬라이드별 노드를 추출하고 태스크와 매칭합니다."""
     from ppt_parser import parse_ppt, match_nodes_to_tasks, ppt_slide_to_react_flow, ppt_to_parsed_workflow
 
-    import datetime as _dt
+
     content = await file.read()
     safe_ppt_name = Path(file.filename or "workflow.pptx").name
 
@@ -1453,7 +1465,7 @@ async def upload_ppt_workflow(file: UploadFile = File(...)):
     (_WF_DIR / safe_ppt_name).write_bytes(content)
 
     # manifest 갱신
-    now = _dt.datetime.now().isoformat()
+    now = _now_kst()
     if sid not in _sessions_manifest:
         _sessions_manifest[sid] = {"id": sid, "name": sid, "created_at": now}
     _sessions_manifest[sid].update({"updated_at": now, "ppt_file": safe_ppt_name})
@@ -1563,7 +1575,7 @@ async def upload_workflow_excel(file: UploadFile = File(...)):
     from excel_reader import load_tasks, list_sheets
 
     global _current_session_id
-    import datetime as _dt
+
     content = await file.read()
     _WF_DIR.mkdir(exist_ok=True)
 
@@ -1597,7 +1609,7 @@ async def upload_workflow_excel(file: UploadFile = File(...)):
     _wf_excel_path = str(save_path)   # 현재 파일 경로 고정
 
     # manifest 갱신
-    now = _dt.datetime.now().isoformat()
+    now = _now_kst()
     if sid not in _sessions_manifest:
         _sessions_manifest[sid] = {"id": sid, "name": sid, "created_at": now}
     _sessions_manifest[sid].update({"updated_at": now, "excel_file": safe_wf_excel_name})
@@ -4738,13 +4750,127 @@ async def list_workflow_sessions():
         v for k, v in _sessions_manifest.items()
         if k != "_current" and isinstance(v, dict)
     ]
-    # updated_at 기준 최신순 정렬
     sessions.sort(key=lambda s: s.get("updated_at", s.get("created_at", "")), reverse=True)
     return {
         "ok": True,
         "current": _sessions_manifest.get("_current", _current_session_id),
         "sessions": sessions,
     }
+
+
+@app.get("/api/workflow/sessions/{session_id}/files", tags=["Workflow"])
+async def list_session_files(session_id: str):
+    """세션에 저장된 모든 Excel·PPT 파일 목록을 반환합니다."""
+
+    _load_sessions_manifest()
+    if session_id not in _sessions_manifest:
+        raise HTTPException(404, f"세션 '{session_id}'을 찾을 수 없습니다.")
+
+    d = _get_session_dir(session_id)
+
+    def _finfo(f: Path) -> dict:
+        st = f.stat()
+        return {
+            "filename": f.name,
+            "size_kb": round(st.st_size / 1024, 1),
+            "modified": _mtime_kst(f),
+            "is_current": str(f) == _wf_excel_path,
+        }
+
+    excels = sorted(d.glob("*.xlsx"), key=lambda f: f.stat().st_mtime, reverse=True)
+    ppts = sorted(d.glob("*.pptx"), key=lambda f: f.stat().st_mtime, reverse=True)
+    json_exists = (d / "workflow.json").exists()
+
+    return {
+        "ok": True,
+        "session_id": session_id,
+        "excels": [_finfo(f) for f in excels],
+        "ppts": [_finfo(f) for f in ppts],
+        "has_json": json_exists,
+    }
+
+
+@app.post("/api/workflow/select-file", tags=["Workflow"])
+async def select_workflow_file(request: Request):
+    """세션 내 특정 Excel 파일을 명시적으로 선택하여 로드합니다."""
+    from excel_reader import load_tasks, list_sheets
+    body = await request.json()
+    session_id = body.get("session_id", "")
+    filename = body.get("filename", "")
+
+    if not session_id or not filename:
+        raise HTTPException(400, "session_id와 filename이 필요합니다.")
+
+    import re as _re
+    safe_sid = _re.sub(r'[^\w가-힣\-]', '_', session_id)[:80] or "default"
+    file_path = _SESSIONS_DIR / safe_sid / Path(filename).name
+    if not file_path.exists():
+        raise HTTPException(404, f"파일을 찾을 수 없습니다: {filename}")
+
+    global _wf_excel_tasks, _wf_excel_path, _wf_classification
+    global _wf_chat_history, _wf_step1_cache, _wf_step2_cache, _wf_benchmark_table
+
+    sheets = list_sheets(str(file_path))
+    recommended = next((s["name"] for s in sheets if s.get("recommended")), None)
+    tasks = load_tasks(str(file_path), sheet_name=recommended)
+
+    _wf_excel_tasks = tasks
+    _wf_excel_path = str(file_path)
+    _wf_classification = {}
+    _wf_chat_history = []
+    _wf_step1_cache = {}
+    _wf_step2_cache = {}
+    _wf_benchmark_table = {}
+
+    # 분류 결과 재추출
+    def _resolve_label(*candidates: str) -> str:
+        for c in candidates:
+            v = (c or "").strip()
+            if v and v != "-":
+                return v
+        return ""
+
+    has_cls = False
+    for t in tasks:
+        label = _resolve_label(t.cls_final_label, t.cls_doosan_label, t.cls_1st_label)
+        if label:
+            has_cls = True
+            _wf_classification[t.id] = {
+                "label": label, "reason": t.cls_1st_reason or "",
+                "criterion": t.cls_1st_knockout or "",
+                "ai_prerequisites": t.cls_1st_ai_prereq or "",
+                "feedback": next((v for x in [t.cls_final_feedback, t.cls_doosan_feedback] if (v := (x or "").strip()) and v != "-"), ""),
+                "task_name": t.name, "hybrid_note": "", "input_types": "", "output_types": "",
+            }
+
+    data_sheets = [s for s in sheets if not s.get("is_guide") and s.get("task_count", 0) > 0]
+    return {
+        "ok": True,
+        "filename": filename,
+        "task_count": len(tasks),
+        "has_classification": has_cls,
+        "classified_count": len(_wf_classification),
+        "sheets": [{"name": s["name"], "recommended": s.get("recommended", False),
+                    "row_count": s.get("task_count", 0), "l5_count": s.get("task_count", 0)}
+                   for s in data_sheets],
+    }
+
+
+@app.get("/api/upload/history", tags=["Upload"])
+async def get_upload_history():
+    """Task 분류용으로 이전에 업로드된 엑셀 파일 목록을 반환합니다."""
+
+    files = []
+    if _UPLOAD_DIR.exists():
+        for f in sorted(_UPLOAD_DIR.glob("*.xlsx"), key=lambda x: x.stat().st_mtime, reverse=True):
+            st = f.stat()
+            files.append({
+                "filename": f.name,
+                "size_kb": round(st.st_size / 1024, 1),
+                "modified": _mtime_kst(f),
+                "is_current": _current_excel_path is not None and str(f) == str(_current_excel_path),
+            })
+    return {"ok": True, "files": files}
 
 
 @app.post("/api/workflow/sessions/{session_id}/load", tags=["Workflow"])
@@ -4908,12 +5034,10 @@ async def admin_force_logout(request: Request):
 
 
 def _file_info(f: Path) -> dict:
-    stat = f.stat()
-    import datetime as _dt
     return {
         "filename": f.name,
-        "size_kb": round(stat.st_size / 1024, 1),
-        "modified": _dt.datetime.fromtimestamp(stat.st_mtime).isoformat(),
+        "size_kb": round(f.stat().st_size / 1024, 1),
+        "modified": _mtime_kst(f),
         "path": str(f),
     }
 
@@ -4934,7 +5058,6 @@ async def admin_list_uploads(request: Request):
 async def admin_list_uploads_all(request: Request):
     """카테고리별 업로드 파일 목록 조회."""
     _require_admin(request)
-    import datetime as _dt
 
     def _dir_files(directory: Path, exts=None) -> list:
         if not directory.exists():
