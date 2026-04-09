@@ -348,16 +348,41 @@ _tasks_cache: list[Task] = []
 # ── 영속 저장 헬퍼 ──────────────────────────────────────────────────────────
 
 def _persist_cache(key: str, cache: dict) -> None:
-    """캐시 데이터를 JSON 파일로 영속 저장합니다."""
+    """캐시 데이터를 JSON 파일로 영속 저장합니다. (Task 분류 전용)"""
     save_data(key, dict(cache))
 
 
 def _restore_cache(key: str, cache: dict) -> None:
-    """서버 시작 시 JSON 파일에서 캐시를 복원합니다."""
+    """서버 시작 시 JSON 파일에서 캐시를 복원합니다. (Task 분류 전용)"""
     data = load_data(key)
     if data and isinstance(data, dict):
         cache.update(data)
         print(f"[data_store] '{key}' 복원 완료 ({len(data)} keys)")
+
+
+# ── New Workflow 전용 파일 I/O (_NW_DIR 고정 경로) ───────────────────────────
+
+def _save_nw_state(key: str, data: dict) -> None:
+    """New Workflow / 과제 정의서 / 과제 설계서를 _NW_DIR에 직접 저장."""
+    try:
+        (_NW_DIR / f"{key}.json").write_text(
+            json.dumps(data, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
+        )
+    except Exception as e:
+        print(f"[NW_STORE] 저장 실패 ({key}): {e}", flush=True)
+
+
+def _load_nw_state(key: str) -> dict:
+    """New Workflow / 과제 정의서 / 과제 설계서를 _NW_DIR에서 로드."""
+    p = _NW_DIR / f"{key}.json"
+    if not p.exists():
+        return {}
+    try:
+        d = json.loads(p.read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except Exception as e:
+        print(f"[NW_STORE] 로드 실패 ({key}): {e}", flush=True)
+        return {}
 
 
 # 데이터 저장 상태 확인 API
@@ -957,10 +982,11 @@ async def export_comparison():
 # ─────────────────────────────────────────────────────────────────────────────
 
 _PERSIST_ROOT = Path("/app/persist") if Path("/app/persist").exists() else Path(__file__).parent
-_UPLOAD_DIR = _PERSIST_ROOT / "uploads"
-_UPLOAD_DIR.mkdir(exist_ok=True)
-_WF_DIR = _PERSIST_ROOT / "workflow"
-_WF_DIR.mkdir(exist_ok=True)
+_UPLOAD_DIR   = _PERSIST_ROOT / "uploads"        # Task 분류 엑셀
+_WF_DIR       = _PERSIST_ROOT / "workflow"       # Workflow 설계 세션
+_NW_DIR       = _PERSIST_ROOT / "new_workflow"   # New Workflow / 과제 정의서 / 설계서
+for _d in (_UPLOAD_DIR, _WF_DIR, _NW_DIR):
+    _d.mkdir(exist_ok=True)
 _current_excel_path: Path | None = None
 
 # ── 멀티 세션 지원 ────────────────────────────────────────────────────────────
@@ -1258,11 +1284,6 @@ async def upload_workflow(file: UploadFile = File(...)):
     json_path = sess_dir / "workflow.json"
     json_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    # 하위 호환: 기존 단일 파일도 유지
-    (_WF_DIR / "workflow.json").write_text(
-        json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-
     # manifest 등록/갱신
     _load_sessions_manifest()
     now = _now_kst()
@@ -1308,9 +1329,12 @@ async def get_workflow():
 
     global _workflow_cache
     if "summary" not in _workflow_cache:
-        # 파일에서 로드 시도
-        save_path = _WF_DIR / "workflow.json"
-        if save_path.exists():
+        # 현재 세션 디렉토리에서 workflow.json 로드 시도
+        save_path = (
+            _get_session_dir(_current_session_id) / "workflow.json"
+            if _current_session_id else None
+        )
+        if save_path and save_path.exists():
             data = json.loads(save_path.read_text(encoding="utf-8"))
             parsed = parse_workflow_json(data)
             summary = get_workflow_summary(parsed)
@@ -1461,9 +1485,6 @@ async def upload_ppt_workflow(file: UploadFile = File(...)):
     ppt_save_path = sess_dir / safe_ppt_name
     ppt_save_path.write_bytes(content)
 
-    # 하위 호환: _WF_DIR 루트에도 저장
-    (_WF_DIR / safe_ppt_name).write_bytes(content)
-
     # manifest 갱신
     now = _now_kst()
     if sid not in _sessions_manifest:
@@ -1551,17 +1572,24 @@ _wf_step2_cache: dict = {}     # Step 2 결과 캐시
 _wf_chat_history: list = []    # Step 1 채팅 이력
 _manual_matches: dict = {}     # 수동 매칭: json_task_id → excel_task_id
 
+def _manual_matches_path() -> Path:
+    """현재 세션의 manual_matches.json 경로. 세션 없으면 _WF_DIR 루트 (하위 호환)."""
+    if _current_session_id:
+        return _get_session_dir(_current_session_id) / "manual_matches.json"
+    return _WF_DIR / "manual_matches.json"
+
+
 def _load_manual_matches():
     global _manual_matches
-    path = _WF_DIR / "manual_matches.json"
-    if path.exists():
-        try:
-            _manual_matches = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
-            _manual_matches = {}
+    path = _manual_matches_path()
+    try:
+        _manual_matches = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    except Exception:
+        _manual_matches = {}
+
 
 def _save_manual_matches():
-    (_WF_DIR / "manual_matches.json").write_text(
+    _manual_matches_path().write_text(
         json.dumps(_manual_matches, ensure_ascii=False, indent=2), encoding="utf-8"
     )
 
@@ -1592,9 +1620,6 @@ async def upload_workflow_excel(file: UploadFile = File(...)):
     # 세션 디렉토리에 저장 (같은 이름이면 덮어쓰기, 다른 이름이면 추가 보존)
     save_path = sess_dir / safe_wf_excel_name
     save_path.write_bytes(content)
-
-    # 하위 호환: _WF_DIR 루트에도 저장 (startup restore용 — 삭제하지 않고 덮어쓰기만)
-    (_WF_DIR / safe_wf_excel_name).write_bytes(content)
 
     # 시트 목록
     sheets = list_sheets(str(save_path))
@@ -1692,16 +1717,17 @@ async def select_workflow_excel_sheet(request: Request):
     if not sheet_name:
         raise HTTPException(400, "시트 이름이 필요합니다.")
 
-    # 업로드 시 고정된 경로 우선 사용 → 없으면 최신 파일 fallback
+    # 업로드 시 고정된 경로 우선 사용 → 없으면 현재 세션 디렉토리 fallback
     if _wf_excel_path and Path(_wf_excel_path).exists():
         excel_path = _wf_excel_path
     else:
-        excel_files = sorted(_WF_DIR.glob("*.xlsx"), key=lambda x: x.stat().st_mtime)
-        if not excel_files:
-            excel_files = sorted(_UPLOAD_DIR.glob("*.xlsx"), key=lambda x: x.stat().st_mtime)
-        if not excel_files:
+        sess_excels = sorted(
+            _get_session_dir(_current_session_id).glob("*.xlsx"),
+            key=lambda x: x.stat().st_mtime,
+        ) if _current_session_id else []
+        if not sess_excels:
             raise HTTPException(404, "업로드된 엑셀 파일이 없습니다.")
-        excel_path = str(excel_files[-1])
+        excel_path = str(sess_excels[-1])
 
     tasks = load_tasks(excel_path, sheet_name=sheet_name)
 
@@ -3289,7 +3315,7 @@ Step 1에서 도출된 기본 설계를 기반으로, 두산에 최적화된 **A
     # New Workflow 캐시에도 반영 (과제 정의서/설계서 생성에 활용)
     _new_workflow_cache.clear()
     _new_workflow_cache.update(result_dict)
-    _persist_cache("new_workflow", _new_workflow_cache)
+    _save_nw_state("new_workflow", _new_workflow_cache)
 
     return {"ok": True, **result_dict}
 
@@ -3780,8 +3806,11 @@ async def generate_tobe_workflow(
     # 워크플로우 로드
     global _workflow_cache
     if "parsed" not in _workflow_cache:
-        save_path = _WF_DIR / "workflow.json"
-        if save_path.exists():
+        save_path = (
+            _get_session_dir(_current_session_id) / "workflow.json"
+            if _current_session_id else None
+        )
+        if save_path and save_path.exists():
             data = json.loads(save_path.read_text(encoding="utf-8"))
             parsed = parse_workflow_json(data)
             _workflow_cache["parsed"] = parsed
@@ -3857,7 +3886,7 @@ _nw_tasks_cache: list[Task] = []
 _nw_projects_cache: list[dict] = []  # 과제 엑셀 형식일 때 사용
 _nw_excel_path: Path | None = None
 _new_workflow_cache: dict = {}
-_restore_cache("new_workflow", _new_workflow_cache)
+_new_workflow_cache.update(_load_nw_state("new_workflow"))
 
 
 @app.post("/api/new-workflow/upload", tags=["NewWorkflow"])
@@ -4027,7 +4056,7 @@ async def generate_new_workflow(
         )
         result_dict = _rtd(result)
         _new_workflow_cache.update(result_dict)
-        _persist_cache("new_workflow", _new_workflow_cache)
+        _save_nw_state("new_workflow", _new_workflow_cache)
         return {"ok": True, **result_dict}
 
     # L5 Task 형식
@@ -4066,7 +4095,7 @@ async def generate_new_workflow(
 
     result_dict = result_to_dict(result)
     _new_workflow_cache.update(result_dict)
-    _persist_cache("new_workflow", _new_workflow_cache)
+    _save_nw_state("new_workflow", _new_workflow_cache)
 
     # meta에 agent 수 저장
     agents = result_dict.get("agents", [])
@@ -4111,7 +4140,7 @@ async def generate_new_workflow_freeform(request: Request):
     result_dict = result_to_dict(result)
     _new_workflow_cache.clear()
     _new_workflow_cache.update(result_dict)
-    _persist_cache("new_workflow", _new_workflow_cache)
+    _save_nw_state("new_workflow", _new_workflow_cache)
 
 
     return {"ok": True, **result_dict}
@@ -4174,7 +4203,7 @@ async def benchmark_new_workflow():
 
     _new_workflow_cache.clear()
     _new_workflow_cache.update(refined_dict)
-    _persist_cache("new_workflow", _new_workflow_cache)
+    _save_nw_state("new_workflow", _new_workflow_cache)
 
     # 벤치마킹 결과 별도 저장 (재실행 없이 불러오기 위해)
     benchmark_data = {
@@ -4182,7 +4211,7 @@ async def benchmark_new_workflow():
         "improvement_summary": improvement_summary,
         "search_count": len(benchmark_results),
     }
-    _persist_cache("benchmark_result", benchmark_data)
+    _save_nw_state("benchmark_result", benchmark_data)
 
     return {
         "ok": True,
@@ -4207,7 +4236,7 @@ async def save_edited_workflow(request: Request):
         raise HTTPException(400, "저장할 데이터가 없습니다.")
     _new_workflow_cache.clear()
     _new_workflow_cache.update(body)
-    _persist_cache("new_workflow", _new_workflow_cache)
+    _save_nw_state("new_workflow", _new_workflow_cache)
     return {"ok": True}
 
 
@@ -4328,7 +4357,7 @@ async def export_new_workflow_as_hr_json():
 
 # 과제 정의서 캐시
 _project_definition_cache: dict = {}
-_restore_cache("project_definition", _project_definition_cache)
+_project_definition_cache.update(_load_nw_state("project_definition"))
 
 
 def _build_classification_from_workflow(workflow_cache: dict) -> dict[str, dict]:
@@ -4432,7 +4461,7 @@ async def generate_project_definition(
         result_dict = project_definition_to_dict(result)
         _project_definition_cache.clear()
         _project_definition_cache.update(result_dict)
-        _persist_cache("project_definition", _project_definition_cache)
+        _save_nw_state("project_definition", _project_definition_cache)
 
         return {"ok": True, **result_dict}
 
@@ -4520,7 +4549,7 @@ async def generate_project_definition(
     result_dict = project_definition_to_dict(result)
     _project_definition_cache.clear()
     _project_definition_cache.update(result_dict)
-    _persist_cache("project_definition", _project_definition_cache)
+    _save_nw_state("project_definition", _project_definition_cache)
 
     return {"ok": True, **result_dict}
 
@@ -4544,7 +4573,7 @@ async def clear_project_definition():
 # ── 과제 설계서 ───────────────────────────────────────────────────────────────
 
 _project_design_cache: dict = {}
-_restore_cache("project_design", _project_design_cache)
+_project_design_cache.update(_load_nw_state("project_design"))
 
 
 @app.post("/api/project-management/design/generate", tags=["ProjectManagement"])
@@ -4617,7 +4646,7 @@ async def generate_project_design(
         result_dict = project_design_to_dict(result)
         _project_design_cache.clear()
         _project_design_cache.update(result_dict)
-        _persist_cache("project_design", _project_design_cache)
+        _save_nw_state("project_design", _project_design_cache)
 
         return {"ok": True, **result_dict}
 
@@ -4689,7 +4718,7 @@ async def generate_project_design(
     result_dict = project_design_to_dict(result)
     _project_design_cache.clear()
     _project_design_cache.update(result_dict)
-    _persist_cache("project_design", _project_design_cache)
+    _save_nw_state("project_design", _project_design_cache)
 
     return {"ok": True, **result_dict}
 
@@ -5103,40 +5132,12 @@ async def admin_list_uploads_all(request: Request):
                 entry["display_name"] = f"[{sid}] {pf.name}"
                 wf_ppt.append(entry)
 
-    # 2) 레거시 루트 파일 — 세션이 없거나 루트에만 파일이 있는 경우 항상 표시
-    root_excels = [f for f in _WF_DIR.glob("*.xlsx") if f.is_file()]
-    for xf in sorted(root_excels, key=lambda f: f.stat().st_mtime, reverse=True):
-        entry = _file_info(xf)
-        entry["display_name"] = f"[미분류] {xf.name}"
-        wf_excel.append(entry)
-
-    root_json = _WF_DIR / "workflow.json"
-    if root_json.exists():
-        entry = _file_info(root_json)
-        entry["display_name"] = "[미분류] workflow.json"
-        wf_json.append(entry)
-
-    for pf in sorted(_WF_DIR.glob("*.pptx"), key=lambda f: f.stat().st_mtime, reverse=True):
-        if pf.is_file():
-            entry = _file_info(pf)
-            entry["display_name"] = f"[미분류] {pf.name}"
-            wf_ppt.append(entry)
-
-    # New Workflow 결과 JSON들
+    # New Workflow 결과 JSON들 (_NW_DIR 직접 스캔)
     nw_files = []
-    for name in ["new_workflow_result.json", "project_definition.json", "project_design.json", "benchmark_result.json"]:
-        p = _PERSIST_ROOT / name
-        if p.exists():
-            nw_files.append(_file_info(p))
-    # data / results 폴더 내 파일도 포함
-    for sub in ["data", "results"]:
-        sub_dir = _PERSIST_ROOT / sub
-        if sub_dir.exists():
-            for f in sorted(sub_dir.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True)[:20]:
-                if f.is_file():
-                    entry = _file_info(f)
-                    entry["filename"] = f"{sub}/{f.name}"
-                    nw_files.append(entry)
+    if _NW_DIR.exists():
+        for f in sorted(_NW_DIR.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
+            if f.is_file() and f.suffix == ".json":
+                nw_files.append(_file_info(f))
 
     return {
         "ok": True,
@@ -5234,7 +5235,16 @@ async def admin_reset_all_workflow(request: Request):
                 except Exception as e:
                     errors.append(f"uploads/{f.name}: {e}")
 
-    # 4) data_store 프로젝트 디렉토리 전체 삭제 (/app/persist/data/)
+    # 4) New Workflow 상태 파일 삭제 (/app/persist/new_workflow/)
+    for f in _NW_DIR.iterdir() if _NW_DIR.exists() else []:
+        if f.is_file():
+            try:
+                f.unlink()
+                deleted.append(f"new_workflow/{f.name}")
+            except Exception as e:
+                errors.append(f"new_workflow/{f.name}: {e}")
+
+    # 5) data_store 프로젝트 디렉토리 전체 삭제 (/app/persist/data/)
     from data_store import _BASE_DIR as _DS_BASE, _CURRENT_FILE as _DS_CURRENT
     if _DS_BASE.exists():
         try:
@@ -5250,7 +5260,7 @@ async def admin_reset_all_workflow(request: Request):
         except Exception as e:
             errors.append(f"current_project.json: {e}")
 
-    # 5) 메모리 상태 전체 초기화 (Workflow + Task + New Workflow)
+    # 6) 메모리 상태 전체 초기화 (Workflow + Task + New Workflow)
     global _workflow_cache, _wf_excel_tasks, _wf_excel_path
     global _wf_classification, _wf_chat_history
     global _wf_step1_cache, _wf_step2_cache, _wf_benchmark_table, _wf_gap_analysis
@@ -5345,52 +5355,13 @@ async def _restore_task():
         except Exception as e:
             print(f"[STARTUP] 세션 복구 실패({last_sid}): {e}", flush=True)
 
-    # ── 레거시 단일 파일 복구 (sessions.json 없는 구버전 환경) ──────────────
-
-    # 1) Workflow JSON 복구
-    json_path = _WF_DIR / "workflow.json"
-    if json_path.exists() and "parsed" not in _workflow_cache:
-        try:
-            data = json.loads(json_path.read_text(encoding="utf-8"))
-            parsed = await asyncio.to_thread(parse_workflow_json, data)
-            summary = get_workflow_summary(parsed)
-            _workflow_cache.update({"filename": "workflow.json", "parsed": parsed,
-                                    "summary": summary, "raw": data})
-            print(f"[STARTUP] Workflow JSON 복구 완료 (레거시)", flush=True)
-        except Exception as e:
-            print(f"[STARTUP] Workflow JSON 복구 실패: {e}", flush=True)
-
-    # 2) Workflow Excel 복구
-    if not _wf_excel_tasks:
-        excel_files = sorted(_WF_DIR.glob("*.xlsx"), key=lambda x: x.stat().st_mtime)
-        if excel_files:
-            try:
-                tasks = await asyncio.to_thread(load_tasks, str(excel_files[-1]))
-                _wf_excel_tasks = tasks
-                _tasks_cache = tasks
-                _wf_classification = {}
-                for t in tasks:
-                    _candidates = [t.cls_final_label, t.cls_doosan_label, t.cls_1st_label]
-                    label = next((v.strip() for c in _candidates if (v := (c or "").strip()) and v != "-"), "")
-                    if label:
-                        _wf_classification[t.id] = {
-                            "label": label, "reason": t.cls_1st_reason or "",
-                            "criterion": t.cls_1st_knockout or "",
-                            "ai_prerequisites": t.cls_1st_ai_prereq or "",
-                            "feedback": next((v for x in [t.cls_final_feedback, t.cls_doosan_feedback] if (v := (x or "").strip()) and v != "-"), ""),
-                            "task_name": t.name, "hybrid_note": "", "input_types": "", "output_types": "",
-                        }
-                print(f"[STARTUP] Workflow Excel 복구 완료 (레거시): {excel_files[-1].name} ({len(tasks)}개)", flush=True)
-            except Exception as e:
-                print(f"[STARTUP] Workflow Excel 복구 실패: {e}", flush=True)
-
-    # 3) Task 분류 엑셀 복구
+    # Task 분류 엑셀 복구 (세션과 무관하게 별도 경로)
     if not _tasks_cache:
         task_excels = sorted(_UPLOAD_DIR.glob("*.xlsx"), key=lambda x: x.stat().st_mtime)
         if task_excels:
             try:
                 _tasks_cache = await asyncio.to_thread(load_tasks, str(task_excels[-1]))
                 _current_excel_path = task_excels[-1]
-                print(f"[STARTUP] Task Excel 복구 완료: {task_excels[-1].name}", flush=True)
+                print(f"[STARTUP] Task Excel 복구: {task_excels[-1].name}", flush=True)
             except Exception as e:
                 print(f"[STARTUP] Task Excel 복구 실패: {e}", flush=True)
