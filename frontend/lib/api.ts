@@ -136,34 +136,11 @@ function clearAuthToken(): void {
 
 // ── 기본 fetch 헬퍼 ──────────────────────────────────────────────────────────
 
-export function getWorkflowUserId(): string {
-  if (typeof window === "undefined") return "";
-  return localStorage.getItem("wf_user_id") || "";
-}
-
-export function setWorkflowUserId(userId: string): void {
-  if (typeof window !== "undefined") localStorage.setItem("wf_user_id", userId);
-}
-
-export function getWorkflowTeamId(): string {
-  if (typeof window === "undefined") return "";
-  return localStorage.getItem("wf_team_id") || "";
-}
-
-export function setWorkflowTeamId(teamId: string): void {
-  if (typeof window === "undefined") return;
-  localStorage.setItem("wf_team_id", teamId);
-}
-
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const token = getAuthToken();
-  const userId = getWorkflowUserId();
-  const teamId = getWorkflowTeamId();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    ...(userId ? { "X-User-Id": userId } : {}),
-    ...(teamId ? { "X-Team-Id": teamId } : {}),
   };
   const res = await fetch(`${BACKEND_DIRECT}/api${path}`, {
     headers,

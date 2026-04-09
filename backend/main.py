@@ -996,11 +996,29 @@ _current_session_id: str = ""   # 현재 활성 세션 ID (JSON 파일명 기반
 _sessions_manifest: dict = {}   # {session_id: {name, created_at, updated_at, excel_file, json_file, ppt_file}}
 
 
+def _get_auth_user(request: Request) -> dict | None:
+    """Authorization 헤더 토큰으로 로그인된 사용자 정보 반환."""
+    token = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    if not token:
+        return None
+    return get_session_user(token)
+
 def _get_team_id(request: Request) -> str:
-    return (request.headers.get("X-Team-Id") or "").strip() or "default"
+    """로그인된 사용자의 프로젝트(팀)를 team_id로 반환. 미로그인 or 공통='default'."""
+    user = _get_auth_user(request)
+    if not user:
+        return "default"
+    proj = user.get("project")  # None = 공통(전체 접근), str = 'SKI'/'두산' 등
+    if not proj:
+        return "공통"  # 공통 멤버 — 전체 조회 가능
+    return proj
 
 def _get_user_id(request: Request) -> str:
-    return (request.headers.get("X-User-Id") or "").strip() or "unknown"
+    """로그인된 사용자 이름 반환. 미로그인='unknown'."""
+    user = _get_auth_user(request)
+    if not user:
+        return "unknown"
+    return user.get("name", "unknown")
 
 
 def _get_session_dir(sid: str) -> Path:
@@ -5349,10 +5367,14 @@ async def get_workflow_sessions_overview(request: Request):
     """전체 세션을 user_id 기준으로 그룹핑하여 PM 대시보드용으로 반환합니다."""
     _load_sessions_manifest()
     req_team_id = _get_team_id(request)
+    auth_user = _get_auth_user(request)
+    is_admin = auth_user.get("is_admin", False) if auth_user else False
+    is_common = (req_team_id == "공통")
+
     all_sessions = [
         v for k, v in _sessions_manifest.items()
         if k != "_current" and isinstance(v, dict)
-        and v.get("team_id", "default") == req_team_id
+        and (is_admin or is_common or v.get("team_id", "default") == req_team_id)
     ]
 
     # user_id별 그룹핑
@@ -5408,17 +5430,21 @@ async def list_workflow_sessions(request: Request, all: bool = Query(False)):
     """
     _load_sessions_manifest()
     req_team_id = _get_team_id(request)
-    # 팀 필터 (항상 적용)
+    auth_user = _get_auth_user(request)
+    is_admin = auth_user.get("is_admin", False) if auth_user else False
+    is_common = (req_team_id == "공통")  # 공통 멤버는 전체 팀 조회 가능
+
+    # 팀 필터: 공통 멤버/Admin이면 전체, 일반 팀원이면 본인 팀만
     all_sessions = [
         v for k, v in _sessions_manifest.items()
         if k != "_current" and isinstance(v, dict)
-        and v.get("team_id", "default") == req_team_id
+        and (is_admin or is_common or v.get("team_id", "default") == req_team_id)
     ]
     all_sessions.sort(key=lambda s: s.get("updated_at", s.get("created_at", "")), reverse=True)
 
     if not all:
         user_id = _get_user_id(request) or request.query_params.get("user", "")
-        if user_id and user_id != "unknown":
+        if user_id and user_id != "unknown" and not is_admin and not is_common:
             all_sessions = [s for s in all_sessions if s.get("user_id", "unknown") == user_id]
 
     return {
@@ -5557,7 +5583,11 @@ async def rename_workflow_session(session_id: str, request: Request):
         raise HTTPException(404, f"세션 '{session_id}'을 찾을 수 없습니다.")
 
     session = _sessions_manifest[session_id]
-    if session.get("team_id", "default") != _get_team_id(request):
+    req_team = _get_team_id(request)
+    auth_user = _get_auth_user(request)
+    if (not auth_user or auth_user.get("is_admin") is True or req_team == "공통"):
+        pass  # Admin / 공통 멤버는 허용
+    elif session.get("team_id", "default") != req_team:
         raise HTTPException(403, "다른 팀의 세션에 접근할 수 없습니다.")
 
     session["name"] = new_name
@@ -5590,8 +5620,11 @@ async def load_workflow_session(session_id: str, request: Request):
         raise HTTPException(404, f"세션 '{session_id}'을 찾을 수 없습니다.")
 
     session = _sessions_manifest[session_id]
-    if session.get("team_id", "default") != _get_team_id(request):
-        raise HTTPException(403, "다른 팀의 세션에 접근할 수 없습니다.")
+    req_team = _get_team_id(request)
+    auth_user2 = _get_auth_user(request)
+    if not (auth_user2 and (auth_user2.get("is_admin") or req_team == "공통")):
+        if session.get("team_id", "default") != req_team:
+            raise HTTPException(403, "다른 팀의 세션에 접근할 수 없습니다.")
 
     global _current_session_id, _wf_excel_tasks, _wf_chat_history
     global _wf_step1_cache, _wf_step2_cache, _wf_benchmark_table, _wf_gap_analysis, _wf_user_resources
@@ -5644,8 +5677,11 @@ async def delete_workflow_session(session_id: str, request: Request):
         raise HTTPException(404, f"세션 '{session_id}'을 찾을 수 없습니다.")
 
     session = _sessions_manifest[session_id]
-    if session.get("team_id", "default") != _get_team_id(request):
-        raise HTTPException(403, "다른 팀의 세션에 접근할 수 없습니다.")
+    req_team = _get_team_id(request)
+    auth_user3 = _get_auth_user(request)
+    if not (auth_user3 and (auth_user3.get("is_admin") or req_team == "공통")):
+        if session.get("team_id", "default") != req_team:
+            raise HTTPException(403, "다른 팀의 세션에 접근할 수 없습니다.")
 
     # 디렉토리 삭제
     try:
