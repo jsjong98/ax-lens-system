@@ -2813,9 +2813,12 @@ async def generate_gap_analysis(request: Request):
             f"성과: {bm.get('outcome', '')}\n"
         )
 
-    # ── Perplexity 추가 검색: Gap 고도화 ────────────────────────────────────
+    # ── Perplexity 심층 검색: 기존 벤치마킹 결과 기반 고도화 ─────────────────
+    # 기존 _wf_benchmark_table 사례를 바탕으로 사례별 검증/심화 쿼리 생성
+    # 새로운 사례 탐색이 아니라, 이미 찾은 사례를 더 깊이 파고드는 것이 목적
     gap_search_context = ""
     try:
+        # L4 이름 추출 (시트 이름 or 엑셀)
         _, excel_by_l4, _, _ = _build_excel_index()
         l4_names_for_search = [d["name"] for d in
                                (lambda p: [{"name": (s.name or s.sheet_id).strip()}
@@ -2823,6 +2826,28 @@ async def generate_gap_analysis(request: Request):
                                (_workflow_cache.get("parsed"))][:4]
         if not l4_names_for_search:
             l4_names_for_search = [tasks[0].l4 for tasks in list(excel_by_l4.values())[:4] if tasks]
+
+        # ── 기존 벤치마킹 사례 기반 심화 쿼리 생성 ──
+        # 상위 사례별: "{기업} {AI기술} {L4} implementation ROI outcome 2024 2025"
+        deepening_queries: list[str] = []
+        seen_sources: set[str] = set()
+        for bm in all_bm_rows[:8]:
+            src = bm.get("source", "").strip()
+            tech = bm.get("ai_technology", "").strip()
+            l4 = bm.get("process_area", "").strip()
+            if not src or src in seen_sources:
+                continue
+            seen_sources.add(src)
+            q = f"{src} {tech} {l4} AI implementation outcome ROI 2024 2025".strip()
+            deepening_queries.append(q)
+            if len(deepening_queries) >= 4:
+                break
+
+        # As-Is L4 단위 Gap 탐색 쿼리 (두산 현재 수준 vs 선도사 비교)
+        for l4n in l4_names_for_search[:2]:
+            deepening_queries.append(
+                f"{process_name} {l4n} AI adoption gap challenge barrier enterprise 2024"
+            )
 
         gap_bm_data = {
             "process_name": process_name,
@@ -2834,11 +2859,8 @@ async def generate_gap_analysis(request: Request):
             "l2_names": [],
             "l3_details": [], "l2_details": [],
             "l5_tasks": [],
-            "blueprint_summary": f"{process_name} AI 전환 Gap 분석 고도화",
-            "extra_queries": [
-                f"{process_name} AI transformation gap analysis best practice 2024 2025",
-                f"HR {process_name} process automation AI adoption barriers challenges",
-            ],
+            "blueprint_summary": f"{process_name} 기존 벤치마킹 사례 심층 검증",
+            "extra_queries": deepening_queries,
         }
         _gap_sr = await search_benchmarks(gap_bm_data)
         _gap_raw = _gap_sr.get("results", [])
@@ -2851,12 +2873,16 @@ async def generate_gap_analysis(request: Request):
                     _gq[_q2]["content"] = r.get("content", "")
                 if r.get("url"):
                     _gq[_q2]["urls"].append(r["url"])
-            gap_search_context = f"\n## Gap 고도화 검색 결과 (Perplexity)\n"
-            for _q2, _g2 in list(_gq.items())[:6]:
-                gap_search_context += f"\n### {_q2[:80]}\n"
+            gap_search_context = (
+                f"\n## 기존 벤치마킹 사례 심층 검증 결과 (Perplexity)\n"
+                f"※ 벤치마킹 결과표의 기업·사례를 대상으로 추가 검색한 내용입니다.\n"
+            )
+            for _q2, _g2 in list(_gq.items())[:8]:
+                gap_search_context += f"\n### 검색: {_q2[:100]}\n"
                 if _g2["urls"]:
                     gap_search_context += "출처: " + ", ".join(_g2["urls"][:2]) + "\n"
-                gap_search_context += f"{_g2['content'][:600]}\n"
+                gap_search_context += f"{_g2['content'][:500]}\n"
+        print(f"[gap-analysis] 심층 검색 완료: {len(deepening_queries)}개 쿼리, {len(_gap_raw)}건 결과")
     except Exception as _e:
         print(f"[gap-analysis] 추가 검색 실패 (무시): {_e}")
 
@@ -2881,8 +2907,8 @@ C. 폐기/통합: As-Is에만 있고 벤치마킹에는 없음. 선도 사례에
 ## Gap 분석 지침
 - 각 L4 Activity 단위로 As-Is vs To-Be Gap 분석
 - gap_type: 반드시 "A. 신규" / "B. 전환" / "C. 폐기/통합" 중 하나로만 분류
-- 실제 벤치마킹 데이터 및 검색 결과에 근거한 분석만 수행
-- 벤치마킹 사례에서 기업명 구체적으로 인용
+- **위 벤치마킹 결과표의 기업·사례를 1차 근거로 사용하고, 심층 검증 결과로 해당 사례의 실제 성과·구현 방식을 보강하여 분석**
+- 벤치마킹 사례에서 기업명 구체적으로 인용 (심층 검증 결과에서 추가 수치/사실 발견 시 반영)
 - quick_wins: 단기(6개월 내) 즉시 시행 가능한 액션
 - strategic_actions: 장기(5년) 전략 과제
 
