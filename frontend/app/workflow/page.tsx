@@ -133,6 +133,34 @@ export default function WorkflowPage() {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatMessages]);
 
+  // 페이지 전체 Ctrl+V 이미지 감지 (textarea 포커스 없이도 동작)
+  useEffect(() => {
+    const handleGlobalPaste = async (e: ClipboardEvent) => {
+      // 기본 텍스트 입력 필드에 붙여넣기 중이면 무시
+      const target = e.target as HTMLElement;
+      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
+      // Step 1 (기본 설계) 화면일 때만 활성화
+      if (currentStep !== 2) return;
+
+      const items = Array.from(e.clipboardData?.items ?? []);
+      const imageItem = items.find((it) => it.type.startsWith("image/"));
+      if (!imageItem) return;
+
+      e.preventDefault();
+      const file = imageItem.getAsFile();
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const b64 = (reader.result as string).split(",")[1];
+        setPendingImages((prev) => [...prev, { b64, type: file.type, name: "screenshot.png" }]);
+      };
+      reader.readAsDataURL(file);
+    };
+
+    document.addEventListener("paste", handleGlobalPaste);
+    return () => document.removeEventListener("paste", handleGlobalPaste);
+  }, [currentStep]);
+
   // 세션 목록 로드
   const loadSessions = useCallback(async () => {
     try {
