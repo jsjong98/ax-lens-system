@@ -1038,8 +1038,8 @@ def _load_session_data(sid: str) -> bool:
         except Exception as e:
             print(f"[SESSION] JSON 복구 실패({sid}): {e}", flush=True)
 
-    # Excel 복구
-    xls = list(d.glob("*.xlsx"))
+    # Excel 복구 — 여러 파일이 있으면 가장 최신 파일 사용
+    xls = sorted(d.glob("*.xlsx"), key=lambda f: f.stat().st_mtime)
     if xls:
         try:
             tasks = load_tasks(str(xls[-1]))
@@ -1577,21 +1577,11 @@ async def upload_workflow_excel(file: UploadFile = File(...)):
         _current_session_id = sid
     sess_dir = _get_session_dir(sid)
 
-    # 세션 내 기존 엑셀 삭제 후 저장
-    for old in sess_dir.glob("*.xlsx"):
-        try:
-            old.unlink()
-        except Exception:
-            pass
+    # 세션 디렉토리에 저장 (같은 이름이면 덮어쓰기, 다른 이름이면 추가 보존)
     save_path = sess_dir / safe_wf_excel_name
     save_path.write_bytes(content)
 
-    # 하위 호환: _WF_DIR 루트에도 복사 (기존 코드 + startup restore)
-    for old in _WF_DIR.glob("*.xlsx"):
-        try:
-            old.unlink()
-        except Exception:
-            pass
+    # 하위 호환: _WF_DIR 루트에도 저장 (startup restore용 — 삭제하지 않고 덮어쓰기만)
     (_WF_DIR / safe_wf_excel_name).write_bytes(content)
 
     # 시트 목록
@@ -4972,7 +4962,8 @@ async def admin_list_uploads_all(request: Request):
             sid = _sessions_manifest.get(sess_dir.name, {}).get("id", "") or sess_dir.name
             seen_sess.add(sess_dir.name)
 
-            for xf in sorted(sess_dir.glob("*.xlsx"), key=lambda f: f.stat().st_mtime, reverse=True)[:1]:
+            # 세션 내 모든 Excel 파일 표시 (최신순)
+            for xf in sorted(sess_dir.glob("*.xlsx"), key=lambda f: f.stat().st_mtime, reverse=True):
                 entry = _file_info(xf)
                 entry["session_id"] = sid
                 entry["display_name"] = f"[{sid}] {xf.name}"
@@ -4985,7 +4976,8 @@ async def admin_list_uploads_all(request: Request):
                 entry["display_name"] = f"[{sid}] workflow.json"
                 wf_json.append(entry)
 
-            for pf in sorted(sess_dir.glob("*.pptx"), key=lambda f: f.stat().st_mtime, reverse=True)[:1]:
+            # 세션 내 모든 PPT 파일 표시 (최신순)
+            for pf in sorted(sess_dir.glob("*.pptx"), key=lambda f: f.stat().st_mtime, reverse=True):
                 entry = _file_info(pf)
                 entry["session_id"] = sid
                 entry["display_name"] = f"[{sid}] {pf.name}"
