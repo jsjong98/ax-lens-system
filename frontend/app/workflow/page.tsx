@@ -91,7 +91,6 @@ export default function WorkflowPage() {
   const [chatInput, setChatInput] = useState("");
   // 시트별 벤치마킹 결과 {sheet_id: rows[]}
   const [benchmarkTableBySheet, setBenchmarkTableBySheet] = useState<Record<string, BenchmarkTableRow[]>>({});
-  const [benchmarkSummary, setBenchmarkSummary] = useState("");
   const [bmLoading, setBmLoading] = useState(false);
   const [searchLog, setSearchLog] = useState<SearchLogItem[]>([]);
   const [showSearchLog, setShowSearchLog] = useState(false);
@@ -281,7 +280,7 @@ export default function WorkflowPage() {
     setStep1Result(null);
     setStep2Result(null);
     setBenchmarkTableBySheet({});
-    setBenchmarkSummary("");
+
     setGapAnalysis(null);
     setTobeFlow(null);
     setTobeActiveSheet(0);
@@ -490,7 +489,7 @@ export default function WorkflowPage() {
       (result) => {
         const sheetKey = result.sheet_id ?? activeSheet ?? "__default__";
         setBenchmarkTableBySheet((prev) => ({ ...prev, [sheetKey]: result.benchmark_table }));
-        setBenchmarkSummary(result.summary);
+
         if (result.search_log) setSearchLog(result.search_log);
         setChatMessages((prev) => [
           ...prev.filter((m) => m.content !== loadingMsg),
@@ -1648,9 +1647,6 @@ export default function WorkflowPage() {
                 <div className="flex items-center justify-between mb-2">
                   <div className="text-xs font-bold text-gray-700">벤치마킹 결과표</div>
                   <div className="flex items-center gap-2">
-                    {benchmarkSummary && (
-                      <div className="text-[10px] text-gray-500 max-w-[50%] text-right">{benchmarkSummary.slice(0, 150)}</div>
-                    )}
                     <button
                       onClick={async () => {
                         const base = process.env.NEXT_PUBLIC_BACKEND_URL || "";
@@ -1815,57 +1811,64 @@ export default function WorkflowPage() {
                         <span className="flex items-center gap-1"><span className="px-1.5 py-0.5 rounded bg-gray-200 text-gray-600 font-bold">C. 폐기/통합</span> As-Is에만 존재 — 존치 재검토</span>
                       </div>
 
-                      {/* Gap 테이블 */}
+                      {/* Gap 항목 카드 */}
                       {gapAnalysis.gap_items && gapAnalysis.gap_items.length > 0 && (
-                        <div className="overflow-x-auto rounded-lg border border-gray-200">
-                          <table className="w-full text-xs" style={{ minWidth: "1000px" }}>
-                            <thead className="sticky top-0 bg-gray-50 border-b border-gray-200">
-                              <tr>
-                                <th className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">L4 활동</th>
-                                <th className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">As-Is (두산)</th>
-                                <th className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">To-Be (선도사)</th>
-                                <th className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">Gap 유형</th>
-                                <th className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">근본 원인</th>
-                                <th className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">Action Plan</th>
-                                <th className="text-center px-3 py-2 font-medium text-gray-600 whitespace-nowrap">우선순위</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {[...gapAnalysis.gap_items]
-                                .sort((a, b) => a.priority - b.priority)
-                                .map((item, i) => (
-                                <tr key={i} className="border-b border-gray-100 hover:bg-gray-50/50">
-                                  <td className="px-3 py-2 font-medium text-gray-800 max-w-[120px]">{item.l4_activity}</td>
-                                  <td className="px-3 py-2 text-gray-600 max-w-[160px]">{item.as_is}</td>
-                                  <td className="px-3 py-2 text-blue-700 max-w-[160px]">{item.to_be}</td>
-                                  <td className="px-3 py-2 whitespace-nowrap">
-                                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                                      item.gap_type?.startsWith("A")
-                                        ? "bg-blue-100 text-blue-700"
-                                        : item.gap_type?.startsWith("B")
-                                        ? "bg-amber-100 text-amber-700"
-                                        : "bg-gray-200 text-gray-600"
-                                    }`}>
-                                      {item.gap_type ?? "-"}
-                                    </span>
-                                  </td>
-                                  <td className="px-3 py-2 text-gray-500 max-w-[140px]">{item.root_cause}</td>
-                                  <td className="px-3 py-2 text-gray-600 max-w-[200px]">{item.action_plan}</td>
-                                  <td className="px-3 py-2 text-center">
-                                    <span className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold ${
-                                      item.priority === 1
-                                        ? "bg-red-100 text-red-700"
-                                        : item.priority === 2
-                                        ? "bg-amber-100 text-amber-700"
-                                        : "bg-gray-100 text-gray-500"
-                                    }`}>
-                                      {item.priority}
-                                    </span>
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
+                        <div className="grid grid-cols-2 gap-3">
+                          {[...gapAnalysis.gap_items]
+                            .sort((a, b) => a.priority - b.priority)
+                            .map((item, i) => {
+                              const isA = item.gap_type?.startsWith("A");
+                              const isB = item.gap_type?.startsWith("B");
+                              const typeColor = isA
+                                ? { bar: "bg-blue-500", badge: "bg-blue-100 text-blue-700", light: "bg-blue-50", border: "border-blue-200" }
+                                : isB
+                                ? { bar: "bg-amber-500", badge: "bg-amber-100 text-amber-700", light: "bg-amber-50", border: "border-amber-200" }
+                                : { bar: "bg-gray-400", badge: "bg-gray-100 text-gray-600", light: "bg-gray-50", border: "border-gray-200" };
+                              const priColor = item.priority === 1
+                                ? "bg-red-500 text-white"
+                                : item.priority === 2
+                                ? "bg-amber-400 text-white"
+                                : "bg-gray-300 text-gray-600";
+                              return (
+                                <div key={i} className={`rounded-xl border ${typeColor.border} overflow-hidden`}>
+                                  {/* 상단 헤더 */}
+                                  <div className={`${typeColor.bar} h-1`} />
+                                  <div className="flex items-center justify-between px-4 py-2.5 bg-white border-b border-gray-100">
+                                    <span className="text-sm font-bold text-gray-800">{item.l4_activity}</span>
+                                    <div className="flex items-center gap-1.5">
+                                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${typeColor.badge}`}>
+                                        {item.gap_type ?? "-"}
+                                      </span>
+                                      <span className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold ${priColor}`}>
+                                        P{item.priority}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  {/* As-Is / To-Be */}
+                                  <div className="grid grid-cols-2 divide-x divide-gray-100 bg-white">
+                                    <div className="px-4 py-2.5">
+                                      <div className="text-[9px] font-bold text-gray-400 uppercase tracking-wide mb-1">As-Is</div>
+                                      <p className="text-[11px] text-gray-600 leading-snug">{item.as_is}</p>
+                                    </div>
+                                    <div className="px-4 py-2.5">
+                                      <div className="text-[9px] font-bold text-blue-400 uppercase tracking-wide mb-1">To-Be</div>
+                                      <p className="text-[11px] text-blue-700 leading-snug">{item.to_be}</p>
+                                    </div>
+                                  </div>
+                                  {/* 원인 + Action Plan */}
+                                  <div className={`${typeColor.light} px-4 py-2.5 space-y-1.5`}>
+                                    <div className="flex items-start gap-2">
+                                      <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wide whitespace-nowrap mt-0.5">원인</span>
+                                      <span className="text-[11px] text-gray-600">{item.root_cause}</span>
+                                    </div>
+                                    <div className="flex items-start gap-2">
+                                      <span className="text-[9px] font-bold text-gray-500 uppercase tracking-wide whitespace-nowrap mt-0.5">Action</span>
+                                      <span className="text-[11px] text-gray-800 font-medium">{item.action_plan}</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
                         </div>
                       )}
 

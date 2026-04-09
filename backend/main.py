@@ -3020,13 +3020,12 @@ gap_items 전체를 종합하여 세 차원(프로세스 / 인프라 / 데이터
   "executive_summary": "경영진 요약 — 3문장 이내, 핵심 숫자(Gap 건수·유형 분포)·최우선 과제·기대 효과 순으로 작성",
   "gap_items": [
     {{
-      "l4_activity": "L4 활동명",
-      "as_is": "두산 현재 수준 (구체적)",
-      "to_be": "선도사 수준 (기업명 포함)",
+      "l4_activity": "L4 활동명 (10자 이내)",
+      "as_is": "현재 수준 — 1문장, 30자 이내, 수치 포함",
+      "to_be": "선도사 수준 — 기업명 포함, 1문장, 30자 이내",
       "gap_type": "A. 신규",
-      "gap_description": "차이 설명 및 Gap 유형 판단 근거",
-      "root_cause": "Gap 원인",
-      "action_plan": "전환 실행 방향 (구체적)",
+      "root_cause": "Gap 원인 — 핵심 명사구, 15자 이내",
+      "action_plan": "실행 방향 — 동사 시작, 1문장, 30자 이내",
       "priority": 1
     }}
   ],
