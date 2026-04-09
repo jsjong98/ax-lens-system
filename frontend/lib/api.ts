@@ -1069,6 +1069,49 @@ export async function generateTobeFlow(): Promise<TobeFlowResult> {
   return apiFetch("/workflow/generate-tobe-flow", { method: "POST", body: "{}" });
 }
 
+// ── 사용자 첨부 리소스 ────────────────────────────────────────────────────────
+
+export interface UserResource {
+  type: "url" | "image";
+  source: string;
+  title: string;
+  content: string;
+  image_b64?: string;   // 이미지만 존재 (메모리 전용, 세션 저장 제외)
+  image_path?: string;
+  added_at: string;
+}
+
+export interface ResourceListResult {
+  resources: UserResource[];
+  total: number;
+}
+
+export async function getWorkflowResources(): Promise<ResourceListResult> {
+  return apiFetch("/workflow/resources");
+}
+
+export async function addUrlResource(url: string): Promise<{ ok: boolean; resource: UserResource; total: number }> {
+  return apiFetch("/workflow/resources/url", {
+    method: "POST",
+    body: JSON.stringify({ url }),
+  });
+}
+
+export async function addImageResource(
+  image_b64: string,
+  image_type: string,
+  filename: string,
+): Promise<{ ok: boolean; resource: UserResource; total: number }> {
+  return apiFetch("/workflow/resources/image", {
+    method: "POST",
+    body: JSON.stringify({ image_b64, image_type, filename }),
+  });
+}
+
+export async function deleteWorkflowResource(idx: number): Promise<{ ok: boolean; total: number }> {
+  return apiFetch(`/workflow/resources/${idx}`, { method: "DELETE" });
+}
+
 // ── 멀티 세션 ────────────────────────────────────────────────────────────────
 
 export interface WorkflowSession {

@@ -1040,6 +1040,10 @@ def _save_session_data(sid: str) -> None:
         "step1": _wf_step1_cache,
         "step2": _wf_step2_cache,
         "gap_analysis": _wf_gap_analysis,
+        "user_resources": [
+            {k: v for k, v in r.items() if k != "image_b64"}  # b64 제외 (파일로 저장)
+            for r in _wf_user_resources
+        ],
         "saved_at": _now_kst(),
     }
     try:
@@ -1059,7 +1063,7 @@ def _save_session_data(sid: str) -> None:
 def _load_session_data(sid: str) -> bool:
     """세션 디렉토리에서 state를 메모리에 복구. 성공 시 True 반환."""
     global _wf_classification, _wf_benchmark_table, _wf_step1_cache, _wf_step2_cache, _wf_gap_analysis
-    global _workflow_cache, _wf_excel_tasks, _wf_excel_path
+    global _workflow_cache, _wf_excel_tasks, _wf_excel_path, _wf_user_resources
     from workflow_parser import parse_workflow_json, get_workflow_summary
     from excel_reader import load_tasks
 
@@ -1097,6 +1101,17 @@ def _load_session_data(sid: str) -> bool:
             _wf_step1_cache = sd.get("step1", {})
             _wf_step2_cache = sd.get("step2", {})
             _wf_gap_analysis = sd.get("gap_analysis", {})
+            _wf_user_resources = sd.get("user_resources", [])
+            # 이미지 리소스의 image_b64 복원 (파일에서 재로드)
+            import base64 as _b64mod
+            for res in _wf_user_resources:
+                if res.get("type") == "image" and res.get("image_path"):
+                    try:
+                        p = Path(res["image_path"])
+                        if p.exists():
+                            res["image_b64"] = _b64mod.b64encode(p.read_bytes()).decode()
+                    except Exception:
+                        pass
         except Exception as e:
             print(f"[SESSION] session_data 복구 실패({sid}): {e}", flush=True)
 
@@ -1571,6 +1586,7 @@ _wf_step1_cache: dict = {}     # Step 1 결과 캐시
 _wf_step2_cache: dict = {}     # Step 2 결과 캐시
 _wf_chat_history: list = []    # Step 1 채팅 이력
 _manual_matches: dict = {}     # 수동 매칭: json_task_id → excel_task_id
+_wf_user_resources: list = []  # 사용자가 첨부한 URL/이미지 리소스 (누적)
 
 def _manual_matches_path() -> Path:
     """현재 세션의 manual_matches.json 경로. 세션 없으면 _WF_DIR 루트 (하위 호환)."""
@@ -1629,7 +1645,7 @@ async def upload_workflow_excel(file: UploadFile = File(...)):
     tasks = load_tasks(str(save_path), sheet_name=recommended)
 
     global _wf_excel_tasks, _wf_excel_path, _wf_classification, _wf_chat_history
-    global _wf_step1_cache, _wf_step2_cache, _wf_benchmark_table
+    global _wf_step1_cache, _wf_step2_cache, _wf_benchmark_table, _wf_user_resources
     _wf_excel_tasks = tasks
     _wf_excel_path = str(save_path)   # 현재 파일 경로 고정
 
@@ -1645,6 +1661,7 @@ async def upload_workflow_excel(file: UploadFile = File(...)):
     _wf_step2_cache = {}
     _wf_chat_history = []
     _wf_benchmark_table = {}
+    _wf_user_resources = []
 
     # 분류 결과 추출 (최종 > 두산 > 1차 순 fallback)
     # '-'(대시)는 "두산 검토: 변경 불필요" 표시이므로 실제 label이 아님 → skip
@@ -3036,6 +3053,175 @@ async def generate_workflow_step1(request: Request):
     return {"ok": True, **result_dict}
 
 
+# ── 사용자 리소스 (URL / 이미지 첨부) ─────────────────────────────
+
+async def _fetch_url_content(url: str) -> dict:
+    """URL 페이지 내용을 크롤링하여 텍스트 추출."""
+    import httpx
+    from bs4 import BeautifulSoup
+
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8",
+    }
+    async with httpx.AsyncClient(timeout=15, follow_redirects=True, verify=False) as client:
+        resp = await client.get(url, headers=headers)
+        resp.raise_for_status()
+        content_type = resp.headers.get("content-type", "")
+        if "html" not in content_type and "text" not in content_type:
+            raise ValueError(f"지원하지 않는 콘텐츠 타입: {content_type}")
+
+    soup = BeautifulSoup(resp.text, "lxml")
+    title = soup.title.get_text(strip=True) if soup.title else url
+
+    # 불필요한 태그 제거
+    for tag in soup(["script", "style", "nav", "footer", "header", "aside",
+                     "noscript", "iframe", "form"]):
+        tag.decompose()
+
+    # 본문 텍스트 추출 (article > main > body 우선순위)
+    body = (soup.find("article") or soup.find("main") or
+            soup.find(id="content") or soup.find(class_="content") or
+            soup.body)
+    text = body.get_text(separator="\n", strip=True) if body else soup.get_text(separator="\n", strip=True)
+    # 연속 줄바꿈 정리
+    import re as _re
+    text = _re.sub(r"\n{3,}", "\n\n", text)[:6000]
+    return {"title": title, "content": text}
+
+
+async def _analyze_image_with_vision(image_b64: str, image_media_type: str) -> str:
+    """Claude Vision으로 이미지 내용을 분석하여 텍스트 추출."""
+    settings = load_settings()
+    anthropic_key = os.getenv("ANTHROPIC_API_KEY", "") or settings.anthropic_api_key
+    if not anthropic_key:
+        raise ValueError("Anthropic API 키가 없습니다.")
+
+    from anthropic import AsyncAnthropic
+    client = AsyncAnthropic(api_key=anthropic_key)
+    response = await client.messages.create(
+        model=settings.anthropic_model or "claude-sonnet-4-6",
+        max_tokens=2048,
+        messages=[{
+            "role": "user",
+            "content": [
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": image_media_type,
+                        "data": image_b64,
+                    },
+                },
+                {
+                    "type": "text",
+                    "text": (
+                        "이 이미지의 내용을 한국어로 상세히 분석해주세요. "
+                        "문서라면 핵심 내용·수치·키워드를 정리하고, "
+                        "차트나 표라면 데이터와 인사이트를 서술하며, "
+                        "화면 캡처라면 어떤 서비스/정보인지 설명해주세요. "
+                        "마지막에 3~5줄 요약을 추가해주세요."
+                    ),
+                },
+            ],
+        }],
+    )
+    return response.content[0].text
+
+
+@app.get("/api/workflow/resources", tags=["Workflow"])
+async def get_workflow_resources():
+    """누적 사용자 리소스 목록 반환 (이미지 b64 제외)."""
+    safe = [{k: v for k, v in r.items() if k != "image_b64"} for r in _wf_user_resources]
+    return {"resources": safe, "total": len(safe)}
+
+
+@app.post("/api/workflow/resources/url", tags=["Workflow"])
+async def add_url_resource(request: Request):
+    """URL 크롤링 후 리소스에 추가."""
+    global _wf_user_resources
+    body = await request.json()
+    url = (body.get("url") or "").strip()
+    if not url:
+        raise HTTPException(400, "url 필드가 필요합니다.")
+
+    try:
+        fetched = await _fetch_url_content(url)
+    except Exception as e:
+        raise HTTPException(400, f"URL 접근 실패: {e}")
+
+    resource = {
+        "type": "url",
+        "source": url,
+        "title": fetched["title"],
+        "content": fetched["content"],
+        "added_at": _now_kst(),
+    }
+    _wf_user_resources.append(resource)
+    _save_session_data(_current_session_id)
+    return {"ok": True, "resource": resource, "total": len(_wf_user_resources)}
+
+
+@app.post("/api/workflow/resources/image", tags=["Workflow"])
+async def add_image_resource(request: Request):
+    """이미지 Vision 분석 후 리소스에 추가. 이미지 파일은 세션 디렉토리에 저장."""
+    global _wf_user_resources
+    body = await request.json()
+    image_b64: str = body.get("image_b64", "")
+    image_type: str = body.get("image_type", "image/png")  # e.g. "image/png", "image/jpeg"
+    filename: str = body.get("filename", "screenshot")
+    if not image_b64:
+        raise HTTPException(400, "image_b64 필드가 필요합니다.")
+
+    # Vision 분석
+    try:
+        analysis = await _analyze_image_with_vision(image_b64, image_type)
+    except Exception as e:
+        raise HTTPException(500, f"이미지 분석 실패: {e}")
+
+    # 세션 디렉토리에 이미지 파일 저장
+    img_path = ""
+    if _current_session_id:
+        import base64 as _b64
+        res_dir = _get_session_dir(_current_session_id) / "resources"
+        res_dir.mkdir(exist_ok=True)
+        ts = _now_kst().replace(":", "-").replace(" ", "_")
+        ext = image_type.split("/")[-1] if "/" in image_type else "png"
+        img_file = res_dir / f"img_{ts}.{ext}"
+        img_file.write_bytes(_b64.b64decode(image_b64))
+        img_path = str(img_file)
+
+    resource = {
+        "type": "image",
+        "source": filename,
+        "title": filename,
+        "content": analysis,
+        "image_path": img_path,
+        "image_b64": image_b64,   # 메모리에만 보관 (session_data 저장 시 제외)
+        "added_at": _now_kst(),
+    }
+    _wf_user_resources.append(resource)
+    _save_session_data(_current_session_id)
+    # 반환 시 b64 포함 (프론트 썸네일 표시용)
+    return {"ok": True, "resource": resource, "total": len(_wf_user_resources)}
+
+
+@app.delete("/api/workflow/resources/{idx}", tags=["Workflow"])
+async def delete_workflow_resource(idx: int):
+    """인덱스로 리소스 삭제."""
+    global _wf_user_resources
+    if idx < 0 or idx >= len(_wf_user_resources):
+        raise HTTPException(404, "리소스를 찾을 수 없습니다.")
+    _wf_user_resources.pop(idx)
+    _save_session_data(_current_session_id)
+    return {"ok": True, "total": len(_wf_user_resources)}
+
+
 # ── To-Be Workflow Swim Lane 생성 ─────────────────────────────
 
 @app.post("/api/workflow/generate-tobe-flow", tags=["Workflow"])
@@ -3364,6 +3550,16 @@ L4 활동: {', '.join(bm_data['l4_names'][:4])}
         context += "\n\n현재 벤치마킹 테이블 (전체 시트 합산):\n"
         for bm in all_bm_for_context[:8]:
             context += f"- [{bm.get('company_type','?')}] {bm.get('source','')}: {bm.get('use_case','')}\n"
+
+    # 사용자 첨부 리소스 (URL/이미지 분석 결과) 포함
+    if _wf_user_resources:
+        context += f"\n\n## 사용자 첨부 리서치 자료 ({len(_wf_user_resources)}건)\n"
+        for i, res in enumerate(_wf_user_resources):
+            rtype = "🔗 URL" if res.get("type") == "url" else "🖼 이미지"
+            context += (f"\n[{i+1}] {rtype} — {res.get('title', res.get('source',''))}\n"
+                        f"출처: {res.get('source','')}\n"
+                        f"{res.get('content','')[:1500]}\n")
+
 
     chat_system = f"""당신은 AI 기반 업무 혁신 벤치마킹 전문가입니다.
 현재 '{process_name}' 프로세스의 벤치마킹 리서치를 진행 중입니다.
@@ -5189,7 +5385,7 @@ async def select_workflow_file(request: Request):
         raise HTTPException(404, f"파일을 찾을 수 없습니다: {filename}")
 
     global _wf_excel_tasks, _wf_excel_path, _wf_classification
-    global _wf_chat_history, _wf_step1_cache, _wf_step2_cache, _wf_benchmark_table
+    global _wf_chat_history, _wf_step1_cache, _wf_step2_cache, _wf_benchmark_table, _wf_user_resources
 
     sheets = list_sheets(str(file_path))
     recommended = next((s["name"] for s in sheets if s.get("recommended")), None)
@@ -5202,6 +5398,7 @@ async def select_workflow_file(request: Request):
     _wf_step1_cache = {}
     _wf_step2_cache = {}
     _wf_benchmark_table = {}
+    _wf_user_resources = []
 
     # 분류 결과 재추출
     def _resolve_label(*candidates: str) -> str:
@@ -5264,7 +5461,7 @@ async def load_workflow_session(session_id: str):
         raise HTTPException(404, f"세션 '{session_id}'을 찾을 수 없습니다.")
 
     global _current_session_id, _wf_excel_tasks, _wf_chat_history
-    global _wf_step1_cache, _wf_step2_cache, _wf_benchmark_table, _wf_gap_analysis
+    global _wf_step1_cache, _wf_step2_cache, _wf_benchmark_table, _wf_gap_analysis, _wf_user_resources
 
     # 현재 세션 저장 후 전환
     if _current_session_id:
@@ -5276,6 +5473,7 @@ async def load_workflow_session(session_id: str):
     _wf_step2_cache = {}
     _wf_benchmark_table = {}
     _wf_gap_analysis = {}
+    _wf_user_resources = []
 
     # 새 세션 로드
     ok = await asyncio.to_thread(_load_session_data, session_id)
@@ -5618,7 +5816,7 @@ async def admin_reset_all_workflow(request: Request):
     # 6) 메모리 상태 전체 초기화 (Workflow + Task + New Workflow)
     global _workflow_cache, _wf_excel_tasks, _wf_excel_path
     global _wf_classification, _wf_chat_history
-    global _wf_step1_cache, _wf_step2_cache, _wf_benchmark_table, _wf_gap_analysis
+    global _wf_step1_cache, _wf_step2_cache, _wf_benchmark_table, _wf_gap_analysis, _wf_user_resources
     global _current_session_id, _sessions_manifest
     global _tasks_cache, _current_excel_path
     global _new_workflow_cache, _project_definition_cache, _project_design_cache
@@ -5632,6 +5830,7 @@ async def admin_reset_all_workflow(request: Request):
     _wf_step2_cache = {}
     _wf_benchmark_table = {}
     _wf_gap_analysis = {}
+    _wf_user_resources = []
     _current_session_id = ""
     _sessions_manifest = {}
     _tasks_cache = []

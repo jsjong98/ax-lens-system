@@ -16,6 +16,11 @@ import {
   generateGapAnalysis,
   deleteBenchmarkRow,
   generateTobeFlow,
+  getWorkflowResources,
+  addUrlResource,
+  addImageResource,
+  deleteWorkflowResource,
+  type UserResource,
   listWorkflowSessions,
   loadWorkflowSession,
   deleteWorkflowSession,
@@ -97,6 +102,13 @@ export default function WorkflowPage() {
   const [tobeLoading, setTobeLoading] = useState(false);
   const [tobeActiveSheet, setTobeActiveSheet] = useState<number>(0);
 
+  // 사용자 첨부 리소스
+  const [userResources, setUserResources] = useState<UserResource[]>([]);
+  const [resourceLoading, setResourceLoading] = useState(false);
+  const [pendingImages, setPendingImages] = useState<Array<{ b64: string; type: string; name: string }>>([]);
+  const [showResources, setShowResources] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   // L3/L4 스코프 선택
   const [bmScope, setBmScope] = useState<"l3" | "l4">("l4");
 
@@ -173,6 +185,11 @@ export default function WorkflowPage() {
         if (r.has_step1 && r.step1) { setStep1Result(r.step1); setChatMessages(r.chat_history || []); setCurrentStep(2); }
         if (r.has_step2 && r.step2) { setStep2Result(r.step2); setCurrentStep(3); }
       }
+      // 누적 리서치 자료 복원
+      try {
+        const rr = await getWorkflowResources();
+        setUserResources(rr.resources);
+      } catch { /* 무시 */ }
       await loadSessions();
     } catch (e) {
       setError((e as Error).message);
@@ -374,27 +391,131 @@ export default function WorkflowPage() {
     }
   }, [activeSheet]);
 
-  const handleChat = useCallback(async () => {
-    if (!chatInput.trim()) return;
-    const msg = chatInput;
-    setChatInput("");
-    setChatMessages((prev) => [...prev, { role: "user", content: msg }]);
-    setLoading(true);
-    try {
-      const result = await chatWorkflowStep1(msg, activeSheet ?? undefined);
-      setChatMessages((prev) => [...prev, { role: "assistant", content: result.message }]);
-      if (result.updated && result.result) {
-        setStep1Result(result.result);
+  /* ── 사용자 리소스 핸들러 ──────────────────────────────────── */
+
+  // 이미지 파일 → base64 변환
+  const fileToBase64 = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve((reader.result as string).split(",")[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+
+  // 채팅 입력창 paste 이벤트 (이미지 붙여넣기)
+  const handleChatPaste = useCallback(async (e: React.ClipboardEvent) => {
+    const items = Array.from(e.clipboardData.items);
+    const imageItem = items.find((it) => it.type.startsWith("image/"));
+    if (!imageItem) return;
+    e.preventDefault();
+    const file = imageItem.getAsFile();
+    if (!file) return;
+    const b64 = await fileToBase64(file);
+    setPendingImages((prev) => [...prev, { b64, type: file.type, name: file.name || "screenshot.png" }]);
+  }, []);
+
+  // 파일 선택 (paperclip 버튼)
+  const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    for (const file of files) {
+      if (file.type.startsWith("image/")) {
+        const b64 = await fileToBase64(file);
+        setPendingImages((prev) => [...prev, { b64, type: file.type, name: file.name }]);
       }
-      if (result.benchmark_table && Object.keys(result.benchmark_table).length > 0) {
-        setBenchmarkTableBySheet((prev) => ({ ...prev, ...result.benchmark_table }));
-      }
-    } catch (e) {
-      setChatMessages((prev) => [...prev, { role: "assistant", content: `오류: ${(e as Error).message}` }]);
-    } finally {
-      setLoading(false);
     }
-  }, [chatInput, activeSheet]);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }, []);
+
+  // URL 첨부 — 채팅 메시지에 URL 포함 시 자동 처리
+  const extractUrls = (text: string): string[] =>
+    (text.match(/https?:\/\/[^\s]+/g) ?? []);
+
+  // 메시지 전송 시 pending 이미지 + URL 먼저 처리
+  const handleChatSend = useCallback(async () => {
+    if (!chatInput.trim() && pendingImages.length === 0) return;
+    setResourceLoading(true);
+
+    // 1) pending 이미지 업로드 → Vision 분석
+    const addedResources: UserResource[] = [];
+    for (const img of pendingImages) {
+      try {
+        const r = await addImageResource(img.b64, img.type, img.name);
+        addedResources.push(r.resource);
+        setUserResources((prev) => [...prev, r.resource]);
+      } catch (e) {
+        setChatMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: `이미지 분석 실패: ${(e as Error).message}` },
+        ]);
+      }
+    }
+    setPendingImages([]);
+
+    // 2) 메시지 내 URL 크롤링
+    const urls = extractUrls(chatInput);
+    for (const url of urls) {
+      try {
+        const r = await addUrlResource(url);
+        addedResources.push(r.resource);
+        setUserResources((prev) => [...prev, r.resource]);
+      } catch (e) {
+        setChatMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: `URL 접근 실패 (${url}): ${(e as Error).message}` },
+        ]);
+      }
+    }
+    setResourceLoading(false);
+
+    // 3) 리소스가 추가됐으면 채팅 메시지에 요약 표시
+    if (addedResources.length > 0) {
+      const summary = addedResources
+        .map((r) => `📎 [${r.type === "url" ? "URL" : "이미지"}] ${r.title}`)
+        .join("\n");
+      setChatMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: `다음 자료를 리서치 라이브러리에 추가했습니다:\n${summary}\n\n이 내용을 기반으로 기본 설계에 반영하겠습니다.`,
+        },
+      ]);
+      if (showResources === false) setShowResources(true);
+    }
+
+    // 4) 실제 채팅 전송 (원본 텍스트 그대로)
+    if (chatInput.trim()) {
+      const msg = chatInput;
+      setChatInput("");
+      setChatMessages((prev) => [...prev, { role: "user", content: msg }]);
+      setLoading(true);
+      try {
+        const result = await chatWorkflowStep1(msg, activeSheet ?? undefined);
+        setChatMessages((prev) => [...prev, { role: "assistant", content: result.message }]);
+        if (result.updated && result.result) setStep1Result(result.result);
+        if (result.benchmark_table && Object.keys(result.benchmark_table).length > 0) {
+          setBenchmarkTableBySheet((prev) => ({ ...prev, ...result.benchmark_table }));
+        }
+      } catch (e) {
+        setChatMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: `오류: ${(e as Error).message}` },
+        ]);
+      } finally {
+        setLoading(false);
+      }
+    } else {
+      setChatInput("");
+    }
+  }, [chatInput, pendingImages, activeSheet, showResources]);
+
+  const handleDeleteResource = useCallback(async (idx: number) => {
+    try {
+      await deleteWorkflowResource(idx);
+      setUserResources((prev) => prev.filter((_, i) => i !== idx));
+    } catch (e) {
+      console.error("리소스 삭제 실패", e);
+    }
+  }, []);
 
   /* ── Gap 분석 ───────────────────────────────────────────── */
   const handleGapAnalysis = useCallback(async () => {
@@ -1537,19 +1658,51 @@ export default function WorkflowPage() {
             )}
 
             {/* 채팅 영역 — 항상 리서치·질문 전용 */}
-            <div className="border border-gray-200 rounded-lg bg-gray-50" style={{ height: "340px", display: "flex", flexDirection: "column" }}>
+            <div className="border border-gray-200 rounded-lg bg-gray-50" style={{ display: "flex", flexDirection: "column" }}>
               {/* 채팅 헤더 레이블 */}
-              <div className="flex items-center gap-2 px-4 py-2 border-b border-gray-200 bg-white rounded-t-lg">
-                <span className="text-xs font-semibold text-gray-500">리서치 채팅</span>
-                <span className="text-[10px] text-gray-400">— 벤치마킹 결과 질문, 추가 기업 사례 요청, 내용 확인 등</span>
+              <div className="flex items-center justify-between px-4 py-2 border-b border-gray-200 bg-white rounded-t-lg">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-gray-500">리서치 채팅</span>
+                  <span className="text-[10px] text-gray-400">— URL·이미지 첨부 가능, 벤치마킹 질문·추가 사례 요청</span>
+                </div>
+                {userResources.length > 0 && (
+                  <button
+                    onClick={() => setShowResources((v) => !v)}
+                    className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold text-blue-600 bg-blue-50 border border-blue-200 hover:bg-blue-100 transition"
+                  >
+                    📚 리서치 자료 {userResources.length}건 {showResources ? "▲" : "▼"}
+                  </button>
+                )}
               </div>
+              {/* 누적 리서치 자료 패널 */}
+              {showResources && userResources.length > 0 && (
+                <div className="border-b border-gray-200 bg-white px-4 py-3 space-y-2 max-h-48 overflow-y-auto">
+                  <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-1">누적 리서치 자료</p>
+                  {userResources.map((res, idx) => (
+                    <div key={idx} className="flex items-start gap-2 p-2 rounded-lg border border-gray-100 bg-gray-50 group">
+                      <span className="text-lg shrink-0">{res.type === "url" ? "🔗" : "🖼"}</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold text-gray-700 truncate">{res.title}</p>
+                        <p className="text-[10px] text-gray-400 truncate">{res.source}</p>
+                        <p className="text-[10px] text-gray-500 mt-0.5 line-clamp-2">{res.content.slice(0, 120)}...</p>
+                      </div>
+                      <button
+                        onClick={() => handleDeleteResource(idx)}
+                        className="shrink-0 opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-400 transition text-sm"
+                        title="삭제"
+                      >✕</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {/* 메시지 목록 */}
-              <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              <div className="overflow-y-auto p-4 space-y-3" style={{ height: "260px" }}>
                 {chatMessages.length === 0 && (
                   <div className="text-center py-6 text-gray-400 text-sm">
                     <div className="text-2xl mb-2">&#128269;</div>
-                    <p className="text-xs">벤치마킹 결과에 대해 질문하거나, 추가 기업 사례를 요청하세요.</p>
-                    <p className="text-xs mt-1 text-gray-300">예: "발령관리 관련 제조업 사례 더 찾아줘" / "Siemens 사례 자세히 설명해줘"</p>
+                    <p className="text-xs">벤치마킹 결과 질문, 추가 사례 요청, 또는 리서치 자료를 첨부하세요.</p>
+                    <p className="text-xs mt-1 text-gray-300">📎 URL 붙여넣기 → 자동 크롤링 &nbsp;|&nbsp; 🖼 이미지 Ctrl+V 또는 파일 첨부 → Vision 분석</p>
                     <p className="text-xs mt-2 text-gray-300">충분히 검토한 뒤 오른쪽 위 <strong className="text-gray-400">기본 설계 생성</strong> 버튼을 누르세요.</p>
                   </div>
                 )}
@@ -1566,12 +1719,12 @@ export default function WorkflowPage() {
                     </div>
                   </div>
                 ))}
-                {(loading || bmLoading) && currentStep === 2 && (
+                {(loading || bmLoading || resourceLoading) && currentStep === 2 && (
                   <div className="flex justify-start">
                     <div className="bg-white border border-gray-200 rounded-lg px-4 py-3">
                       <div className="flex items-center gap-2 text-sm text-gray-500">
                         <div className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-red-600" />
-                        {bmLoading ? "벤치마킹 검색 중..." : loading ? "AI 처리 중..." : ""}
+                        {resourceLoading ? "자료 분석 중 (URL 크롤링 / 이미지 Vision)..." : bmLoading ? "벤치마킹 검색 중..." : loading ? "AI 처리 중..." : ""}
                       </div>
                     </div>
                   </div>
@@ -1579,27 +1732,64 @@ export default function WorkflowPage() {
                 <div ref={chatEndRef} />
               </div>
 
-              {/* 입력 영역 — 항상 채팅 전용 */}
-              <div className="border-t border-gray-200 p-3 bg-white rounded-b-lg">
-                <div className="flex gap-2">
+              {/* 입력 영역 */}
+              <div className="border-t border-gray-200 p-3 bg-white rounded-b-lg space-y-2">
+                {/* pending 이미지 미리보기 */}
+                {pendingImages.length > 0 && (
+                  <div className="flex gap-2 flex-wrap">
+                    {pendingImages.map((img, i) => (
+                      <div key={i} className="relative group">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={`data:${img.type};base64,${img.b64}`}
+                          alt={img.name}
+                          className="h-14 w-14 object-cover rounded-lg border border-gray-200"
+                        />
+                        <button
+                          onClick={() => setPendingImages((prev) => prev.filter((_, j) => j !== i))}
+                          className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center opacity-0 group-hover:opacity-100 transition"
+                        >✕</button>
+                        <p className="text-[9px] text-gray-400 text-center truncate w-14">{img.name}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="flex gap-2 items-end">
+                  {/* 파일 첨부 버튼 */}
                   <input
-                    type="text"
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={handleFileSelect}
+                  />
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    title="이미지 파일 첨부"
+                    className="shrink-0 p-2 rounded-lg border border-gray-200 text-gray-400 hover:text-blue-500 hover:border-blue-300 transition"
+                  >
+                    📎
+                  </button>
+                  <textarea
+                    rows={2}
                     value={chatInput}
                     onChange={(e) => setChatInput(e.target.value)}
+                    onPaste={handleChatPaste}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" && !e.shiftKey) {
                         e.preventDefault();
-                        handleChat();
+                        handleChatSend();
                       }
                     }}
-                    placeholder="벤치마킹 결과 질문, 추가 사례 요청... (예: 제조업 발령관리 AI 사례 더 찾아줘)"
-                    className="flex-1 border border-gray-300 rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-red-300"
-                    disabled={loading || bmLoading}
+                    placeholder="질문, URL 붙여넣기, 또는 이미지 Ctrl+V... (Shift+Enter 줄바꿈)"
+                    className="flex-1 border border-gray-300 rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-red-300 resize-none"
+                    disabled={loading || bmLoading || resourceLoading}
                   />
                   <button
-                    onClick={handleChat}
-                    disabled={loading || bmLoading || !chatInput.trim()}
-                    className="px-4 py-2 rounded-lg text-sm font-bold text-white transition disabled:opacity-50"
+                    onClick={handleChatSend}
+                    disabled={loading || bmLoading || resourceLoading || (!chatInput.trim() && pendingImages.length === 0)}
+                    className="shrink-0 px-4 py-2 rounded-lg text-sm font-bold text-white transition disabled:opacity-50"
                     style={{ backgroundColor: PWC.primary }}
                   >
                     전송
