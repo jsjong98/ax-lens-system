@@ -2029,14 +2029,15 @@ def _build_mapped_asis_context(sheet_id: str = "") -> str:
 
 def _build_task_and_pain_summary(sheet_id: str = "") -> tuple[str, str, str]:
     """엑셀 Task 데이터로 task_summary, pain_summary, process_name을 만든다.
-    - sheet_id 지정 시: 해당 시트(L4 단위)의 task_id 범위로 필터링
-    - sheet_id="" + JSON 있음: JSON의 모든 시트를 합산 (= L3 전체 스코프)
-    - sheet_id="" + JSON 없음: 엑셀 전체 반환"""
+    구조: JSON/PPT 파일 1개 = L3, 파일 안의 시트 1개 = L4
+    - sheet_id 지정 시: 해당 L4 시트의 task_id 범위로 필터링
+    - sheet_id="" : JSON의 모든 시트(= L3 전체, 모든 L4) 합산
+    - JSON 없음: 엑셀 전체 반환"""
 
     relevant_tasks = _wf_excel_tasks
     if "parsed" in _workflow_cache:
         parsed = _workflow_cache["parsed"]
-        # sheet_id 지정 시 해당 시트만, 아니면 JSON의 전체 시트
+        # sheet_id 지정 시 해당 시트(=L4)만, 아니면 전체 시트(=L3 전체)
         if sheet_id:
             target_sheets = [s for s in parsed.sheets if s.sheet_id == sheet_id] or parsed.sheets[:1]
         else:
@@ -2065,11 +2066,22 @@ def _build_task_and_pain_summary(sheet_id: str = "") -> tuple[str, str, str]:
         if filtered:
             relevant_tasks = filtered
 
-    # set은 순서 미보장 → dict.fromkeys로 삽입 순서 보존
-    l3_names = list(dict.fromkeys(t.l3 for t in relevant_tasks if t.l3))
+    # process_name = L3 이름
+    # 우선순위: JSON의 L3 노드 라벨 → 엑셀 l3 컬럼
+    l3_from_json: list[str] = []
+    if "parsed" in _workflow_cache:
+        parsed_tmp = _workflow_cache["parsed"]
+        tgt = ([s for s in parsed_tmp.sheets if s.sheet_id == sheet_id]
+               or parsed_tmp.sheets[:1]) if sheet_id else parsed_tmp.sheets
+        seen_l3_tmp: set[str] = set()
+        for s in tgt:
+            for n in s.nodes.values():
+                if n.level == "L3" and n.label.strip() and n.label.strip() not in seen_l3_tmp:
+                    seen_l3_tmp.add(n.label.strip())
+                    l3_from_json.append(n.label.strip())
+
+    l3_names = l3_from_json or list(dict.fromkeys(t.l3 for t in relevant_tasks if t.l3))
     process_name = l3_names[0] if l3_names else "HR 프로세스"
-    if len(l3_names) > 1:
-        print(f"[build_summary] ⚠️ 복수 L3 감지 ({len(l3_names)}개): {l3_names} → process_name='{process_name}' (sheet_id='{sheet_id}')")
 
     task_lines = []
     for t in relevant_tasks:
@@ -2371,50 +2383,66 @@ async def benchmark_workflow_step1(request: Request):
 
     if "parsed" in _workflow_cache:
         parsed = _workflow_cache["parsed"]
+        # ── JSON 파일 = L3, 각 시트 = L4 ──────────────────────────────────────
+        # scope="l4" + sheet_id: 선택한 시트가 바로 L4 (시트 이름 = L4 이름)
+        # scope="l3"           : 모든 시트가 L4들의 집합 (파일 전체 = L3)
         if scope == "l3":
-            target_sheets = parsed.sheets  # 전체 시트 (L3 스코프)
+            target_sheets = parsed.sheets
         elif sheet_id_bm:
-            target_sheets = [s for s in parsed.sheets if s.sheet_id == sheet_id_bm] or parsed.sheets[:1]
+            target_sheets = [s for s in parsed.sheets if s.sheet_id == sheet_id_bm]
+            if not target_sheets:
+                target_sheets = parsed.sheets[:1]  # fallback
         else:
             target_sheets = parsed.sheets[:1]
 
-        # 현재 sheet에서 실제로 L5 자식이 있는 L4 task_id만 수집
-        # (L3 단위 JSON은 모든 L4 헤더를 첫 sheet에 선언하므로, L5 없는 phantom L4 제외)
-        valid_l4_tids: set[str] = set()
         for s in target_sheets:
-            for node in s.nodes.values():
-                if node.level == "L5" and node.task_id:
-                    parts = node.task_id.split(".")
-                    if len(parts) >= 3:
-                        valid_l4_tids.add(".".join(parts[:3]))
+            # 시트 이름 자체 = L4 이름 (시트 = L4 단위)
+            sheet_l4_name = (s.name or s.sheet_id).strip()
+            if sheet_l4_name and sheet_l4_name not in seen_l4:
+                seen_l4.add(sheet_l4_name)
+                # 이 시트(L4)에 해당하는 엑셀 task 매칭
+                # task_id 기반 → l4_id 기반 → l3_id 기반 순으로 탐색
+                sheet_tids: set[str] = set()
+                sheet_l4_ids: set[str] = set()
+                sheet_l3_ids: set[str] = set()
+                for node in s.nodes.values():
+                    if node.task_id:
+                        sheet_tids.add(node.task_id)
+                        parts = node.task_id.split(".")
+                        if len(parts) >= 3:
+                            sheet_l4_ids.add(".".join(parts[:3]))
+                        if len(parts) >= 2:
+                            sheet_l3_ids.add(".".join(parts[:2]))
+                matched = [t for t in _wf_excel_tasks if t.id in sheet_tids]
+                if not matched:
+                    matched = [t for t in _wf_excel_tasks if t.l4_id in sheet_l4_ids]
+                if not matched:
+                    matched = [t for t in _wf_excel_tasks if t.l3_id in sheet_l3_ids]
+                l4_details.append({
+                    "name": sheet_l4_name,
+                    "task_id": s.sheet_id,
+                    "pain_points": _get_pain_points(matched),
+                    "description": "; ".join(t.description for t in matched[:3] if t.description),
+                    "task_names": [t.name for t in matched[:5]],
+                })
 
-        for s in target_sheets:
+            # L3/L2는 시트 내부 노드에서 추출 (파일 수준 컨텍스트)
             for node in s.nodes.values():
-                lv, lbl, tid = node.level, node.label.strip(), node.task_id.strip()
+                lv, lbl, tid = node.level, node.label.strip(), (node.task_id or "").strip()
                 if not lbl:
                     continue
-                if lv == "L4" and lbl not in seen_l4:
-                    # L5 자식이 없는 phantom L4는 벤치마킹 컨텍스트에서 제외
-                    if valid_l4_tids and tid not in valid_l4_tids:
-                        continue
-                    seen_l4.add(lbl)
-                    matched = excel_by_l4.get(tid, [])
-                    l4_details.append({"name": lbl, "task_id": tid,
-                        "pain_points": _get_pain_points(matched),
-                        "description": "; ".join(t.description for t in matched[:3] if t.description),
-                        "task_names": [t.name for t in matched[:5]]})
-                elif lv == "L3" and lbl not in seen_l3:
+                if lv == "L3" and lbl not in seen_l3:
                     seen_l3.add(lbl)
-                    matched = excel_by_l3.get(tid, [])
+                    matched_l3 = excel_by_l3.get(tid, [])
                     l3_details.append({"name": lbl, "task_id": tid,
-                        "pain_points": _get_pain_points(matched),
-                        "description": "; ".join(t.description for t in matched[:3] if t.description)})
+                        "pain_points": _get_pain_points(matched_l3),
+                        "description": "; ".join(t.description for t in matched_l3[:3] if t.description)})
                 elif lv == "L2" and lbl not in seen_l2:
                     seen_l2.add(lbl)
                     l2_details.append({"name": lbl, "task_id": tid,
                         "pain_points": _get_pain_points(excel_by_l2.get(tid, []))})
 
-    # As-Is 없을 때 엑셀만으로 구성
+    # JSON 없을 때 엑셀만으로 구성 (L4 = 엑셀의 l4 컬럼)
     if not l4_details:
         for l4_id, tasks in excel_by_l4.items():
             name = tasks[0].l4 if tasks else ""
@@ -2443,18 +2471,16 @@ async def benchmark_workflow_step1(request: Request):
     l3_names = [d["name"] for d in l3_details]
     l4_names = [d["name"] for d in l4_details]
 
-    # L5 task — l4_details(현재 분석 범위로 필터링된 L4 그룹)에서만 수집
-    # excel_by_l4.values() 전체를 쓰면 다른 프로세스(채용관리 등)의 L5 task까지 섞임
+    # L5 task — 이 L4(시트) 범위에 속하는 엑셀 task 수집
     l5_tasks = []
     for d in l4_details:
-        l4_id = d.get("task_id", "")
-        tasks = excel_by_l4.get(l4_id, [])
-        for t in tasks:
-            if t.name:
+        for t in (excel_by_l4.get(d.get("task_id", ""), []) or
+                  [t for t in _wf_excel_tasks if t.name in (d.get("task_names") or [])]):
+            if t.name and not any(x["name"] == t.name for x in l5_tasks):
                 l5_tasks.append({
                     "name": t.name,
                     "description": t.description or "",
-                    "l4": t.l4 or "",
+                    "l4": d["name"],
                 })
 
     # 검증 로그 — bm_data에 실제 어떤 계층 정보가 들어가는지 확인
