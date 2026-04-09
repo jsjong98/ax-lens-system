@@ -2629,23 +2629,33 @@ async def benchmark_workflow_step1(request: Request):
             f"{extra_companies} '{focus}' AI 자동화 도입 사례 성과",
         ]
 
-    bm_search_result = await search_benchmarks(bm_data)
-    raw_results = bm_search_result.get("results", [])
-    _bm_search_log = bm_search_result.get("search_log", [])
+    # ── SSE 스트리밍 설정 ────────────────────────────────────────────────────
+    import asyncio as _asyncio
+    from fastapi.responses import StreamingResponse as _StreamingResponse
 
-    global _wf_benchmark_results, _wf_benchmark_table, _wf_search_log
-    _wf_benchmark_results = raw_results
-    _wf_search_log = _bm_search_log
+    progress_queue: _asyncio.Queue = _asyncio.Queue()
 
-    # LLM으로 벤치마킹 결과 분석하여 구조화된 테이블 생성
-    # L4 활동별 영어 대응어 생성 (검색 결과 해석에 활용)
-    from benchmark_search import _translate_to_en as _bm_translate
-    l4_en_map = "\n".join(
-        f"  - {d['name']} (영어: {_bm_translate(d['name'])})"
-        for d in l4_details[:6]
-    )
+    async def _do_benchmark():
+        """검색 + LLM 분석을 background에서 실행하고 progress_queue에 이벤트를 넣습니다."""
+        try:
+            bm_sr = await search_benchmarks(bm_data, progress_cb=progress_queue.put_nowait)
+            raw = bm_sr.get("results", [])
+            bm_log = bm_sr.get("search_log", [])
 
-    bm_analysis_system = f"""당신은 글로벌 AI 업무 혁신 벤치마킹 분석 전문가입니다.
+            global _wf_benchmark_results, _wf_benchmark_table, _wf_search_log
+            _wf_benchmark_results = raw
+            _wf_search_log = bm_log
+
+            progress_queue.put_nowait({"type": "llm_analyze", "total": len(raw)})
+
+            # LLM으로 벤치마킹 결과 분석하여 구조화된 테이블 생성
+            from benchmark_search import _translate_to_en as _bm_translate
+            l4_en_map = "\n".join(
+                f"  - {d['name']} (영어: {_bm_translate(d['name'])})"
+                for d in l4_details[:6]
+            )
+
+            bm_analysis_system = f"""당신은 글로벌 AI 업무 혁신 벤치마킹 분석 전문가입니다.
 영어·한국어 검색 결과를 엄격하게 분석하여 실제 근거가 있는 기업의 AI 적용 사례만 추출합니다.
 
 ## 프로세스: {process_name}
@@ -2741,100 +2751,119 @@ async def benchmark_workflow_step1(request: Request):
 }}
 """
 
-    # Sonar Pro 결과는 같은 쿼리의 citation URL들이 각각 별도 row로 들어옴.
-    # 동일 query끼리 묶어서 URL 목록을 함께 표시 → LLM이 URL 출처를 명확히 파악
-    from collections import defaultdict as _defaultdict
-    query_groups: dict = _defaultdict(lambda: {"content": "", "urls": []})
-    for r in raw_results[:200]:
-        q = r.get("query", r.get("title", ""))
-        if r.get("content") and not query_groups[q]["content"]:
-            query_groups[q]["content"] = r.get("content", "")
-        if r.get("url"):
-            query_groups[q]["urls"].append(r["url"])
+            # Sonar Pro 결과는 같은 쿼리의 citation URL들이 각각 별도 row로 들어옴.
+            from collections import defaultdict as _defaultdict
+            query_groups: dict = _defaultdict(lambda: {"content": "", "urls": []})
+            for r in raw[:200]:
+                q = r.get("query", r.get("title", ""))
+                if r.get("content") and not query_groups[q]["content"]:
+                    query_groups[q]["content"] = r.get("content", "")
+                if r.get("url"):
+                    query_groups[q]["urls"].append(r["url"])
 
-    bm_user = "## 웹 검색 결과\n\n"
-    for i, (q, g) in enumerate(query_groups.items(), 1):
-        bm_user += f"### [{i}] 검색 쿼리: {q[:100]}\n"
-        if g["urls"]:
-            bm_user += "- 출처 URL 목록:\n"
-            for url in g["urls"][:6]:
-                bm_user += f"  - {url}\n"
-        bm_user += f"- 내용: {g['content'][:2000]}\n\n"
+            bm_user = "## 웹 검색 결과\n\n"
+            for i, (q, g) in enumerate(query_groups.items(), 1):
+                bm_user += f"### [{i}] 검색 쿼리: {q[:100]}\n"
+                if g["urls"]:
+                    bm_user += "- 출처 URL 목록:\n"
+                    for url in g["urls"][:6]:
+                        bm_user += f"  - {url}\n"
+                bm_user += f"- 내용: {g['content'][:2000]}\n\n"
 
-    bm_user += (
-        "\n위 검색 결과에서 벤치마킹 테이블을 작성해주세요.\n"
-        "각 사례의 url 필드는 위 검색 결과에 실제로 나온 URL만 기재하세요 (임의 생성 금지).\n"
-        "관련 사례가 없으면 benchmark_table을 빈 배열로 반환하고 no_cases_note에 이유를 명시하세요."
+            bm_user += (
+                "\n위 검색 결과에서 벤치마킹 테이블을 작성해주세요.\n"
+                "각 사례의 url 필드는 위 검색 결과에 실제로 나온 URL만 기재하세요 (임의 생성 금지).\n"
+                "관련 사례가 없으면 benchmark_table을 빈 배열로 반환하고 no_cases_note에 이유를 명시하세요."
+            )
+
+            result_data = await _call_llm_step1(bm_analysis_system, [{"role": "user", "content": bm_user}])
+
+            sheet_key = sheet_id_bm or "__default__"
+
+            if not result_data:
+                sheet_rows = [
+                    {
+                        "source": r.get("title", "")[:30],
+                        "industry": "",
+                        "process_area": process_name,
+                        "ai_technology": "",
+                        "use_case": r.get("snippet", "")[:100],
+                        "outcome": "",
+                        "implication": "",
+                        "url": r.get("url", ""),
+                    }
+                    for r in raw[:10]
+                    if r.get("url")
+                ]
+            else:
+                raw_table = result_data.get("benchmark_table", [])
+                sheet_rows = [
+                    row for row in raw_table
+                    if row.get("url")
+                    and _is_valid_benchmark_source(row.get("source", ""))
+                    and not _is_news_url(row.get("url", ""))
+                    and (row.get("use_case") or row.get("outcome"))
+                ]
+                valid_areas = set(l4_names) | set(l3_names)
+                fallback_area = l4_names[0] if l4_names else (l3_names[0] if l3_names else process_name)
+                for row in sheet_rows:
+                    area = row.get("process_area", "")
+                    if area not in valid_areas:
+                        matched_l4 = next(
+                            (ln for ln in l4_names if ln in area or area in ln), None
+                        )
+                        row["process_area"] = matched_l4 if matched_l4 else fallback_area
+
+            _wf_benchmark_table[sheet_key] = sheet_rows
+
+            global _wf_chat_history
+            summary_text = result_data.get("summary", "") if result_data else f"벤치마킹 검색 완료: {len(raw)}개 결과"
+            _wf_chat_history.append({"role": "assistant", "content": f"[벤치마킹 완료 — {process_name}] {summary_text}"})
+
+            if _wf_step1_cache:
+                all_rows = [r for rows in _wf_benchmark_table.values() for r in rows]
+                _wf_step1_cache["benchmark_table"] = all_rows
+
+            if _current_session_id:
+                _save_session_data(_current_session_id)
+
+            progress_queue.put_nowait({
+                "type": "final",
+                "ok": True,
+                "result_count": len(raw),
+                "sheet_id": sheet_key,
+                "benchmark_table": sheet_rows,
+                "all_benchmark_table": {k: v for k, v in _wf_benchmark_table.items()},
+                "summary": summary_text,
+                "search_log": bm_log,
+            })
+
+        except Exception as exc:
+            import traceback
+            print(f"[benchmark SSE] 오류: {exc}\n{traceback.format_exc()}")
+            progress_queue.put_nowait({"type": "error", "message": str(exc)})
+
+    async def _event_stream():
+        import json as _json
+        task = _asyncio.create_task(_do_benchmark())
+        try:
+            while True:
+                try:
+                    event = await _asyncio.wait_for(progress_queue.get(), timeout=300)
+                except _asyncio.TimeoutError:
+                    yield "data: {\"type\": \"error\", \"message\": \"타임아웃\"}\n\n"
+                    break
+                yield f"data: {_json.dumps(event, ensure_ascii=False)}\n\n"
+                if event.get("type") in ("final", "error"):
+                    break
+        finally:
+            task.cancel()
+
+    return _StreamingResponse(
+        _event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
-
-    result_data = await _call_llm_step1(bm_analysis_system, [{"role": "user", "content": bm_user}])
-
-    sheet_key = sheet_id_bm or "__default__"
-
-    if not result_data:
-        sheet_rows = [
-            {
-                "source": r.get("title", "")[:30],
-                "industry": "",
-                "process_area": process_name,
-                "ai_technology": "",
-                "use_case": r.get("snippet", "")[:100],
-                "outcome": "",
-                "implication": "",
-                "url": r.get("url", ""),
-            }
-            for r in raw_results[:10]
-            if r.get("url")
-        ]
-    else:
-        raw_table = result_data.get("benchmark_table", [])
-        sheet_rows = [
-            row for row in raw_table
-            if row.get("url")
-            and _is_valid_benchmark_source(row.get("source", ""))
-            and not _is_news_url(row.get("url", ""))
-            and (row.get("use_case") or row.get("outcome"))
-        ]
-        # process_area 검증: l4_names 목록에 없는 값은 정규화
-        # (LLM이 목록 외 값을 창작하는 것을 방지)
-        valid_areas = set(l4_names) | set(l3_names)
-        fallback_area = l4_names[0] if l4_names else (l3_names[0] if l3_names else process_name)
-        for row in sheet_rows:
-            area = row.get("process_area", "")
-            if area not in valid_areas:
-                # 부분 문자열로 가장 가까운 L4 찾기
-                matched_l4 = next(
-                    (ln for ln in l4_names if ln in area or area in ln),
-                    None,
-                )
-                row["process_area"] = matched_l4 if matched_l4 else fallback_area
-
-    # 시트별로 저장 (기존 결과에 덮어쓰기)
-    _wf_benchmark_table[sheet_key] = sheet_rows
-
-    # 채팅 이력에 기록
-    global _wf_chat_history
-    summary_text = result_data.get("summary", "") if result_data else f"벤치마킹 검색 완료: {len(raw_results)}개 결과"
-    _wf_chat_history.append({"role": "assistant", "content": f"[벤치마킹 완료 — {process_name}] {summary_text}"})
-
-    # 이미 Step1 결과가 있으면 전체 벤치마킹 테이블 갱신
-    if _wf_step1_cache:
-        all_rows = [r for rows in _wf_benchmark_table.values() for r in rows]
-        _wf_step1_cache["benchmark_table"] = all_rows
-
-    # 세션 데이터 저장
-    if _current_session_id:
-        _save_session_data(_current_session_id)
-
-    return {
-        "ok": True,
-        "result_count": len(raw_results),
-        "sheet_id": sheet_key,
-        "benchmark_table": sheet_rows,           # 현재 시트 결과
-        "all_benchmark_table": {k: v for k, v in _wf_benchmark_table.items()},  # 전체
-        "summary": summary_text,
-        "search_log": _bm_search_log,
-    }
 
 
 # ── Gap 분석 ─────────────────────────────────────────────────

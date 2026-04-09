@@ -994,6 +994,113 @@ export async function benchmarkWorkflowStep1(params?: {
   });
 }
 
+// ── 벤치마킹 SSE 스트리밍 ────────────────────────────────────────────────────
+
+export interface BmProgressEvent {
+  type:
+    | "engine"
+    | "plan"
+    | "queries"
+    | "round_start"
+    | "query_done"
+    | "round_end"
+    | "embed"
+    | "done_search"
+    | "llm_analyze"
+    | "final"
+    | "error";
+  round?: number;
+  text?: string;
+  queries?: string[];
+  count?: number;
+  idx?: number;
+  total?: number;
+  query?: string;
+  found?: number;
+  collected?: number;
+  final?: number;
+  // final 이벤트 payload
+  ok?: boolean;
+  result_count?: number;
+  sheet_id?: string;
+  benchmark_table?: BenchmarkTableRow[];
+  all_benchmark_table?: Record<string, BenchmarkTableRow[]>;
+  summary?: string;
+  search_log?: SearchLogItem[];
+  message?: string;
+}
+
+export function benchmarkWorkflowStep1Stream(
+  params: { companies?: string; sheet_id?: string; scope?: "l3" | "l4" },
+  onProgress: (event: BmProgressEvent) => void,
+  onDone: (result: BenchmarkStep1Result) => void,
+  onError: (err: Error) => void
+): () => void {
+  const controller = new AbortController();
+  const token =
+    typeof window !== "undefined" ? localStorage.getItem("auth_token") : null;
+
+  (async () => {
+    try {
+      const res = await fetch(
+        `${BACKEND_DIRECT}/api/workflow/benchmark-step1`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify(params || {}),
+          signal: controller.signal,
+        }
+      );
+
+      if (!res.ok) {
+        const err = await res
+          .json()
+          .catch(() => ({ detail: `HTTP ${res.status}` }));
+        throw new Error(err.detail || `HTTP ${res.status}`);
+      }
+
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const data: BmProgressEvent = JSON.parse(line.slice(6));
+          if (data.type === "final") {
+            onDone({
+              ok: data.ok ?? true,
+              result_count: data.result_count ?? 0,
+              sheet_id: data.sheet_id,
+              benchmark_table: data.benchmark_table ?? [],
+              all_benchmark_table: data.all_benchmark_table,
+              summary: data.summary ?? "",
+              search_log: data.search_log,
+            });
+          } else if (data.type === "error") {
+            onError(new Error(data.message || "벤치마킹 오류"));
+          } else {
+            onProgress(data);
+          }
+        }
+      }
+    } catch (err) {
+      if ((err as Error).name !== "AbortError") onError(err as Error);
+    }
+  })();
+
+  return () => controller.abort();
+}
+
 export interface GapItem {
   l4_activity: string;
   as_is: string;

@@ -732,23 +732,31 @@ async def _run_search_round(
     use_tavily: bool,
     seen_keys: set,
     search_log: list[dict],
+    progress_cb=None,
 ) -> list[dict]:
     """단일 라운드 검색 실행 — 엔진별 분기 + 중복 제거 후 결과 반환."""
     results: list[dict] = []
     search_log.append({"type": "round_start", "round": round_num, "query_count": len(queries)})
+    if progress_cb:
+        progress_cb({"type": "round_start", "round": round_num, "count": len(queries)})
 
-    if use_pplx:
-        tasks = [asyncio.to_thread(_search_perplexity_sonar, q) for q in queries]
-    elif use_tavily:
-        tasks = [asyncio.to_thread(_search_tavily, q, 5) for q in queries]
-    else:
-        tasks = [asyncio.to_thread(_search_duckduckgo, q, 5) for q in queries]
+    # 개별 쿼리 태스크 — 완료되는 순서대로 처리
+    async def _run_one(q: str, idx: int):
+        if use_pplx:
+            batch = await asyncio.to_thread(_search_perplexity_sonar, q)
+        elif use_tavily:
+            batch = await asyncio.to_thread(_search_tavily, q, 5)
+        else:
+            batch = await asyncio.to_thread(_search_duckduckgo, q, 5)
+        return q, batch, idx
 
-    batches = await asyncio.gather(*tasks, return_exceptions=True)
+    tasks = [asyncio.create_task(_run_one(q, i + 1)) for i, q in enumerate(queries)]
 
-    for q, batch in zip(queries, batches):
-        if isinstance(batch, Exception):
-            search_log.append({"type": "query", "round": round_num, "q": q, "found": 0})
+    for coro in asyncio.as_completed(tasks):
+        try:
+            q, batch, idx = await coro
+        except Exception as e:
+            search_log.append({"type": "query", "round": round_num, "q": "?", "found": 0})
             continue
         cnt = 0
         for r in batch:
@@ -759,37 +767,61 @@ async def _run_search_round(
                 results.append(r)
                 cnt += 1
         search_log.append({"type": "query", "round": round_num, "q": q, "found": cnt})
+        if progress_cb:
+            progress_cb({
+                "type": "query_done",
+                "round": round_num,
+                "idx": idx,
+                "total": len(queries),
+                "query": q[:80],
+                "found": cnt,
+            })
 
     search_log.append({"type": "round_end", "round": round_num, "total": len(results)})
+    if progress_cb:
+        progress_cb({"type": "round_end", "round": round_num, "collected": len(results)})
     print(f"[benchmark] Round {round_num} 완료 — {len(results)}건 추가")
     return results
 
 
-async def search_benchmarks(workflow_cache: dict) -> dict:
+async def search_benchmarks(workflow_cache: dict, progress_cb=None) -> dict:
     """
     Sonnet ↔ Sonar 3라운드 벤치마킹 파이프라인.
     - Round 1 (L5): Sonnet이 L5 Task 단위 구체 쿼리 생성 → 검색
     - Round 2 (L4): Sonnet이 R1 결과 보고 L4 활동 단위 쿼리 생성 → 검색
     - Round 3 (L3): Sonnet이 R1+R2 결과 보고 L3 전환 + 보완 쿼리 생성 → 검색
     반환: {"results": [...], "search_log": [...]}
+    progress_cb(event_dict): 진행 상황을 실시간으로 전달하는 동기 콜백
     """
+    def emit(event: dict):
+        if progress_cb:
+            try:
+                progress_cb(event)
+            except Exception:
+                pass
+
     search_log: list[dict] = []
     use_pplx = bool(_get_perplexity_key())
     use_tavily = bool(os.getenv("TAVILY_API_KEY", ""))
 
-    engine = "Perplexity" if use_pplx else ("Tavily" if use_tavily else "DuckDuckGo")
+    engine = "Perplexity Sonar Pro" if use_pplx else ("Tavily" if use_tavily else "DuckDuckGo")
     search_log.append({"type": "engine", "text": f"검색 엔진: {engine}"})
+    emit({"type": "engine", "text": f"검색 엔진: {engine}"})
 
     seen_keys: set[str] = set()
     all_results: list[dict] = []
 
     # ── Round 1: L5 Task 단위 구체 탐색 ──────────────────────────────────────
+    emit({"type": "plan", "round": 1, "text": "R1 쿼리 생성 중 (L5 Task 단위 구체 탐색)..."})
     queries_r1 = await _plan_search_queries(workflow_cache, search_log)
-    r1_results = await _run_search_round(queries_r1, 1, use_pplx, use_tavily, seen_keys, search_log)
+    emit({"type": "queries", "round": 1, "queries": [q[:80] for q in queries_r1], "count": len(queries_r1)})
+
+    r1_results = await _run_search_round(queries_r1, 1, use_pplx, use_tavily, seen_keys, search_log, emit)
     all_results.extend(r1_results)
 
     # ── Embedding 재랭킹 (Sonar Pro 결과 품질 향상) ───────────────────────────
     if use_pplx and all_results:
+        emit({"type": "embed", "text": f"임베딩 재랭킹 중... ({len(all_results)}건 의미 유사도 정렬)"})
         process_name = workflow_cache.get("process_name", "")
         _, _, l4_names, _ = _extract_names_from_cache(workflow_cache)
         query_context = f"{process_name} AI 자동화 구현 사례 수치 성과: {', '.join(l4_names[:5])}"
@@ -797,17 +829,21 @@ async def search_benchmarks(workflow_cache: dict) -> dict:
         r1_results = all_results  # 재랭킹된 결과를 R2 플래닝에 사용
 
     # ── Round 2: L4 활동 단위 패턴 탐색 ─────────────────────────────────────
+    emit({"type": "plan", "round": 2, "text": "R2 쿼리 생성 중 (L4 활동 단위 패턴 탐색)..."})
     queries_r2 = await _plan_l4_queries(workflow_cache, r1_results, search_log)
     if queries_r2:
-        r2_results = await _run_search_round(queries_r2, 2, use_pplx, use_tavily, seen_keys, search_log)
+        emit({"type": "queries", "round": 2, "queries": [q[:80] for q in queries_r2], "count": len(queries_r2)})
+        r2_results = await _run_search_round(queries_r2, 2, use_pplx, use_tavily, seen_keys, search_log, emit)
         all_results.extend(r2_results)
     else:
         r2_results = []
 
     # ── Round 3: L3 전체 AX 전환 + 보완 ─────────────────────────────────────
+    emit({"type": "plan", "round": 3, "text": "R3 쿼리 생성 중 (L3 종합 + 보완 탐색)..."})
     queries_r3 = await _plan_l3_queries(workflow_cache, r1_results, r2_results, search_log)
     if queries_r3:
-        r3_results = await _run_search_round(queries_r3, 3, use_pplx, use_tavily, seen_keys, search_log)
+        emit({"type": "queries", "round": 3, "queries": [q[:80] for q in queries_r3], "count": len(queries_r3)})
+        r3_results = await _run_search_round(queries_r3, 3, use_pplx, use_tavily, seen_keys, search_log, emit)
         all_results.extend(r3_results)
 
     # ── 최종 정렬 ─────────────────────────────────────────────────────────────
@@ -823,6 +859,7 @@ async def search_benchmarks(workflow_cache: dict) -> dict:
         "final": final_count,
         "engine": engine,
     })
+    emit({"type": "done_search", "total": len(all_results), "final": final_count})
 
     return {"results": all_results[:200], "search_log": search_log}
 

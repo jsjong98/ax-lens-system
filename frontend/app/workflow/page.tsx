@@ -8,7 +8,8 @@ import {
   selectWorkflowExcelSheet,
   getWorkflowExcelTasks,
   getWorkflowSummary,
-  benchmarkWorkflowStep1,
+  benchmarkWorkflowStep1Stream,
+  type BmProgressEvent,
   generateWorkflowStep1,
   chatWorkflowStep1,
   generateWorkflowStep2,
@@ -94,6 +95,7 @@ export default function WorkflowPage() {
   const [bmLoading, setBmLoading] = useState(false);
   const [searchLog, setSearchLog] = useState<SearchLogItem[]>([]);
   const [showSearchLog, setShowSearchLog] = useState(false);
+  const [bmProgressLog, setBmProgressLog] = useState<BmProgressEvent[]>([]);
 
   // Step 3: Step 2 상세 설계
   const [step2Result, setStep2Result] = useState<WorkflowStepResult | null>(null);
@@ -470,32 +472,39 @@ export default function WorkflowPage() {
     }
   }, []);
 
-  /* ── Step 2: 벤치마킹 ───────────────────────────────────── */
-  const handleBenchmark = useCallback(async (companies?: string) => {
+  /* ── Step 2: 벤치마킹 (SSE 실시간 스트리밍) ─────────────── */
+  const handleBenchmark = useCallback((companies?: string) => {
     setBmLoading(true);
     setError(null);
     setSearchLog([]);
     setShowSearchLog(true);
+    setBmProgressLog([]);
     const loadingMsg = `벤치마킹 수행 중...${companies ? ` (기업: ${companies})` : " (Big Tech / Industry 선도사)"}`;
     setChatMessages((prev) => [...prev, { role: "system", content: loadingMsg }]);
-    try {
-      const result = await benchmarkWorkflowStep1({ companies, sheet_id: activeSheet ?? undefined, scope: bmScope });
-      // 현재 시트 결과를 시트별 dict에 저장
-      const sheetKey = result.sheet_id ?? activeSheet ?? "__default__";
-      setBenchmarkTableBySheet((prev) => ({ ...prev, [sheetKey]: result.benchmark_table }));
-      setBenchmarkSummary(result.summary);
-      if (result.search_log) setSearchLog(result.search_log);
-      setChatMessages((prev) => [
-        ...prev.filter((m) => m.content !== loadingMsg),
-        { role: "assistant", content: `[벤치마킹 완료] ${result.result_count}개 사례 수집\n\n${result.summary}` },
-      ]);
-    } catch (e) {
-      setError((e as Error).message);
-      setChatMessages((prev) => prev.filter((m) => !m.content.startsWith("벤치마킹 수행 중")));
-    } finally {
-      setBmLoading(false);
-    }
-  }, [activeSheet]);
+
+    benchmarkWorkflowStep1Stream(
+      { companies, sheet_id: activeSheet ?? undefined, scope: bmScope },
+      (event) => {
+        setBmProgressLog((prev) => [...prev, event]);
+      },
+      (result) => {
+        const sheetKey = result.sheet_id ?? activeSheet ?? "__default__";
+        setBenchmarkTableBySheet((prev) => ({ ...prev, [sheetKey]: result.benchmark_table }));
+        setBenchmarkSummary(result.summary);
+        if (result.search_log) setSearchLog(result.search_log);
+        setChatMessages((prev) => [
+          ...prev.filter((m) => m.content !== loadingMsg),
+          { role: "assistant", content: `[벤치마킹 완료] ${result.result_count}개 사례 수집\n\n${result.summary}` },
+        ]);
+        setBmLoading(false);
+      },
+      (err) => {
+        setError(err.message);
+        setChatMessages((prev) => prev.filter((m) => m.content !== loadingMsg));
+        setBmLoading(false);
+      }
+    );
+  }, [activeSheet, bmScope]);
 
   /* ── Step 2: Step 1 기본 설계 생성 + 채팅 ──────────────── */
   const handleGenerateStep1 = useCallback(async (prompt?: string) => {
@@ -1512,56 +1521,122 @@ export default function WorkflowPage() {
               </div>
             </div>
 
-            {/* 검색 과정 (Thinking Process) */}
-            {searchLog.length > 0 && (
-              <div className="mb-4 rounded-lg border border-gray-200 overflow-hidden">
+            {/* 검색 과정 — 실시간 라이브 로그 (검색 중) or 완료 후 토글 */}
+            {(bmLoading || searchLog.length > 0) && (
+              <div className="mb-4 rounded-lg border overflow-hidden"
+                style={{ borderColor: bmLoading ? "#6366F1" : "#E5E7EB" }}>
                 <button
-                  onClick={() => setShowSearchLog((v) => !v)}
-                  className="w-full flex items-center justify-between px-3 py-2 bg-gray-50 hover:bg-gray-100 text-xs text-gray-600 font-medium transition"
+                  onClick={() => !bmLoading && setShowSearchLog((v) => !v)}
+                  className="w-full flex items-center justify-between px-3 py-2 text-xs font-medium transition"
+                  style={{
+                    background: bmLoading ? "#EEF2FF" : "#F9FAFB",
+                    color: bmLoading ? "#4338CA" : "#4B5563",
+                    cursor: bmLoading ? "default" : "pointer",
+                  }}
                 >
-                  <span>검색 과정 보기 ({searchLog.length}단계)</span>
-                  <span>{showSearchLog ? "▲" : "▼"}</span>
+                  <span className="flex items-center gap-2">
+                    {bmLoading && (
+                      <span className="inline-block h-3 w-3 rounded-full border-2 border-indigo-300 border-t-indigo-600 animate-spin" />
+                    )}
+                    {bmLoading
+                      ? (() => {
+                          const last = bmProgressLog[bmProgressLog.length - 1];
+                          if (!last) return "검색 엔진 초기화 중...";
+                          if (last.type === "engine") return `${last.text}`;
+                          if (last.type === "plan") return `${last.text}`;
+                          if (last.type === "queries") return `R${last.round} 쿼리 ${last.count}개 생성 완료 — 병렬 검색 시작`;
+                          if (last.type === "round_start") return `R${last.round} 병렬 검색 중 (${last.count}개 쿼리)...`;
+                          if (last.type === "query_done") return `R${last.round} 검색 중 — ${last.idx}/${last.total} 완료 (+${last.found}건)`;
+                          if (last.type === "round_end") return `R${last.round} 완료 — ${last.collected}건 수집`;
+                          if (last.type === "embed") return last.text ?? "임베딩 재랭킹 중...";
+                          if (last.type === "done_search") return `검색 완료 — 총 ${last.total}건 수집, Claude AI 분석 중...`;
+                          if (last.type === "llm_analyze") return `Claude AI 분석 중 (${last.total}건 처리)...`;
+                          return "처리 중...";
+                        })()
+                      : `검색 과정 보기 (${searchLog.length}단계)`}
+                  </span>
+                  {!bmLoading && <span>{showSearchLog ? "▲" : "▼"}</span>}
                 </button>
-                {showSearchLog && (
-                  <div className="max-h-[260px] overflow-y-auto px-3 py-2 space-y-1 bg-white font-mono text-[11px]">
-                    {searchLog.map((item, i) => {
-                      let label = "";
-                      let cls = "text-gray-600";
-                      if (item.type === "engine") {
-                        label = item.text ?? "";
-                        cls = "text-blue-700 font-bold";
-                      } else if (item.type === "plan") {
-                        label = item.fallback
-                          ? `쿼리 플래닝 (fallback) — ${item.query_count}개`
-                          : `쿼리 플래닝 완료 — ${item.query_count}개 쿼리${item.hypotheses?.length ? ` / 가설: ${item.hypotheses.slice(0, 2).join(" · ")}` : ""}`;
-                        cls = "text-blue-600 font-semibold";
-                      } else if (item.type === "round_start") {
-                        label = `▶ Round ${item.round} 시작 — ${item.query_count}개 쿼리 병렬 검색`;
-                        cls = "text-indigo-700 font-semibold";
-                      } else if (item.type === "query") {
-                        label = `  검색: "${item.q}"${item.found !== "?" ? ` → ${item.found}건` : ""}`;
-                        cls = "text-indigo-500";
-                      } else if (item.type === "round_end") {
-                        label = `◀ Round ${item.round} 완료 — 누적 ${item.total}건`;
-                        cls = "text-indigo-700 font-semibold";
-                      } else if (item.type === "embed_rank") {
-                        label = item.status ?? `의미 재랭킹 — top score: ${item.top_score}`;
-                        cls = "text-purple-600";
-                      } else if (item.type === "gap") {
-                        label = `Gap 분석: ${item.text ?? ""}`;
-                        cls = "text-orange-600";
-                      } else if (item.type === "done") {
-                        label = `완료 — 총 ${item.total}건 수집, ${item.final}건 반환 (엔진: ${item.engine})`;
-                        cls = "text-green-700 font-bold";
-                      } else {
-                        label = item.text ?? item.type;
+
+                {/* 실시간 로그 (검색 중에는 항상 표시) */}
+                {(bmLoading || showSearchLog) && (
+                  <div className="max-h-[300px] overflow-y-auto px-3 py-2 space-y-0.5 bg-white font-mono text-[11px]">
+                    {bmProgressLog.map((ev, i) => {
+                      if (ev.type === "engine") {
+                        return (
+                          <div key={i} className="text-blue-700 font-bold py-0.5">
+                            🔍 {ev.text}
+                          </div>
+                        );
                       }
-                      return (
-                        <div key={i} className={`leading-snug ${cls}`}>
-                          {label}
-                        </div>
-                      );
+                      if (ev.type === "plan") {
+                        return (
+                          <div key={i} className="text-indigo-700 font-semibold py-0.5 mt-1">
+                            ◆ {ev.text}
+                          </div>
+                        );
+                      }
+                      if (ev.type === "queries") {
+                        return (
+                          <div key={i} className="pl-3 py-0.5">
+                            <div className="text-indigo-500 font-semibold mb-0.5">R{ev.round} 쿼리 {ev.count}개:</div>
+                            {ev.queries?.map((q, qi) => (
+                              <div key={qi} className="text-gray-500 pl-2 leading-snug">· {q}</div>
+                            ))}
+                          </div>
+                        );
+                      }
+                      if (ev.type === "round_start") {
+                        return (
+                          <div key={i} className="text-indigo-600 font-semibold py-0.5 mt-1">
+                            ▶ Round {ev.round} 시작 — {ev.count}개 쿼리 병렬 검색
+                          </div>
+                        );
+                      }
+                      if (ev.type === "query_done") {
+                        return (
+                          <div key={i} className="pl-3 text-gray-500 leading-snug py-0.5">
+                            <span className="text-indigo-400">[R{ev.round} {ev.idx}/{ev.total}]</span>{" "}
+                            {ev.query}{" "}
+                            <span className={ev.found && ev.found > 0 ? "text-green-600 font-semibold" : "text-gray-400"}>
+                              → {ev.found}건
+                            </span>
+                          </div>
+                        );
+                      }
+                      if (ev.type === "round_end") {
+                        return (
+                          <div key={i} className="text-indigo-700 font-semibold py-0.5">
+                            ◀ Round {ev.round} 완료 — 누적 {ev.collected}건
+                          </div>
+                        );
+                      }
+                      if (ev.type === "embed") {
+                        return (
+                          <div key={i} className="text-purple-600 py-0.5">
+                            ✦ {ev.text}
+                          </div>
+                        );
+                      }
+                      if (ev.type === "done_search") {
+                        return (
+                          <div key={i} className="text-green-700 font-bold py-0.5 mt-1">
+                            ✅ 검색 완료 — 총 {ev.total}건 수집 (상위 {ev.final}건 분석)
+                          </div>
+                        );
+                      }
+                      if (ev.type === "llm_analyze") {
+                        return (
+                          <div key={i} className="text-orange-600 font-semibold py-0.5">
+                            🤖 Claude AI 분석 중 — {ev.total}건 처리...
+                          </div>
+                        );
+                      }
+                      return null;
                     })}
+                    {bmLoading && (
+                      <div className="text-gray-400 animate-pulse py-0.5">▌</div>
+                    )}
                   </div>
                 )}
               </div>
