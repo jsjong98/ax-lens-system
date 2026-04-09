@@ -2231,9 +2231,6 @@ def _save_step1_result(result_data: dict) -> dict:
 async def export_benchmark_table_xlsx():
     """벤치마킹 결과 테이블을 xlsx 파일로 내보냅니다."""
     from fastapi.responses import Response
-    from datetime import datetime, timedelta, timezone
-
-    _KST = timezone(timedelta(hours=9))
 
     all_export_rows = [r for rows in _wf_benchmark_table.values() for r in rows]
     if not all_export_rows:
@@ -5237,12 +5234,30 @@ async def admin_reset_all_workflow(request: Request):
                 except Exception as e:
                     errors.append(f"uploads/{f.name}: {e}")
 
-    # 4) 메모리 상태 전체 초기화
+    # 4) data_store 프로젝트 디렉토리 전체 삭제 (/app/persist/data/)
+    from data_store import _BASE_DIR as _DS_BASE, _CURRENT_FILE as _DS_CURRENT
+    if _DS_BASE.exists():
+        try:
+            shutil.rmtree(_DS_BASE)
+            _DS_BASE.mkdir(exist_ok=True)
+            deleted.append("persist/data/")
+        except Exception as e:
+            errors.append(f"persist/data/: {e}")
+    if _DS_CURRENT.exists():
+        try:
+            _DS_CURRENT.unlink()
+            deleted.append("current_project.json")
+        except Exception as e:
+            errors.append(f"current_project.json: {e}")
+
+    # 5) 메모리 상태 전체 초기화 (Workflow + Task + New Workflow)
     global _workflow_cache, _wf_excel_tasks, _wf_excel_path
     global _wf_classification, _wf_chat_history
     global _wf_step1_cache, _wf_step2_cache, _wf_benchmark_table, _wf_gap_analysis
     global _current_session_id, _sessions_manifest
     global _tasks_cache, _current_excel_path
+    global _new_workflow_cache, _project_definition_cache, _project_design_cache
+    global _nw_tasks_cache, _nw_projects_cache
     _workflow_cache = {}
     _wf_excel_tasks = []
     _wf_excel_path = ""
@@ -5256,6 +5271,11 @@ async def admin_reset_all_workflow(request: Request):
     _sessions_manifest = {}
     _tasks_cache = []
     _current_excel_path = None
+    _new_workflow_cache.clear()
+    _project_definition_cache.clear()
+    _project_design_cache.clear()
+    _nw_tasks_cache.clear()
+    _nw_projects_cache.clear()
 
     return {"ok": True, "deleted": deleted, "errors": errors}
 

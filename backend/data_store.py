@@ -21,9 +21,14 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+
+_KST = timezone(timedelta(hours=9))
+
+def _now_kst() -> str:
+    return datetime.now(_KST).isoformat()
 
 # Railway Volume이 마운트되면 /app/persist 사용, 아니면 로컬 data/ 사용
 _PERSIST_ROOT = Path("/app/persist") if Path("/app/persist").exists() else Path(__file__).parent
@@ -73,7 +78,7 @@ def get_current_project() -> str | None:
 def set_current_project(filename: str) -> None:
     """현재 활성 프로젝트 설정."""
     _CURRENT_FILE.write_text(
-        json.dumps({"filename": filename, "set_at": datetime.now().isoformat()},
+        json.dumps({"filename": filename, "set_at": _now_kst()},
                    ensure_ascii=False),
         "utf-8",
     )
@@ -86,9 +91,9 @@ def set_current_project(filename: str) -> None:
         except Exception:
             pass
     meta["filename"] = filename
-    meta["last_accessed"] = datetime.now().isoformat()
+    meta["last_accessed"] = _now_kst()
     if "created_at" not in meta:
-        meta["created_at"] = datetime.now().isoformat()
+        meta["created_at"] = _now_kst()
     meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), "utf-8")
 
 
