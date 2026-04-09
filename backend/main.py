@@ -2731,8 +2731,16 @@ async def benchmark_workflow_step1(request: Request):
 async def generate_gap_analysis(request: Request):
     """
     벤치마킹 결과(선도사 To-Be) vs 두산 현재(As-Is)를 비교하여 Gap 분석 수행.
+    Perplexity 추가 검색으로 Gap 분석 고도화.
     벤치마킹이 먼저 수행되어 있어야 합니다.
+
+    [Gap 유형]
+    A. 신규: 벤치마킹에는 존재하나 As-Is에 없는 L4/L5. AI 기반 신규 프로세스.
+    B. 전환: 양쪽 다 존재하나 수행 방식이 완전히 다름. AI로 대체/변환.
+    C. 폐기/통합: As-Is에만 있고 벤치마킹에는 없음. 폐기되었거나 타 프로세스에 흡수.
     """
+    from benchmark_search import search_benchmarks
+
     global _wf_gap_analysis
 
     all_bm_rows = [r for rows in _wf_benchmark_table.values() for r in rows]
@@ -2753,6 +2761,53 @@ async def generate_gap_analysis(request: Request):
             f"성과: {bm.get('outcome', '')}\n"
         )
 
+    # ── Perplexity 추가 검색: Gap 고도화 ────────────────────────────────────
+    gap_search_context = ""
+    try:
+        _, excel_by_l4, _, _ = _build_excel_index()
+        l4_names_for_search = [d["name"] for d in
+                               (lambda p: [{"name": (s.name or s.sheet_id).strip()}
+                                           for s in p.sheets] if p else [])
+                               (_workflow_cache.get("parsed"))][:4]
+        if not l4_names_for_search:
+            l4_names_for_search = [tasks[0].l4 for tasks in list(excel_by_l4.values())[:4] if tasks]
+
+        gap_bm_data = {
+            "process_name": process_name,
+            "agents": [],
+            "l4_details": [{"name": n, "task_id": "", "pain_points": [], "description": "", "task_names": []}
+                           for n in l4_names_for_search],
+            "l4_names": l4_names_for_search,
+            "l3_names": [process_name],
+            "l2_names": [],
+            "l3_details": [], "l2_details": [],
+            "l5_tasks": [],
+            "blueprint_summary": f"{process_name} AI 전환 Gap 분석 고도화",
+            "extra_queries": [
+                f"{process_name} AI transformation gap analysis best practice 2024 2025",
+                f"HR {process_name} process automation AI adoption barriers challenges",
+            ],
+        }
+        _gap_sr = await search_benchmarks(gap_bm_data)
+        _gap_raw = _gap_sr.get("results", [])
+        if _gap_raw:
+            from collections import defaultdict as _ddict2
+            _gq: dict = _ddict2(lambda: {"content": "", "urls": []})
+            for r in _gap_raw:
+                _q2 = r.get("query", r.get("title", ""))
+                if r.get("content") and not _gq[_q2]["content"]:
+                    _gq[_q2]["content"] = r.get("content", "")
+                if r.get("url"):
+                    _gq[_q2]["urls"].append(r["url"])
+            gap_search_context = f"\n## Gap 고도화 검색 결과 (Perplexity)\n"
+            for _q2, _g2 in list(_gq.items())[:6]:
+                gap_search_context += f"\n### {_q2[:80]}\n"
+                if _g2["urls"]:
+                    gap_search_context += "출처: " + ", ".join(_g2["urls"][:2]) + "\n"
+                gap_search_context += f"{_g2['content'][:600]}\n"
+    except Exception as _e:
+        print(f"[gap-analysis] 추가 검색 실패 (무시): {_e}")
+
     gap_system = f"""당신은 경영 혁신 전문가입니다. 두산 HR 프로세스의 As-Is 현황과 글로벌 선도사 벤치마킹 결과를 비교하여 Gap 분석을 수행합니다.
 
 ## 벤치마킹 결과 (선도사 To-Be)
@@ -2763,34 +2818,40 @@ async def generate_gap_analysis(request: Request):
 
 {pain_summary}
 
-{asis_context[:3000]}
+{asis_context[:2500]}
+{gap_search_context}
+
+## Gap 유형 분류 기준 (반드시 준수)
+A. 신규: 벤치마킹에는 존재하나 As-Is에 없는 L4/L5. AI 기반으로 새롭게 생겨난 프로세스. 두산에 도입 여부 검토
+B. 전환: 양쪽 다 존재하나 수행 방식이 완전히 다름. 벤치마킹에서는 AI로 대체/변환하여 수행 중. 기존 프로세스를 전환 검토
+C. 폐기/통합: As-Is에만 있고 벤치마킹에는 없음. 선도 사례에서는 AI 도입과 함께 폐기되었거나 타 프로세스에 흡수. 존치 필요성 재검토
 
 ## Gap 분석 지침
 - 각 L4 Activity 단위로 As-Is vs To-Be Gap 분석
-- Gap Level: "높음" / "중간" / "낮음"
-- Action Plan: 구체적인 AI 전환 실행 방향
-- 실제 벤치마킹 데이터에 근거한 분석만 수행
+- gap_type: 반드시 "A. 신규" / "B. 전환" / "C. 폐기/통합" 중 하나로만 분류
+- 실제 벤치마킹 데이터 및 검색 결과에 근거한 분석만 수행
 - 벤치마킹 사례에서 기업명 구체적으로 인용
+- quick_wins: 단기(6개월 내) 즉시 시행 가능한 액션
+- strategic_actions: 장기(5년) 전략 과제
 
 ## 출력 형식 (JSON만, 마크다운 없음)
 {{
   "process_name": "{process_name}",
-  "overall_gap_level": "높음/중간/낮음",
-  "executive_summary": "경영진 요약 (3-5문장)",
+  "executive_summary": "경영진 요약 (3-5문장, Gap 유형 분포 포함)",
   "gap_items": [
     {{
       "l4_activity": "L4 활동명",
       "as_is": "두산 현재 수준 (구체적)",
       "to_be": "선도사 수준 (기업명 포함)",
-      "gap_description": "차이 설명",
-      "gap_level": "높음/중간/낮음",
+      "gap_type": "A. 신규",
+      "gap_description": "차이 설명 및 Gap 유형 판단 근거",
       "root_cause": "Gap 원인",
-      "action_plan": "단계별 개선 방향",
+      "action_plan": "전환 실행 방향 (구체적)",
       "priority": 1
     }}
   ],
-  "quick_wins": ["즉시 시행 가능한 액션 (3개 이내)"],
-  "strategic_actions": ["중장기 전략 과제 (3개 이내)"]
+  "quick_wins": ["단기(6개월 내) 즉시 시행 가능한 액션 (3개 이내)"],
+  "strategic_actions": ["장기(5년) 전략 과제 (3개 이내)"]
 }}"""
 
     gap_user = "위 데이터를 기반으로 Gap 분석을 수행해주세요. JSON 형식으로만 응답하세요."

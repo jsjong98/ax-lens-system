@@ -999,7 +999,7 @@ export interface GapItem {
   as_is: string;
   to_be: string;
   gap_description: string;
-  gap_level: "높음" | "중간" | "낮음";
+  gap_type: "A. 신규" | "B. 전환" | "C. 폐기/통합";
   root_cause: string;
   action_plan: string;
   priority: number;
@@ -1008,7 +1008,6 @@ export interface GapItem {
 export interface GapAnalysisResult {
   ok: boolean;
   process_name: string;
-  overall_gap_level: string;
   executive_summary: string;
   gap_items: GapItem[];
   quick_wins: string[];

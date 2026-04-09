@@ -1338,17 +1338,31 @@ export default function WorkflowPage() {
                       <div className="rounded-lg border border-purple-200 bg-purple-50 px-4 py-3">
                         <div className="flex items-center gap-2 mb-1.5">
                           <span className="text-xs font-bold text-purple-800">종합 요약</span>
-                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                            gapAnalysis.overall_gap_level === "높음"
-                              ? "bg-red-100 text-red-700"
-                              : gapAnalysis.overall_gap_level === "중간"
-                              ? "bg-amber-100 text-amber-700"
-                              : "bg-green-100 text-green-700"
-                          }`}>
-                            전체 Gap: {gapAnalysis.overall_gap_level}
-                          </span>
+                          {/* Gap 유형 분포 배지 */}
+                          {gapAnalysis.gap_items && (() => {
+                            const counts = { A: 0, B: 0, C: 0 };
+                            gapAnalysis.gap_items.forEach((it) => {
+                              if (it.gap_type?.startsWith("A")) counts.A++;
+                              else if (it.gap_type?.startsWith("B")) counts.B++;
+                              else if (it.gap_type?.startsWith("C")) counts.C++;
+                            });
+                            return (
+                              <div className="flex gap-1">
+                                {counts.A > 0 && <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-700">A.신규 {counts.A}</span>}
+                                {counts.B > 0 && <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-700">B.전환 {counts.B}</span>}
+                                {counts.C > 0 && <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-gray-200 text-gray-600">C.폐기/통합 {counts.C}</span>}
+                              </div>
+                            );
+                          })()}
                         </div>
                         <p className="text-xs text-purple-900 leading-relaxed">{gapAnalysis.executive_summary}</p>
+                      </div>
+
+                      {/* Gap 유형 범례 */}
+                      <div className="flex gap-3 text-[10px] text-gray-500">
+                        <span className="flex items-center gap-1"><span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-bold">A. 신규</span> 벤치마킹에만 존재 — 도입 검토</span>
+                        <span className="flex items-center gap-1"><span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-bold">B. 전환</span> 양쪽 존재, 방식 차이 — AI 전환 검토</span>
+                        <span className="flex items-center gap-1"><span className="px-1.5 py-0.5 rounded bg-gray-200 text-gray-600 font-bold">C. 폐기/통합</span> As-Is에만 존재 — 존치 재검토</span>
                       </div>
 
                       {/* Gap 테이블 */}
@@ -1360,7 +1374,7 @@ export default function WorkflowPage() {
                                 <th className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">L4 활동</th>
                                 <th className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">As-Is (두산)</th>
                                 <th className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">To-Be (선도사)</th>
-                                <th className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">Gap 수준</th>
+                                <th className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">Gap 유형</th>
                                 <th className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">근본 원인</th>
                                 <th className="text-left px-3 py-2 font-medium text-gray-600 whitespace-nowrap">Action Plan</th>
                                 <th className="text-center px-3 py-2 font-medium text-gray-600 whitespace-nowrap">우선순위</th>
@@ -1376,13 +1390,13 @@ export default function WorkflowPage() {
                                   <td className="px-3 py-2 text-blue-700 max-w-[160px]">{item.to_be}</td>
                                   <td className="px-3 py-2 whitespace-nowrap">
                                     <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                                      item.gap_level === "높음"
-                                        ? "bg-red-100 text-red-700"
-                                        : item.gap_level === "중간"
+                                      item.gap_type?.startsWith("A")
+                                        ? "bg-blue-100 text-blue-700"
+                                        : item.gap_type?.startsWith("B")
                                         ? "bg-amber-100 text-amber-700"
-                                        : "bg-green-100 text-green-700"
+                                        : "bg-gray-200 text-gray-600"
                                     }`}>
-                                      {item.gap_level}
+                                      {item.gap_type ?? "-"}
                                     </span>
                                   </td>
                                   <td className="px-3 py-2 text-gray-500 max-w-[140px]">{item.root_cause}</td>
@@ -1409,9 +1423,9 @@ export default function WorkflowPage() {
                       <div className="grid grid-cols-2 gap-3">
                         {gapAnalysis.quick_wins && gapAnalysis.quick_wins.length > 0 && (
                           <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3">
-                            <div className="text-xs font-bold text-green-800 mb-2">Quick Wins (즉시 시행)</div>
+                            <div className="text-xs font-bold text-green-800 mb-2">Quick Wins — 단기 (6개월 내)</div>
                             <ul className="space-y-1">
-                              {gapAnalysis.quick_wins.map((w, i) => (
+                              {gapAnalysis.quick_wins.map((w: string, i: number) => (
                                 <li key={i} className="flex items-start gap-1.5 text-xs text-green-900">
                                   <span className="text-green-500 shrink-0 mt-0.5">✓</span>
                                   <span>{w}</span>
@@ -1422,9 +1436,9 @@ export default function WorkflowPage() {
                         )}
                         {gapAnalysis.strategic_actions && gapAnalysis.strategic_actions.length > 0 && (
                           <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3">
-                            <div className="text-xs font-bold text-blue-800 mb-2">Strategic Actions (중장기)</div>
+                            <div className="text-xs font-bold text-blue-800 mb-2">Strategic Actions — 장기 (5년)</div>
                             <ul className="space-y-1">
-                              {gapAnalysis.strategic_actions.map((a, i) => (
+                              {gapAnalysis.strategic_actions.map((a: string, i: number) => (
                                 <li key={i} className="flex items-start gap-1.5 text-xs text-blue-900">
                                   <span className="text-blue-500 shrink-0 mt-0.5">→</span>
                                   <span>{a}</span>
