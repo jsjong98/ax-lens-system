@@ -1747,3 +1747,7 @@ export async function deleteAdminUpload(filename: string): Promise<{ ok: boolean
 export async function deleteAdminWorkflowFile(filename: string): Promise<{ ok: boolean; deleted: string }> {
   return apiFetch(`/admin/workflow-file/${encodeURIComponent(filename)}`, { method: "DELETE" });
 }
+
+export async function resetAllWorkflow(): Promise<{ ok: boolean; deleted: string[]; errors: string[] }> {
+  return apiFetch("/admin/workflow-reset", { method: "DELETE" });
+}

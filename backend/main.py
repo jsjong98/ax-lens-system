@@ -5078,12 +5078,58 @@ async def admin_delete_workflow_file(filename: str, request: Request):
     """Admin: Workflow 루트 디렉토리의 단일 파일 삭제 (세션 미존재 레거시 파일용)."""
     _require_admin(request)
     safe_name = Path(filename).name
-    # 경로 순회 방지: _WF_DIR 직속 파일만 허용
     file_path = _WF_DIR / safe_name
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(404, f"파일을 찾을 수 없습니다: {safe_name}")
     file_path.unlink()
     return {"ok": True, "deleted": safe_name}
+
+
+@app.delete("/api/admin/workflow-reset", tags=["Admin"])
+async def admin_reset_all_workflow(request: Request):
+    """Admin: Workflow 전체 초기화 — 모든 세션·파일·메모리 상태 삭제."""
+    import shutil
+    _require_admin(request)
+
+    deleted = []
+    errors = []
+
+    # 1) 세션 디렉토리 전체 삭제
+    if _SESSIONS_DIR.exists():
+        try:
+            shutil.rmtree(_SESSIONS_DIR)
+            _SESSIONS_DIR.mkdir(exist_ok=True)
+            deleted.append("sessions/")
+        except Exception as e:
+            errors.append(f"sessions/: {e}")
+
+    # 2) _WF_DIR 루트의 파일들 삭제 (xlsx, json, pptx 등)
+    for f in _WF_DIR.iterdir():
+        if f.is_file():
+            try:
+                f.unlink()
+                deleted.append(f.name)
+            except Exception as e:
+                errors.append(f"{f.name}: {e}")
+
+    # 3) 메모리 상태 초기화
+    global _workflow_cache, _wf_excel_tasks, _wf_excel_path
+    global _wf_classification, _wf_chat_history
+    global _wf_step1_cache, _wf_step2_cache, _wf_benchmark_table, _wf_gap_analysis
+    global _current_session_id, _sessions_manifest
+    _workflow_cache = {}
+    _wf_excel_tasks = []
+    _wf_excel_path = ""
+    _wf_classification = {}
+    _wf_chat_history = []
+    _wf_step1_cache = {}
+    _wf_step2_cache = {}
+    _wf_benchmark_table = {}
+    _wf_gap_analysis = {}
+    _current_session_id = ""
+    _sessions_manifest = {}
+
+    return {"ok": True, "deleted": deleted, "errors": errors}
 
 
 @app.get("/api/admin/download/{filename}", tags=["Admin"])
