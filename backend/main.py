@@ -3042,13 +3042,13 @@ async def generate_workflow_step1(request: Request):
 async def generate_tobe_flow(request: Request):
     """
     To-Be Workflow를 Swim Lane 형식으로 생성.
-    Step 1 기본 설계 + Gap 분석 결과 기반, L4(시트) 단위.
+    상세 설계(Step 2) + Gap 분석 결과 기반, L4(시트) 단위.
 
     Swim Lane 액터: 임원 / 현업 팀장 / HR 임원 / HR 담당자 /
                    Senior AI / Junior AI / 현업 구성원 / 그 외
     """
-    if not _wf_step1_cache:
-        raise HTTPException(400, "Step 1 기본 설계를 먼저 수행해주세요.")
+    if not _wf_step2_cache:
+        raise HTTPException(400, "상세 설계(Step 2)를 먼저 수행해주세요.")
 
     # L4 시트 목록 수집 (JSON/PPT 우선, 없으면 Step1 결과에서)
     l4_sheets: list[dict] = []
@@ -3062,12 +3062,24 @@ async def generate_tobe_flow(request: Request):
                 l4_sheets.append({"l4_id": l4.get("l4_id", ""),
                                    "l4_name": l4.get("l4_name", "")})
 
-    process_name = _wf_step1_cache.get("process_name", "HR 프로세스")
+    process_name = _wf_step2_cache.get("process_name",
+                    _wf_step1_cache.get("process_name", "HR 프로세스"))
+
+    # 상세 설계 컨텍스트 (Agent 정의 — Senior AI/Junior AI 역할 확정)
+    agents = _wf_step2_cache.get("agents", [])
+    step2_ctx = ""
+    for ag in agents:
+        step2_ctx += (f"\n[{ag.get('agent_type','')}] {ag.get('agent_name','')}: "
+                      f"{ag.get('description','')}\n")
+        for t in ag.get("assigned_tasks", [])[:5]:
+            step2_ctx += (f"  - {t.get('task_name','')} ({t.get('automation_level','')}): "
+                          f"AI={t.get('ai_role','')}\n")
+    step2_ctx = step2_ctx[:3000]
 
     # 기본 설계 컨텍스트 (L3→L4→L5 트리)
     step1_ctx = json.dumps(
         _wf_step1_cache.get("redesigned_process", []),
-        ensure_ascii=False)[:3500]
+        ensure_ascii=False)[:2000]
 
     # Gap 분석 컨텍스트
     gap_ctx = ""
@@ -3079,10 +3091,11 @@ async def generate_tobe_flow(request: Request):
                         f"{g.get('gap_description','')}\n")
 
     # As-Is 컨텍스트
-    asis_ctx = _build_mapped_asis_context("")[:1500]
+    asis_ctx = _build_mapped_asis_context("")[:1000]
 
     system_prompt = f"""당신은 AI 기반 업무 혁신 설계 전문가입니다.
-Step 1 기본 설계와 Gap 분석 결과를 기반으로, L4 시트 단위 To-Be Workflow를 Swim Lane JSON으로 생성합니다.
+상세 설계(Step 2)에서 확정된 Senior AI / Junior AI Agent 구조를 기반으로,
+L4 시트 단위 To-Be Workflow를 Swim Lane JSON으로 생성합니다.
 
 ## 프로세스: {process_name}
 
@@ -3109,7 +3122,10 @@ Step 1 기본 설계와 Gap 분석 결과를 기반으로, L4 시트 단위 To-B
 9. 사용 안 하는 액터는 actors_used에서 제외
 10. 각 시트 노드는 최소 4개 이상, 자연스러운 업무 흐름으로
 
-## Step 1 기본 설계 (L3→L4→L5)
+## 상세 설계 (Step 2) — Agent 구조 (Senior AI / Junior AI 역할 확정)
+{step2_ctx}
+
+## 기본 설계 (Step 1) — L3→L4→L5 재설계 트리
 {step1_ctx}
 
 {gap_ctx}
