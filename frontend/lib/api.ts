@@ -1112,10 +1112,18 @@ export interface GapItem {
   priority: number;
 }
 
+export interface GapWrapUpDim {
+  headline: string;
+  as_is: string;
+  to_be: string;
+  gaps: string[];
+  implication: string;
+}
+
 export interface GapWrapUp {
-  process_gap: string | null;
-  infra_gap: string | null;
-  data_gap: string | null;
+  process_gap: GapWrapUpDim | string | null;
+  infra_gap: GapWrapUpDim | string | null;
+  data_gap: GapWrapUpDim | string | null;
 }
 
 export interface GapAnalysisResult {

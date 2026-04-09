@@ -1869,28 +1869,94 @@ export default function WorkflowPage() {
                         </div>
                       )}
 
-                      {/* Gap Wrap-up: 프로세스 / 인프라 / 데이터 */}
+                      {/* Gap Wrap-up: 프로세스 / 인프라 / 데이터 — MBB 스타일 */}
                       {gapAnalysis.gap_wrap_up && (() => {
                         const wu = gapAnalysis.gap_wrap_up!;
-                        const dims = [
-                          { key: "process_gap", label: "프로세스 Gap", val: wu.process_gap,
-                            border: "border-violet-200", bg: "bg-violet-50", title: "text-violet-800", body: "text-violet-900", icon: "⚙️" },
-                          { key: "infra_gap",   label: "인프라 Gap",   val: wu.infra_gap,
-                            border: "border-orange-200", bg: "bg-orange-50", title: "text-orange-800", body: "text-orange-900", icon: "🏗️" },
-                          { key: "data_gap",    label: "데이터 Gap",   val: wu.data_gap,
-                            border: "border-cyan-200", bg: "bg-cyan-50", title: "text-cyan-800", body: "text-cyan-900", icon: "📊" },
-                        ].filter(d => d.val);
-                        if (dims.length === 0) return null;
+                        type DimCfg = {
+                          key: "process_gap" | "infra_gap" | "data_gap";
+                          label: string;
+                          icon: string;
+                          accent: string;
+                          headlineBg: string;
+                          headlineText: string;
+                          border: string;
+                          bg: string;
+                        };
+                        const dimCfg: DimCfg[] = [
+                          { key: "process_gap", label: "프로세스 Gap", icon: "⚙️",
+                            accent: "violet", headlineBg: "bg-violet-600", headlineText: "text-white",
+                            border: "border-violet-200", bg: "bg-violet-50" },
+                          { key: "infra_gap", label: "인프라 Gap", icon: "🏗️",
+                            accent: "orange", headlineBg: "bg-orange-500", headlineText: "text-white",
+                            border: "border-orange-200", bg: "bg-orange-50" },
+                          { key: "data_gap", label: "데이터 Gap", icon: "📊",
+                            accent: "cyan", headlineBg: "bg-cyan-600", headlineText: "text-white",
+                            border: "border-cyan-200", bg: "bg-cyan-50" },
+                        ];
+                        const activeDims = dimCfg.filter(d => wu[d.key]);
+                        if (activeDims.length === 0) return null;
+
                         return (
                           <div>
                             <div className="text-xs font-bold text-gray-700 mb-2">Gap 종합 분석</div>
-                            <div className={`grid gap-3 ${dims.length === 1 ? "grid-cols-1" : dims.length === 2 ? "grid-cols-2" : "grid-cols-3"}`}>
-                              {dims.map(d => (
-                                <div key={d.key} className={`rounded-lg border ${d.border} ${d.bg} px-4 py-3`}>
-                                  <div className={`text-xs font-bold ${d.title} mb-1.5`}>{d.icon} {d.label}</div>
-                                  <p className={`text-xs ${d.body} leading-relaxed`}>{d.val}</p>
-                                </div>
-                              ))}
+                            <div className={`grid gap-3 ${activeDims.length === 1 ? "grid-cols-1" : activeDims.length === 2 ? "grid-cols-2" : "grid-cols-3"}`}>
+                              {activeDims.map(d => {
+                                const raw = wu[d.key];
+                                // 구조화된 객체인지 판별
+                                const isObj = raw && typeof raw === "object" && !Array.isArray(raw) && "headline" in raw;
+                                const dim = isObj ? (raw as { headline: string; as_is: string; to_be: string; gaps: string[]; implication: string }) : null;
+
+                                return (
+                                  <div key={d.key} className={`rounded-xl border ${d.border} overflow-hidden`}>
+                                    {/* 헤더 — 컬러 배너 */}
+                                    <div className={`${d.headlineBg} px-4 py-2.5`}>
+                                      <div className={`text-[10px] font-semibold ${d.headlineText} opacity-80 mb-0.5`}>
+                                        {d.icon} {d.label}
+                                      </div>
+                                      <div className={`text-sm font-bold ${d.headlineText} leading-snug`}>
+                                        {dim ? dim.headline : (typeof raw === "string" ? raw.slice(0, 40) : "")}
+                                      </div>
+                                    </div>
+
+                                    {/* 바디 */}
+                                    {dim ? (
+                                      <div className={`${d.bg} px-4 py-3 space-y-2.5`}>
+                                        {/* As-Is / To-Be */}
+                                        <div className="grid grid-cols-2 gap-2">
+                                          <div>
+                                            <div className="text-[9px] font-bold text-gray-500 uppercase tracking-wide mb-0.5">As-Is</div>
+                                            <p className="text-[11px] text-gray-700 leading-snug">{dim.as_is}</p>
+                                          </div>
+                                          <div>
+                                            <div className="text-[9px] font-bold text-gray-500 uppercase tracking-wide mb-0.5">To-Be</div>
+                                            <p className="text-[11px] text-gray-700 leading-snug">{dim.to_be}</p>
+                                          </div>
+                                        </div>
+                                        {/* 핵심 Gap 포인트 */}
+                                        <div>
+                                          <div className="text-[9px] font-bold text-gray-500 uppercase tracking-wide mb-1">핵심 Gap</div>
+                                          <div className="flex flex-wrap gap-1.5">
+                                            {dim.gaps.map((g, gi) => (
+                                              <span key={gi} className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-white border border-gray-300 text-gray-700">
+                                                {g}
+                                              </span>
+                                            ))}
+                                          </div>
+                                        </div>
+                                        {/* 시사점 */}
+                                        <div className="border-t border-gray-200 pt-2">
+                                          <div className="text-[9px] font-bold text-gray-500 uppercase tracking-wide mb-0.5">시사점</div>
+                                          <p className="text-[11px] text-gray-800 font-medium leading-snug">{dim.implication}</p>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <div className={`${d.bg} px-4 py-3`}>
+                                        <p className="text-xs text-gray-700 leading-relaxed">{typeof raw === "string" ? raw : ""}</p>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
                             </div>
                           </div>
                         );
