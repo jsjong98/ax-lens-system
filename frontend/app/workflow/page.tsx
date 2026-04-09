@@ -14,6 +14,7 @@ import {
   generateWorkflowStep2,
   getWorkflowStepResults,
   generateGapAnalysis,
+  deleteBenchmarkRow,
   listWorkflowSessions,
   loadWorkflowSession,
   deleteWorkflowSession,
@@ -1270,11 +1271,12 @@ export default function WorkflowPage() {
                         <th className="text-left px-3 py-2 font-medium text-blue-800 whitespace-nowrap">인프라</th>
                         <th className="text-left px-3 py-2 font-medium text-blue-800 whitespace-nowrap">두산 시사점</th>
                         <th className="text-left px-3 py-2 font-medium text-blue-800 whitespace-nowrap">출처</th>
+                        <th className="px-2 py-2 text-blue-800 whitespace-nowrap"></th>
                       </tr>
                     </thead>
                     <tbody>
                       {benchmarkTable.map((row, i) => (
-                        <tr key={i} className="border-b border-blue-100 hover:bg-blue-50/50">
+                        <tr key={i} className="border-b border-blue-100 hover:bg-blue-50/50 group">
                           <td className="px-3 py-2 font-medium text-gray-800 whitespace-nowrap">{row.source}</td>
                           <td className="px-3 py-2 whitespace-nowrap">
                             {row.company_type && (
@@ -1304,6 +1306,23 @@ export default function WorkflowPage() {
                             ) : (
                               <span className="text-gray-300 text-[10px]">없음</span>
                             )}
+                          </td>
+                          <td className="px-2 py-2 text-center">
+                            <button
+                              title={`"${row.source}" 행 삭제`}
+                              onClick={async () => {
+                                if (!confirm(`"${row.source}" 행을 삭제하시겠습니까?`)) return;
+                                try {
+                                  const res = await deleteBenchmarkRow(row.source, activeSheet ?? undefined);
+                                  setBenchmarkTableBySheet(res.benchmark_table);
+                                } catch (e) {
+                                  alert((e as Error).message);
+                                }
+                              }}
+                              className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-red-50 text-red-400 hover:text-red-600"
+                            >
+                              ✕
+                            </button>
                           </td>
                         </tr>
                       ))}

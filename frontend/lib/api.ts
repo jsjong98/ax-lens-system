@@ -1025,6 +1025,16 @@ export async function generateGapAnalysis(): Promise<GapAnalysisResult> {
   return apiFetch("/workflow/gap-analysis", { method: "POST", body: "{}" });
 }
 
+export async function deleteBenchmarkRow(source: string, sheetId?: string): Promise<{
+  ok: boolean; deleted_source: string; remaining: number;
+  benchmark_table: Record<string, BenchmarkTableRow[]>;
+}> {
+  return apiFetch("/workflow/benchmark-table/row", {
+    method: "DELETE",
+    body: JSON.stringify({ source, sheet_id: sheetId ?? "" }),
+  });
+}
+
 // ── 멀티 세션 ────────────────────────────────────────────────────────────────
 
 export interface WorkflowSession {

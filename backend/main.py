@@ -2266,6 +2266,57 @@ def _save_step1_result(result_data: dict) -> dict:
 
 # ── 벤치마킹 전용 ──────────────────────────────────────────
 
+@app.delete("/api/workflow/benchmark-table/row", tags=["Workflow"])
+async def delete_benchmark_row(request: Request):
+    """벤치마킹 결과 테이블에서 특정 행을 삭제합니다.
+    body: {source: "기업명", sheet_id: "시트ID"}
+    sheet_id가 없으면 모든 시트에서 source가 일치하는 첫 번째 행을 삭제합니다.
+    """
+    body = await request.json()
+    source = (body.get("source") or "").strip()
+    sheet_id = (body.get("sheet_id") or "").strip()
+
+    if not source:
+        raise HTTPException(400, "source(기업명)가 필요합니다.")
+
+    deleted = False
+    if sheet_id and sheet_id in _wf_benchmark_table:
+        before = len(_wf_benchmark_table[sheet_id])
+        _wf_benchmark_table[sheet_id] = [
+            r for r in _wf_benchmark_table[sheet_id]
+            if r.get("source", "").strip() != source
+        ]
+        deleted = len(_wf_benchmark_table[sheet_id]) < before
+    else:
+        # 모든 시트에서 source 일치 행 제거
+        for sid in list(_wf_benchmark_table.keys()):
+            before = len(_wf_benchmark_table[sid])
+            _wf_benchmark_table[sid] = [
+                r for r in _wf_benchmark_table[sid]
+                if r.get("source", "").strip() != source
+            ]
+            if len(_wf_benchmark_table[sid]) < before:
+                deleted = True
+
+    if not deleted:
+        raise HTTPException(404, f"'{source}' 항목을 찾지 못했습니다.")
+
+    # 세션 상태 persist
+    if _current_session_id:
+        session_dir = _get_session_dir(_current_session_id)
+        (session_dir / "benchmark_table.json").write_text(
+            json.dumps(_wf_benchmark_table, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+    all_rows = [r for rows in _wf_benchmark_table.values() for r in rows]
+    return {
+        "ok": True,
+        "deleted_source": source,
+        "remaining": len(all_rows),
+        "benchmark_table": {k: v for k, v in _wf_benchmark_table.items()},
+    }
+
+
 @app.get("/api/workflow/benchmark-table/export", tags=["Workflow"])
 async def export_benchmark_table_xlsx():
     """벤치마킹 결과 테이블을 xlsx 파일로 내보냅니다."""
