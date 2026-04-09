@@ -2030,11 +2030,15 @@ def _build_mapped_asis_context(sheet_id: str = "") -> str:
 def _build_task_and_pain_summary(sheet_id: str = "") -> tuple[str, str, str]:
     """엑셀 Task 데이터로 task_summary, pain_summary, process_name을 만든다.
     구조: JSON/PPT 파일 1개 = L3, 파일 안의 시트 1개 = L4
+    계층: L2=x, L3=x.y, L4=x.y.z, L5=x.y.z.w (L1 없음)
+    - L3 이름: 시트 노드의 task_id 앞 두 자리(x.y) → 엑셀 l3_id 매핑으로 추적
     - sheet_id 지정 시: 해당 L4 시트의 task_id 범위로 필터링
     - sheet_id="" : JSON의 모든 시트(= L3 전체, 모든 L4) 합산
     - JSON 없음: 엑셀 전체 반환"""
 
     relevant_tasks = _wf_excel_tasks
+    json_l3_ids: set[str] = set()  # 시트 내 노드 task_id의 L3 접두사 (x.y)
+
     if "parsed" in _workflow_cache:
         parsed = _workflow_cache["parsed"]
         # sheet_id 지정 시 해당 시트(=L4)만, 아니면 전체 시트(=L3 전체)
@@ -2043,19 +2047,19 @@ def _build_task_and_pain_summary(sheet_id: str = "") -> tuple[str, str, str]:
         else:
             target_sheets = parsed.sheets  # L3 전체: 모든 L4 시트 합산
 
-        # JSON 노드의 task_id 및 l4_id/l3_id 접두사 수집
+        # JSON 노드의 task_id에서 L5→L4→L3 접두사 수집
+        # L5: x.y.z.w → L4: x.y.z, L3: x.y, L2: x
         json_tids: set[str] = set()
         json_l4_ids: set[str] = set()
-        json_l3_ids: set[str] = set()
         for s in target_sheets:
             for n in s.nodes.values():
                 if n.task_id:
                     json_tids.add(n.task_id)
                     parts = n.task_id.split(".")
                     if len(parts) >= 3:
-                        json_l4_ids.add(".".join(parts[:3]))  # x.y.z
+                        json_l4_ids.add(".".join(parts[:3]))  # x.y.z = L4
                     if len(parts) >= 2:
-                        json_l3_ids.add(".".join(parts[:2]))  # x.y
+                        json_l3_ids.add(".".join(parts[:2]))  # x.y = L3
 
         # 1순위: task_id 직접 매칭 → 2순위: l4_id 매칭 → 3순위: l3_id 매칭
         filtered = [t for t in _wf_excel_tasks if t.id in json_tids]
@@ -2067,20 +2071,16 @@ def _build_task_and_pain_summary(sheet_id: str = "") -> tuple[str, str, str]:
             relevant_tasks = filtered
 
     # process_name = L3 이름
-    # 우선순위: JSON의 L3 노드 라벨 → 엑셀 l3 컬럼
-    l3_from_json: list[str] = []
-    if "parsed" in _workflow_cache:
-        parsed_tmp = _workflow_cache["parsed"]
-        tgt = ([s for s in parsed_tmp.sheets if s.sheet_id == sheet_id]
-               or parsed_tmp.sheets[:1]) if sheet_id else parsed_tmp.sheets
-        seen_l3_tmp: set[str] = set()
-        for s in tgt:
-            for n in s.nodes.values():
-                if n.level == "L3" and n.label.strip() and n.label.strip() not in seen_l3_tmp:
-                    seen_l3_tmp.add(n.label.strip())
-                    l3_from_json.append(n.label.strip())
-
-    l3_names = l3_from_json or list(dict.fromkeys(t.l3 for t in relevant_tasks if t.l3))
+    # L5 노드의 task_id 앞 두 자리(x.y) = L3 ID → 엑셀 t.l3_id로 매핑하여 L3 이름 추적
+    if json_l3_ids:
+        seen_l3n: set[str] = set()
+        l3_names: list[str] = []
+        for t in _wf_excel_tasks:
+            if t.l3_id in json_l3_ids and t.l3 and t.l3 not in seen_l3n:
+                seen_l3n.add(t.l3)
+                l3_names.append(t.l3)
+    else:
+        l3_names = list(dict.fromkeys(t.l3 for t in relevant_tasks if t.l3))
     process_name = l3_names[0] if l3_names else "HR 프로세스"
 
     task_lines = []
@@ -2834,6 +2834,13 @@ C. 폐기/통합: As-Is에만 있고 벤치마킹에는 없음. 선도 사례에
 - quick_wins: 단기(6개월 내) 즉시 시행 가능한 액션
 - strategic_actions: 장기(5년) 전략 과제
 
+## gap_wrap_up 작성 기준
+gap_items 전체를 종합하여 세 차원의 Gap을 각각 요약합니다.
+각 차원은 해당 Gap이 실제로 존재할 때만 작성하고, 없으면 반드시 null로 출력합니다.
+- process_gap: L3/L4 단위 프로세스 활동 자체의 Gap (업무 수행 방식, 프로세스 부재·전환·폐기)
+- infra_gap: 시스템/도구/플랫폼/인프라 수준의 Gap (기술 스택, 통합 환경, 자동화 인프라)
+- data_gap: 데이터 수집·활용·분석 수준의 Gap (데이터 부재, 품질, 활용 체계)
+
 ## 출력 형식 (JSON만, 마크다운 없음)
 {{
   "process_name": "{process_name}",
@@ -2850,6 +2857,11 @@ C. 폐기/통합: As-Is에만 있고 벤치마킹에는 없음. 선도 사례에
       "priority": 1
     }}
   ],
+  "gap_wrap_up": {{
+    "process_gap": "L3/L4 프로세스 Gap 종합 설명 또는 null",
+    "infra_gap": "인프라/시스템 Gap 종합 설명 또는 null",
+    "data_gap": "데이터 Gap 종합 설명 또는 null"
+  }},
   "quick_wins": ["단기(6개월 내) 즉시 시행 가능한 액션 (3개 이내)"],
   "strategic_actions": ["장기(5년) 전략 과제 (3개 이내)"]
 }}"""

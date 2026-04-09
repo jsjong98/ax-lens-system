@@ -1005,11 +1005,18 @@ export interface GapItem {
   priority: number;
 }
 
+export interface GapWrapUp {
+  process_gap: string | null;
+  infra_gap: string | null;
+  data_gap: string | null;
+}
+
 export interface GapAnalysisResult {
   ok: boolean;
   process_name: string;
   executive_summary: string;
   gap_items: GapItem[];
+  gap_wrap_up?: GapWrapUp;
   quick_wins: string[];
   strategic_actions: string[];
 }

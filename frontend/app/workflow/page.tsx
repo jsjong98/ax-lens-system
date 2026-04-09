@@ -1419,6 +1419,33 @@ export default function WorkflowPage() {
                         </div>
                       )}
 
+                      {/* Gap Wrap-up: 프로세스 / 인프라 / 데이터 */}
+                      {gapAnalysis.gap_wrap_up && (() => {
+                        const wu = gapAnalysis.gap_wrap_up!;
+                        const dims = [
+                          { key: "process_gap", label: "프로세스 Gap", val: wu.process_gap,
+                            border: "border-violet-200", bg: "bg-violet-50", title: "text-violet-800", body: "text-violet-900", icon: "⚙️" },
+                          { key: "infra_gap",   label: "인프라 Gap",   val: wu.infra_gap,
+                            border: "border-orange-200", bg: "bg-orange-50", title: "text-orange-800", body: "text-orange-900", icon: "🏗️" },
+                          { key: "data_gap",    label: "데이터 Gap",   val: wu.data_gap,
+                            border: "border-cyan-200", bg: "bg-cyan-50", title: "text-cyan-800", body: "text-cyan-900", icon: "📊" },
+                        ].filter(d => d.val);
+                        if (dims.length === 0) return null;
+                        return (
+                          <div>
+                            <div className="text-xs font-bold text-gray-700 mb-2">Gap 종합 분석</div>
+                            <div className={`grid gap-3 ${dims.length === 1 ? "grid-cols-1" : dims.length === 2 ? "grid-cols-2" : "grid-cols-3"}`}>
+                              {dims.map(d => (
+                                <div key={d.key} className={`rounded-lg border ${d.border} ${d.bg} px-4 py-3`}>
+                                  <div className={`text-xs font-bold ${d.title} mb-1.5`}>{d.icon} {d.label}</div>
+                                  <p className={`text-xs ${d.body} leading-relaxed`}>{d.val}</p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })()}
+
                       {/* Quick Wins & Strategic Actions */}
                       <div className="grid grid-cols-2 gap-3">
                         {gapAnalysis.quick_wins && gapAnalysis.quick_wins.length > 0 && (
