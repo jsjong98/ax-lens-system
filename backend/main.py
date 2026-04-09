@@ -5451,6 +5451,38 @@ async def get_upload_history():
     return {"ok": True, "files": files}
 
 
+@app.patch("/api/workflow/sessions/{session_id}/rename", tags=["Workflow"])
+async def rename_workflow_session(session_id: str, request: Request):
+    """세션 표시 이름을 변경합니다 (디렉토리 이름은 유지)."""
+    body = await request.json()
+    new_name = (body.get("name") or "").strip()
+    if not new_name:
+        raise HTTPException(400, "name 필드가 필요합니다.")
+
+    _load_sessions_manifest()
+    if session_id not in _sessions_manifest:
+        raise HTTPException(404, f"세션 '{session_id}'을 찾을 수 없습니다.")
+
+    _sessions_manifest[session_id]["name"] = new_name
+    _sessions_manifest[session_id]["updated_at"] = _now_kst()
+    _save_sessions_manifest()
+    return {"ok": True, "session_id": session_id, "name": new_name}
+
+
+@app.post("/api/workflow/sessions/current/save", tags=["Workflow"])
+async def save_current_session():
+    """현재 세션 상태를 명시적으로 저장합니다."""
+    if not _current_session_id:
+        raise HTTPException(400, "활성 세션이 없습니다.")
+    _save_session_data(_current_session_id)
+    return {
+        "ok": True,
+        "session_id": _current_session_id,
+        "name": _sessions_manifest.get(_current_session_id, {}).get("name", _current_session_id),
+        "saved_at": _now_kst(),
+    }
+
+
 @app.post("/api/workflow/sessions/{session_id}/load", tags=["Workflow"])
 async def load_workflow_session(session_id: str):
     """다른 세션을 로드합니다 (파일 + 상태 전환)."""

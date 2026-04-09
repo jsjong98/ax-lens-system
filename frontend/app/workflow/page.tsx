@@ -26,6 +26,8 @@ import {
   deleteWorkflowSession,
   listSessionFiles,
   selectWorkflowFile,
+  renameWorkflowSession,
+  saveCurrentSession,
   type WorkflowSummary,
   type WorkflowExcelTask,
   type WorkflowExcelUploadResult,
@@ -116,6 +118,9 @@ export default function WorkflowPage() {
   const [sessions, setSessions] = useState<WorkflowSession[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string>("");
   const [sessionLoading, setSessionLoading] = useState(false);
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [editingSessionName, setEditingSessionName] = useState("");
+  const [saveToast, setSaveToast] = useState("");
 
   // 파일 피커
   const [sessionFiles, setSessionFiles] = useState<SessionFileInfo[]>([]);
@@ -250,6 +255,39 @@ export default function WorkflowPage() {
     setError(null);
     setCurrentStep(0);
   }, []);
+
+  // 현재 세션 저장
+  const handleSaveSession = useCallback(async () => {
+    if (!currentSessionId) return;
+    try {
+      const r = await saveCurrentSession();
+      setSaveToast(`"${r.name}" 저장 완료`);
+      setTimeout(() => setSaveToast(""), 2500);
+    } catch (e) {
+      setSaveToast(`저장 실패: ${(e as Error).message}`);
+      setTimeout(() => setSaveToast(""), 3000);
+    }
+  }, [currentSessionId]);
+
+  // 세션 이름 편집 시작
+  const handleStartRename = useCallback((s: WorkflowSession) => {
+    setEditingSessionId(s.id);
+    setEditingSessionName(s.name || s.id);
+  }, []);
+
+  // 세션 이름 저장
+  const handleConfirmRename = useCallback(async (sessionId: string) => {
+    const name = editingSessionName.trim();
+    if (!name) { setEditingSessionId(null); return; }
+    try {
+      await renameWorkflowSession(sessionId, name);
+      setSessions((prev) => prev.map((s) => s.id === sessionId ? { ...s, name } : s));
+    } catch (e) {
+      console.error("이름 변경 실패", e);
+    } finally {
+      setEditingSessionId(null);
+    }
+  }, [editingSessionName]);
 
   // 세션 삭제
   const handleDeleteSession = useCallback(async (sessionId: string) => {
@@ -634,51 +672,96 @@ export default function WorkflowPage() {
         </p>
       </div>
 
-      {/* ═══ 세션 바 ═══ */}
-      <div className="flex items-center gap-3 p-3 rounded-xl border border-gray-200 bg-gray-50 flex-wrap">
-        <span className="text-xs font-semibold text-gray-500 shrink-0">프로젝트</span>
-        <div className="flex gap-2 flex-wrap flex-1">
-          {sessions.map((s) => (
-            <div
-              key={s.id}
-              className="flex items-center gap-1 rounded-full border text-xs px-3 py-1"
-              style={{
-                background: s.id === currentSessionId ? PWC.bg : "#fff",
-                borderColor: s.id === currentSessionId ? PWC.primary : "#d1d5db",
-                color: s.id === currentSessionId ? PWC.primary : "#374151",
-                fontWeight: s.id === currentSessionId ? 700 : 400,
-              }}
-            >
+      {/* ═══ 프로젝트 관리 바 ═══ */}
+      <div className="rounded-xl border border-gray-200 bg-gray-50 overflow-hidden">
+        {/* 헤더 행 */}
+        <div className="flex items-center justify-between px-4 py-2 border-b border-gray-200 bg-white">
+          <span className="text-xs font-bold text-gray-600">📁 프로젝트</span>
+          <div className="flex items-center gap-2">
+            {/* 저장 토스트 */}
+            {saveToast && (
+              <span className="text-[10px] font-semibold text-green-600 bg-green-50 px-2 py-0.5 rounded-full border border-green-200 animate-pulse">
+                {saveToast}
+              </span>
+            )}
+            {/* 현재 세션 저장 버튼 */}
+            {currentSessionId && (
               <button
-                onClick={() => handleLoadSession(s.id)}
-                disabled={sessionLoading || s.id === currentSessionId}
-                className="hover:underline disabled:opacity-50"
+                onClick={handleSaveSession}
+                className="flex items-center gap-1 px-3 py-1 rounded-lg text-[11px] font-bold border transition"
+                style={{ borderColor: "#2563EB", color: "#2563EB", backgroundColor: "#EFF6FF" }}
+                title="현재 작업 상태를 저장합니다"
               >
-                {s.name}
-                {s.id === currentSessionId && " ●"}
+                💾 저장
               </button>
-              {s.id !== currentSessionId && (
-                <button
-                  onClick={() => handleDeleteSession(s.id)}
-                  className="ml-1 text-gray-400 hover:text-red-500 leading-none"
-                  title="삭제"
-                >
-                  ×
-                </button>
-              )}
-            </div>
-          ))}
+            )}
+            {/* 새 프로젝트 버튼 */}
+            <button
+              onClick={handleNewProject}
+              className="flex items-center gap-1 px-3 py-1 rounded-lg text-[11px] font-bold border-2 transition"
+              style={{ borderColor: PWC.primary, color: PWC.primary, backgroundColor: PWC.bg }}
+              title="현재 작업은 세션에 보관됩니다. 새 프로젝트를 시작합니다."
+            >
+              + 새 프로젝트
+            </button>
+          </div>
         </div>
-        {sessionLoading && <span className="text-xs text-gray-400 animate-pulse">불러오는 중…</span>}
-        {/* 새 프로젝트 버튼 */}
-        <button
-          onClick={handleNewProject}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border-2 transition whitespace-nowrap"
-          style={{ borderColor: PWC.primary, color: PWC.primary, backgroundColor: PWC.bg }}
-          title="현재 작업은 세션에 저장됩니다. 새 프로젝트를 시작합니다."
-        >
-          + 새 프로젝트
-        </button>
+
+        {/* 세션 목록 */}
+        <div className="flex items-center gap-2 px-4 py-2.5 flex-wrap">
+          {sessions.length === 0 && (
+            <span className="text-[11px] text-gray-400">저장된 프로젝트가 없습니다. 엑셀/JSON을 업로드하면 자동 생성됩니다.</span>
+          )}
+          {sessions.map((s) => {
+            const isCurrent = s.id === currentSessionId;
+            const isEditing = editingSessionId === s.id;
+            return (
+              <div
+                key={s.id}
+                className="flex items-center gap-1 rounded-lg border text-xs px-2 py-1 group"
+                style={{
+                  background: isCurrent ? PWC.bg : "#fff",
+                  borderColor: isCurrent ? PWC.primary : "#d1d5db",
+                }}
+              >
+                {isEditing ? (
+                  /* 이름 편집 모드 */
+                  <input
+                    autoFocus
+                    value={editingSessionName}
+                    onChange={(e) => setEditingSessionName(e.target.value)}
+                    onBlur={() => handleConfirmRename(s.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleConfirmRename(s.id);
+                      if (e.key === "Escape") setEditingSessionId(null);
+                    }}
+                    className="w-28 border-b border-blue-400 bg-transparent text-xs outline-none text-gray-800 font-semibold"
+                  />
+                ) : (
+                  /* 일반 표시 모드 */
+                  <button
+                    onClick={() => isCurrent ? handleStartRename(s) : handleLoadSession(s.id)}
+                    disabled={sessionLoading}
+                    className="max-w-[140px] truncate text-left"
+                    style={{ color: isCurrent ? PWC.primary : "#374151", fontWeight: isCurrent ? 700 : 400 }}
+                    title={isCurrent ? "클릭하여 이름 편집" : s.name}
+                  >
+                    {isCurrent ? "✏️ " : ""}{s.name || s.id}
+                  </button>
+                )}
+                {/* 삭제 버튼 (현재 세션 제외) */}
+                {!isCurrent && (
+                  <button
+                    onClick={() => handleDeleteSession(s.id)}
+                    className="ml-0.5 text-gray-300 hover:text-red-400 opacity-0 group-hover:opacity-100 transition leading-none"
+                    title="삭제"
+                  >×</button>
+                )}
+              </div>
+            );
+          })}
+          {sessionLoading && <span className="text-[11px] text-gray-400 animate-pulse ml-2">불러오는 중…</span>}
+        </div>
       </div>
 
       {/* 스텝 인디케이터 */}

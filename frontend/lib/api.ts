@@ -1151,6 +1151,17 @@ export async function deleteWorkflowSession(sessionId: string): Promise<{ ok: bo
   return apiFetch(`/workflow/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
 }
 
+export async function renameWorkflowSession(sessionId: string, name: string): Promise<{ ok: boolean; session_id: string; name: string }> {
+  return apiFetch(`/workflow/sessions/${encodeURIComponent(sessionId)}/rename`, {
+    method: "PATCH",
+    body: JSON.stringify({ name }),
+  });
+}
+
+export async function saveCurrentSession(): Promise<{ ok: boolean; session_id: string; name: string; saved_at: string }> {
+  return apiFetch("/workflow/sessions/current/save", { method: "POST", body: "{}" });
+}
+
 export interface SessionFileInfo {
   filename: string;
   size_kb: number;
