@@ -31,6 +31,8 @@ import {
   getSessionsOverview,
   getWorkflowUserId,
   setWorkflowUserId,
+  getWorkflowTeamId,
+  setWorkflowTeamId,
   type WorkflowSummary,
   type WorkflowExcelTask,
   type WorkflowExcelUploadResult,
@@ -131,10 +133,12 @@ export default function WorkflowPage() {
   const [showFilePicker, setShowFilePicker] = useState(false);
   const [filePickerLoading, setFilePickerLoading] = useState(false);
 
-  // 사용자 ID
+  // 사용자 ID / 팀
   const [userId, setUserId] = useState<string>("");
+  const [teamId, setTeamId] = useState<string>("");
   const [showUserModal, setShowUserModal] = useState(false);
   const [userInput, setUserInput] = useState("");
+  const [editingTeam, setEditingTeam] = useState("");
 
   // PM 대시보드
   const [showPMDashboard, setShowPMDashboard] = useState(false);
@@ -152,11 +156,13 @@ export default function WorkflowPage() {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatMessages]);
 
-  // 사용자 ID 초기화 — localStorage에서 읽거나 모달 표시
+  // 사용자 ID / 팀 초기화 — localStorage에서 읽거나 모달 표시
   useEffect(() => {
-    const saved = getWorkflowUserId();
-    if (saved) {
-      setUserId(saved);
+    const savedUser = getWorkflowUserId();
+    const savedTeam = getWorkflowTeamId();
+    if (savedUser && savedTeam) {
+      setUserId(savedUser);
+      setTeamId(savedTeam);
     } else {
       setShowUserModal(true);
     }
@@ -176,15 +182,19 @@ export default function WorkflowPage() {
     }
   }, []);
 
-  // 사용자 이름 저장
+  // 사용자 이름 / 팀 코드 저장
   const handleSaveUserId = useCallback(() => {
     const name = userInput.trim();
-    if (!name) return;
+    const team = editingTeam.trim();
+    if (!name || !team) return;
     setWorkflowUserId(name);
+    setWorkflowTeamId(team);
     setUserId(name);
+    setTeamId(team);
     setShowUserModal(false);
     setUserInput("");
-  }, [userInput]);
+    setEditingTeam("");
+  }, [userInput, editingTeam]);
 
   // 페이지 전체 Ctrl+V 이미지 감지 (textarea 포커스 없이도 동작)
   useEffect(() => {
@@ -722,13 +732,13 @@ export default function WorkflowPage() {
         </div>
         {/* 우상단 사용자 표시 */}
         <button
-          onClick={() => { setUserInput(userId); setShowUserModal(true); }}
+          onClick={() => { setUserInput(userId); setEditingTeam(teamId); setShowUserModal(true); }}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition hover:bg-gray-100"
           style={{ borderColor: "#d1d5db", color: "#374151" }}
-          title="클릭하여 이름 변경"
+          title="클릭하여 팀/이름 변경"
         >
           <span>👤</span>
-          <span>{userId || "이름 없음"}</span>
+          <span>{teamId && userId ? `${teamId} / ${userId}` : (userId || "설정 필요")}</span>
         </button>
       </div>
 
@@ -2361,23 +2371,31 @@ export default function WorkflowPage() {
         </div>
       )}
 
-      {/* ═══ 사용자 이름 입력 모달 ═══ */}
+      {/* ═══ 팀 코드 + 이름 입력 모달 ═══ */}
       {showUserModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="bg-white rounded-2xl shadow-xl p-8 w-80 space-y-5">
-            <h2 className="text-lg font-bold text-gray-800">이름을 입력해주세요</h2>
-            <p className="text-sm text-gray-500">프로젝트 관리에서 내 작업을 구분하는 데 사용됩니다.</p>
+            <h2 className="text-lg font-bold text-gray-800">팀 코드 · 이름 입력</h2>
+            <p className="text-sm text-gray-500">팀 코드를 모르면 접근할 수 없습니다. 팀 내 데이터만 공유됩니다.</p>
             <input
               autoFocus
+              type="text"
+              value={editingTeam}
+              onChange={(e) => setEditingTeam(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") handleSaveUserId(); }}
+              placeholder="팀 코드 입력 (예: 두산2026)"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-400"
+            />
+            <input
               type="text"
               value={userInput}
               onChange={(e) => setUserInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") handleSaveUserId(); }}
-              placeholder="예: 홍길동"
+              placeholder="이름 입력 (예: 홍길동)"
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-400"
             />
             <div className="flex gap-2 justify-end">
-              {userId && (
+              {userId && teamId && (
                 <button
                   onClick={() => setShowUserModal(false)}
                   className="px-4 py-2 text-sm text-gray-500 hover:text-gray-700"
@@ -2387,7 +2405,7 @@ export default function WorkflowPage() {
               )}
               <button
                 onClick={handleSaveUserId}
-                disabled={!userInput.trim()}
+                disabled={!userInput.trim() || !editingTeam.trim()}
                 className="px-4 py-2 rounded-lg text-sm font-bold text-white disabled:opacity-40"
                 style={{ backgroundColor: "#A62121" }}
               >

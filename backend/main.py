@@ -137,7 +137,7 @@ app.add_middleware(
     allow_origins=_all_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "X-Session-Token", "X-User-Id"],
+    allow_headers=["Content-Type", "Authorization", "X-Session-Token", "X-User-Id", "X-Team-Id"],
 )
 
 # 500 에러에도 CORS 헤더 보장
@@ -996,6 +996,13 @@ _current_session_id: str = ""   # 현재 활성 세션 ID (JSON 파일명 기반
 _sessions_manifest: dict = {}   # {session_id: {name, created_at, updated_at, excel_file, json_file, ppt_file}}
 
 
+def _get_team_id(request: Request) -> str:
+    return (request.headers.get("X-Team-Id") or "").strip() or "default"
+
+def _get_user_id(request: Request) -> str:
+    return (request.headers.get("X-User-Id") or "").strip() or "unknown"
+
+
 def _get_session_dir(sid: str) -> Path:
     """세션 디렉토리 경로 반환 (없으면 생성)."""
     import re
@@ -1302,13 +1309,15 @@ async def upload_workflow(request: Request, file: UploadFile = File(...)):
     # manifest 등록/갱신
     _load_sessions_manifest()
     now = _now_kst()
-    user_id = request.headers.get("X-User-Id", "unknown") or "unknown"
+    user_id = _get_user_id(request)
+    team_id = _get_team_id(request)
     if sid not in _sessions_manifest:
-        _sessions_manifest[sid] = {"id": sid, "name": sid, "created_at": now, "user_id": user_id}
+        _sessions_manifest[sid] = {"id": sid, "name": sid, "created_at": now, "user_id": user_id, "team_id": team_id}
     _sessions_manifest[sid].update({
         "updated_at": now,
         "json_file": "workflow.json",
-        "user_id": _sessions_manifest[sid].get("user_id", user_id),
+        "user_id": user_id,
+        "team_id": _sessions_manifest[sid].get("team_id", team_id),
     })
     _sessions_manifest["_current"] = sid
     _save_sessions_manifest()
@@ -1504,13 +1513,15 @@ async def upload_ppt_workflow(request: Request, file: UploadFile = File(...)):
 
     # manifest 갱신
     now = _now_kst()
-    user_id = request.headers.get("X-User-Id", "unknown") or "unknown"
+    user_id = _get_user_id(request)
+    team_id = _get_team_id(request)
     if sid not in _sessions_manifest:
-        _sessions_manifest[sid] = {"id": sid, "name": sid, "created_at": now, "user_id": user_id}
+        _sessions_manifest[sid] = {"id": sid, "name": sid, "created_at": now, "user_id": user_id, "team_id": team_id}
     _sessions_manifest[sid].update({
         "updated_at": now,
         "ppt_file": safe_ppt_name,
-        "user_id": _sessions_manifest[sid].get("user_id", user_id),
+        "user_id": user_id,
+        "team_id": _sessions_manifest[sid].get("team_id", team_id),
     })
     _save_sessions_manifest()
 
@@ -1658,13 +1669,15 @@ async def upload_workflow_excel(request: Request, file: UploadFile = File(...)):
 
     # manifest 갱신
     now = _now_kst()
-    user_id = request.headers.get("X-User-Id", "unknown") or "unknown"
+    user_id = _get_user_id(request)
+    team_id = _get_team_id(request)
     if sid not in _sessions_manifest:
-        _sessions_manifest[sid] = {"id": sid, "name": sid, "created_at": now, "user_id": user_id}
+        _sessions_manifest[sid] = {"id": sid, "name": sid, "created_at": now, "user_id": user_id, "team_id": team_id}
     _sessions_manifest[sid].update({
         "updated_at": now,
         "excel_file": safe_wf_excel_name,
-        "user_id": _sessions_manifest[sid].get("user_id", user_id),
+        "user_id": user_id,
+        "team_id": _sessions_manifest[sid].get("team_id", team_id),
     })
     _sessions_manifest["_current"] = sid
     _save_sessions_manifest()
@@ -5332,12 +5345,14 @@ async def export_project_ppt():
 # ─────────────────────────────────────────────────────────────────────────────
 
 @app.get("/api/workflow/sessions/overview", tags=["Workflow"])
-async def get_workflow_sessions_overview():
+async def get_workflow_sessions_overview(request: Request):
     """전체 세션을 user_id 기준으로 그룹핑하여 PM 대시보드용으로 반환합니다."""
     _load_sessions_manifest()
+    req_team_id = _get_team_id(request)
     all_sessions = [
         v for k, v in _sessions_manifest.items()
         if k != "_current" and isinstance(v, dict)
+        and v.get("team_id", "default") == req_team_id
     ]
 
     # user_id별 그룹핑
@@ -5387,19 +5402,23 @@ async def get_workflow_sessions_overview():
 @app.get("/api/workflow/sessions", tags=["Workflow"])
 async def list_workflow_sessions(request: Request, all: bool = Query(False)):
     """저장된 Workflow 세션 목록을 반환합니다.
-    - ?all=true: 전체 세션 (PM 뷰)
+    - ?all=true: 같은 팀 내 전체 세션 (PM 뷰)
     - 기본: X-User-Id 헤더 또는 ?user= 파라미터와 일치하는 세션만 반환
+    - 타 팀 데이터는 항상 숨김
     """
     _load_sessions_manifest()
+    req_team_id = _get_team_id(request)
+    # 팀 필터 (항상 적용)
     all_sessions = [
         v for k, v in _sessions_manifest.items()
         if k != "_current" and isinstance(v, dict)
+        and v.get("team_id", "default") == req_team_id
     ]
     all_sessions.sort(key=lambda s: s.get("updated_at", s.get("created_at", "")), reverse=True)
 
     if not all:
-        user_id = request.headers.get("X-User-Id", "") or request.query_params.get("user", "")
-        if user_id:
+        user_id = _get_user_id(request) or request.query_params.get("user", "")
+        if user_id and user_id != "unknown":
             all_sessions = [s for s in all_sessions if s.get("user_id", "unknown") == user_id]
 
     return {
@@ -5537,8 +5556,12 @@ async def rename_workflow_session(session_id: str, request: Request):
     if session_id not in _sessions_manifest:
         raise HTTPException(404, f"세션 '{session_id}'을 찾을 수 없습니다.")
 
-    _sessions_manifest[session_id]["name"] = new_name
-    _sessions_manifest[session_id]["updated_at"] = _now_kst()
+    session = _sessions_manifest[session_id]
+    if session.get("team_id", "default") != _get_team_id(request):
+        raise HTTPException(403, "다른 팀의 세션에 접근할 수 없습니다.")
+
+    session["name"] = new_name
+    session["updated_at"] = _now_kst()
     _save_sessions_manifest()
     return {"ok": True, "session_id": session_id, "name": new_name}
 
@@ -5558,13 +5581,17 @@ async def save_current_session():
 
 
 @app.post("/api/workflow/sessions/{session_id}/load", tags=["Workflow"])
-async def load_workflow_session(session_id: str):
+async def load_workflow_session(session_id: str, request: Request):
     """다른 세션을 로드합니다 (파일 + 상태 전환)."""
     import asyncio
 
     _load_sessions_manifest()
     if session_id not in _sessions_manifest:
         raise HTTPException(404, f"세션 '{session_id}'을 찾을 수 없습니다.")
+
+    session = _sessions_manifest[session_id]
+    if session.get("team_id", "default") != _get_team_id(request):
+        raise HTTPException(403, "다른 팀의 세션에 접근할 수 없습니다.")
 
     global _current_session_id, _wf_excel_tasks, _wf_chat_history
     global _wf_step1_cache, _wf_step2_cache, _wf_benchmark_table, _wf_gap_analysis, _wf_user_resources
@@ -5608,13 +5635,17 @@ async def load_workflow_session(session_id: str):
 
 
 @app.delete("/api/workflow/sessions/{session_id}", tags=["Workflow"])
-async def delete_workflow_session(session_id: str):
+async def delete_workflow_session(session_id: str, request: Request):
     """세션과 연관 파일을 삭제합니다."""
     import shutil
 
     _load_sessions_manifest()
     if session_id not in _sessions_manifest:
         raise HTTPException(404, f"세션 '{session_id}'을 찾을 수 없습니다.")
+
+    session = _sessions_manifest[session_id]
+    if session.get("team_id", "default") != _get_team_id(request):
+        raise HTTPException(403, "다른 팀의 세션에 접근할 수 없습니다.")
 
     # 디렉토리 삭제
     try:
