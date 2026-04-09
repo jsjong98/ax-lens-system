@@ -465,7 +465,7 @@ export default function AdminPage() {
               <button onClick={loadFiles} className="text-xs text-gray-400 hover:text-red-500 px-3 py-1.5 border border-gray-200 rounded-lg">새로고침</button>
               <button
                 onClick={async () => {
-                  if (!confirm("Workflow 파일 전체(Excel·JSON·PPT·세션·설계 결과)를 삭제하고 초기화할까요?\n이 작업은 되돌릴 수 없습니다.")) return;
+                  if (!confirm("전체 초기화: Task Excel + Workflow 파일(세션·JSON·PPT·설계 결과)을 모두 삭제합니다.\n이 작업은 되돌릴 수 없습니다.")) return;
                   try {
                     const res = await resetAllWorkflow();
                     alert(`초기화 완료: ${res.deleted.length}개 삭제${res.errors.length ? `\n오류: ${res.errors.join(", ")}` : ""}`);
@@ -476,7 +476,7 @@ export default function AdminPage() {
                 }}
                 className="text-xs text-red-500 hover:text-red-700 px-3 py-1.5 border border-red-200 rounded-lg font-medium"
               >
-                Workflow 전체 초기화
+                전체 초기화
               </button>
             </div>
           </div>

@@ -5087,7 +5087,7 @@ async def admin_delete_workflow_file(filename: str, request: Request):
 
 @app.delete("/api/admin/workflow-reset", tags=["Admin"])
 async def admin_reset_all_workflow(request: Request):
-    """Admin: Workflow 전체 초기화 — 모든 세션·파일·메모리 상태 삭제."""
+    """Admin: 전체 초기화 — Workflow 세션·파일 + Task 분류 엑셀 + 메모리 상태 삭제."""
     import shutil
     _require_admin(request)
 
@@ -5112,11 +5112,22 @@ async def admin_reset_all_workflow(request: Request):
             except Exception as e:
                 errors.append(f"{f.name}: {e}")
 
-    # 3) 메모리 상태 초기화
+    # 3) Task 분류용 엑셀 파일 삭제 (_UPLOAD_DIR)
+    if _UPLOAD_DIR.exists():
+        for f in _UPLOAD_DIR.iterdir():
+            if f.is_file():
+                try:
+                    f.unlink()
+                    deleted.append(f"uploads/{f.name}")
+                except Exception as e:
+                    errors.append(f"uploads/{f.name}: {e}")
+
+    # 4) 메모리 상태 전체 초기화
     global _workflow_cache, _wf_excel_tasks, _wf_excel_path
     global _wf_classification, _wf_chat_history
     global _wf_step1_cache, _wf_step2_cache, _wf_benchmark_table, _wf_gap_analysis
     global _current_session_id, _sessions_manifest
+    global _tasks_cache, _current_excel_path
     _workflow_cache = {}
     _wf_excel_tasks = []
     _wf_excel_path = ""
@@ -5128,6 +5139,8 @@ async def admin_reset_all_workflow(request: Request):
     _wf_gap_analysis = {}
     _current_session_id = ""
     _sessions_manifest = {}
+    _tasks_cache = []
+    _current_excel_path = None
 
     return {"ok": True, "deleted": deleted, "errors": errors}
 
