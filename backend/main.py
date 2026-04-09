@@ -2111,12 +2111,13 @@ def _build_task_and_pain_summary(sheet_id: str = "") -> tuple[str, str, str]:
 def _step1_system_prompt(process_name: str, task_summary: str, pain_summary: str,
                          benchmark_text: str = "") -> str:
     return f"""당신은 AI 기반 업무 혁신 설계 전문가입니다.
-벤치마킹 선도사례를 바탕으로, 기존 As-Is 프로세스를 재구조화하고 각 Task에 AI 적용 기본 설계를 수행합니다.
+벤치마킹 선도사례와 Gap 분석 결과를 동시에 활용하여, 기존 As-Is 프로세스를 재구조화하고 각 Task에 AI 적용 기본 설계를 수행합니다.
 
 ## ⚠️ 핵심 원칙
 - 아래 L5 Task 목록({process_name})이 설계의 기준입니다. 기존 Task는 최대한 유지하되, 필요 시 통합·세분화·추가·삭제를 제안할 수 있습니다.
 - `task_id`는 반드시 아래 Task 목록의 실제 ID를 사용하세요. 신규 추가 Task는 "NEW_xxx" 형식으로 표기하세요.
 - 에이전트 아키텍처(오케스트레이터/Junior AI 등)를 설계하는 것이 아닙니다. **프로세스 계층(L3→L4→L5)을 재설계하고, 각 L5 Task에 AI 적용 방안을 기술하는 것**이 목표입니다.
+- **Gap 분석 결과를 최우선으로 반영**: A.신규(도입), B.전환(AI 전환), C.폐기/통합(삭제/흡수) 방향을 설계에 직접 반영하세요.
 
 ## 프로세스: {process_name}
 
@@ -2884,27 +2885,28 @@ gap_items 전체를 종합하여 세 차원의 Gap을 각각 요약합니다.
 @app.post("/api/workflow/generate-step1", tags=["Workflow"])
 async def generate_workflow_step1(request: Request):
     """
-    Step 1-B: 벤치마킹 결과표 기반 Workflow 기본 설계 (Top-Down, Lv.2~5).
-    반드시 벤치마킹 수행(start_workflow_benchmark) 후에 호출해야 합니다.
+    Step 1-B: 벤치마킹 + Gap 분석 결과 기반 Workflow 기본 설계 (Top-Down, Lv.2~5).
+    수행 순서: 벤치마킹 → Gap 분석 → 기본 설계 (Gap 분석이 선행되어야 함)
     """
     if not _wf_excel_tasks:
         raise HTTPException(400, "엑셀을 먼저 업로드하세요.")
 
-    # 어느 시트라도 벤치마킹 결과가 있어야 기본 설계 가능
     all_bm_rows = [r for rows in _wf_benchmark_table.values() for r in rows]
     if not all_bm_rows:
-        raise HTTPException(400, "벤치마킹을 먼저 수행해주세요. 벤치마킹 결과표가 있어야 기본 설계를 생성할 수 있습니다.")
+        raise HTTPException(400, "벤치마킹을 먼저 수행해주세요.")
+    if not _wf_gap_analysis:
+        raise HTTPException(400, "Gap 분석을 먼저 수행해주세요. 벤치마킹 → Gap 분석 → 기본 설계 순서로 진행해야 합니다.")
 
     body = await request.json()
     user_prompt = body.get("prompt", "")
     process_name_override = body.get("process_name", "")
 
-    # 기본 설계는 JSON/PPT 전체(L3 단위) 기준 — sheet_id 무관하게 모든 시트 합산
+    # 기본 설계는 JSON/PPT 전체(L3 단위) 기준
     process_name, task_summary, pain_summary = _build_task_and_pain_summary("")
     if process_name_override:
         process_name = process_name_override
 
-    # 전체 시트 벤치마킹 결과 합산 — L3 단위 설계에 사용
+    # 전체 시트 벤치마킹 결과 합산
     benchmark_text = f"## 벤치마킹 결과 (전체 {len(_wf_benchmark_table)}개 시트, 총 {len(all_bm_rows)}건)\n"
     for sheet_key, rows in _wf_benchmark_table.items():
         if rows:
@@ -2915,10 +2917,31 @@ async def generate_workflow_step1(request: Request):
                     f"{bm.get('use_case', '')} → {bm.get('outcome', '')}\n"
                 )
 
-    # As-Is + 엑셀 매핑 컨텍스트 — 모든 시트 합산 (sheet_id="" → 전체)
+    # Gap 분석 결과 — 기본 설계의 핵심 인풋
+    gap_text = ""
+    if _wf_gap_analysis:
+        gap_items = _wf_gap_analysis.get("gap_items", [])
+        gap_wrap = _wf_gap_analysis.get("gap_wrap_up", {}) or {}
+        gap_text = f"\n## Gap 분석 결과 (벤치마킹 vs As-Is)\n"
+        gap_text += f"### 경영진 요약\n{_wf_gap_analysis.get('executive_summary', '')}\n\n"
+        if gap_wrap.get("process_gap"):
+            gap_text += f"### 프로세스 Gap\n{gap_wrap['process_gap']}\n\n"
+        if gap_wrap.get("infra_gap"):
+            gap_text += f"### 인프라 Gap\n{gap_wrap['infra_gap']}\n\n"
+        if gap_wrap.get("data_gap"):
+            gap_text += f"### 데이터 Gap\n{gap_wrap['data_gap']}\n\n"
+        gap_text += f"### L4 단위 Gap 항목 ({len(gap_items)}건)\n"
+        for g in gap_items[:10]:
+            gap_text += (
+                f"- [{g.get('gap_type', '')}] **{g.get('l4_activity', '')}**: "
+                f"{g.get('gap_description', '')} → {g.get('action_plan', '')}\n"
+            )
+
+    # As-Is + 엑셀 매핑 컨텍스트
     asis_context = _build_mapped_asis_context("")
 
-    system = _step1_system_prompt(process_name, task_summary, pain_summary, benchmark_text + "\n\n" + asis_context)
+    system = _step1_system_prompt(process_name, task_summary, pain_summary,
+                                  benchmark_text + gap_text + "\n\n" + asis_context)
 
     global _wf_chat_history
     actual_prompt = user_prompt or "선도사례를 분석하여 To-Be Workflow 기본 설계를 수행해주세요."

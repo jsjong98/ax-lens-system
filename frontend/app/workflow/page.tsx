@@ -1072,8 +1072,18 @@ export default function WorkflowPage() {
                 <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0" style={{ backgroundColor: PWC.primary }}>1</div>
                 <div>
                   <div className="font-bold text-gray-800">선도사례 벤치마킹 기반 Workflow 기본 설계</div>
-                  <div className="text-xs text-gray-500 mt-0.5">
-                    ① 벤치마킹으로 사례를 수집하고 &nbsp;② 채팅으로 내용을 검토한 뒤 &nbsp;③ 충분하면 기본 설계 생성
+                  <div className="text-xs text-gray-500 mt-0.5 flex items-center gap-1.5">
+                    <span className={`flex items-center gap-1 ${totalBenchmarkCount > 0 ? "text-green-600 font-semibold" : ""}`}>
+                      {totalBenchmarkCount > 0 ? "✓" : "①"} 벤치마킹
+                    </span>
+                    <span className="text-gray-300">→</span>
+                    <span className={`flex items-center gap-1 ${gapAnalysis ? "text-green-600 font-semibold" : totalBenchmarkCount > 0 ? "text-purple-600 font-semibold" : ""}`}>
+                      {gapAnalysis ? "✓" : "②"} Gap 분석
+                    </span>
+                    <span className="text-gray-300">→</span>
+                    <span className={`flex items-center gap-1 ${step1Result ? "text-green-600 font-semibold" : gapAnalysis ? "text-red-600 font-semibold" : ""}`}>
+                      {step1Result ? "✓" : "③"} 기본 설계 생성
+                    </span>
                   </div>
                 </div>
               </div>
@@ -1123,13 +1133,14 @@ export default function WorkflowPage() {
                     "\uD83D\uDD0D 벤치마킹 수행"
                   )}
                 </button>
-                {/* 기본 설계 생성 버튼 — 벤치마킹 있으면 Top-down, 없으면 Step 2로 이동 */}
+                {/* 기본 설계 생성 버튼 — 벤치마킹+Gap분석 완료 시 활성화, 없으면 Step 2로 이동 */}
                 {totalBenchmarkCount > 0 ? (
                   <button
                     onClick={() => handleGenerateStep1()}
-                    disabled={loading || bmLoading}
+                    disabled={loading || bmLoading || !gapAnalysis}
+                    title={!gapAnalysis ? "Gap 분석을 먼저 수행해주세요" : ""}
                     className="px-4 py-2 rounded-lg text-sm font-bold text-white transition disabled:opacity-50 whitespace-nowrap"
-                    style={{ backgroundColor: step1Result ? "#15803D" : PWC.primary }}
+                    style={{ backgroundColor: step1Result ? "#15803D" : gapAnalysis ? PWC.primary : "#9CA3AF" }}
                   >
                     {loading ? (
                       <span className="flex items-center gap-2">
@@ -1137,9 +1148,11 @@ export default function WorkflowPage() {
                         설계 중...
                       </span>
                     ) : step1Result ? (
-                      "\u21BA 기본 설계 재생성"
+                      "↺ 기본 설계 재생성"
+                    ) : !gapAnalysis ? (
+                      "✏️ 기본 설계 생성 (Gap 분석 필요)"
                     ) : (
-                      "\u270F\uFE0F 기본 설계 생성"
+                      "✏️ 기본 설계 생성"
                     )}
                   </button>
                 ) : (
