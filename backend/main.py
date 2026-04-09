@@ -2745,7 +2745,7 @@ async def benchmark_workflow_step1(request: Request):
     # 동일 query끼리 묶어서 URL 목록을 함께 표시 → LLM이 URL 출처를 명확히 파악
     from collections import defaultdict as _defaultdict
     query_groups: dict = _defaultdict(lambda: {"content": "", "urls": []})
-    for r in raw_results[:20]:
+    for r in raw_results[:200]:
         q = r.get("query", r.get("title", ""))
         if r.get("content") and not query_groups[q]["content"]:
             query_groups[q]["content"] = r.get("content", "")
