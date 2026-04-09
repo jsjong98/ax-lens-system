@@ -137,7 +137,7 @@ app.add_middleware(
     allow_origins=_all_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "X-Session-Token"],
+    allow_headers=["Content-Type", "Authorization", "X-Session-Token", "X-User-Id"],
 )
 
 # 500 에러에도 CORS 헤더 보장
@@ -1267,7 +1267,7 @@ _workflow_cache: dict = {}   # 최근 업로드된 워크플로우 저장
 
 
 @app.post("/api/workflow/upload", tags=["Workflow"])
-async def upload_workflow(file: UploadFile = File(...)):
+async def upload_workflow(request: Request, file: UploadFile = File(...)):
     """hr-workflow-ai에서 내보낸 JSON 파일을 업로드하여 파싱합니다."""
     from workflow_parser import parse_workflow_json, get_workflow_summary
 
@@ -1302,11 +1302,13 @@ async def upload_workflow(file: UploadFile = File(...)):
     # manifest 등록/갱신
     _load_sessions_manifest()
     now = _now_kst()
+    user_id = request.headers.get("X-User-Id", "unknown") or "unknown"
     if sid not in _sessions_manifest:
-        _sessions_manifest[sid] = {"id": sid, "name": sid, "created_at": now}
+        _sessions_manifest[sid] = {"id": sid, "name": sid, "created_at": now, "user_id": user_id}
     _sessions_manifest[sid].update({
         "updated_at": now,
         "json_file": "workflow.json",
+        "user_id": _sessions_manifest[sid].get("user_id", user_id),
     })
     _sessions_manifest["_current"] = sid
     _save_sessions_manifest()
@@ -1485,7 +1487,7 @@ async def get_execution_order(sheet_id: str):
 # ─────────────────────────────────────────────────────────────────────────────
 
 @app.post("/api/workflow/upload-ppt", tags=["Workflow"])
-async def upload_ppt_workflow(file: UploadFile = File(...)):
+async def upload_ppt_workflow(request: Request, file: UploadFile = File(...)):
     """PPT 파일을 업로드하여 슬라이드별 노드를 추출하고 태스크와 매칭합니다."""
     from ppt_parser import parse_ppt, match_nodes_to_tasks, ppt_slide_to_react_flow, ppt_to_parsed_workflow
 
@@ -1502,9 +1504,14 @@ async def upload_ppt_workflow(file: UploadFile = File(...)):
 
     # manifest 갱신
     now = _now_kst()
+    user_id = request.headers.get("X-User-Id", "unknown") or "unknown"
     if sid not in _sessions_manifest:
-        _sessions_manifest[sid] = {"id": sid, "name": sid, "created_at": now}
-    _sessions_manifest[sid].update({"updated_at": now, "ppt_file": safe_ppt_name})
+        _sessions_manifest[sid] = {"id": sid, "name": sid, "created_at": now, "user_id": user_id}
+    _sessions_manifest[sid].update({
+        "updated_at": now,
+        "ppt_file": safe_ppt_name,
+        "user_id": _sessions_manifest[sid].get("user_id", user_id),
+    })
     _save_sessions_manifest()
 
     try:
@@ -1611,7 +1618,7 @@ def _save_manual_matches():
 
 
 @app.post("/api/workflow/upload-excel", tags=["Workflow"])
-async def upload_workflow_excel(file: UploadFile = File(...)):
+async def upload_workflow_excel(request: Request, file: UploadFile = File(...)):
     """
     분류 결과가 포함된 엑셀 업로드.
     As-Is 프로세스 + 분류 결과를 읽어 Workflow 설계에 활용합니다.
@@ -1651,9 +1658,14 @@ async def upload_workflow_excel(file: UploadFile = File(...)):
 
     # manifest 갱신
     now = _now_kst()
+    user_id = request.headers.get("X-User-Id", "unknown") or "unknown"
     if sid not in _sessions_manifest:
-        _sessions_manifest[sid] = {"id": sid, "name": sid, "created_at": now}
-    _sessions_manifest[sid].update({"updated_at": now, "excel_file": safe_wf_excel_name})
+        _sessions_manifest[sid] = {"id": sid, "name": sid, "created_at": now, "user_id": user_id}
+    _sessions_manifest[sid].update({
+        "updated_at": now,
+        "excel_file": safe_wf_excel_name,
+        "user_id": _sessions_manifest[sid].get("user_id", user_id),
+    })
     _sessions_manifest["_current"] = sid
     _save_sessions_manifest()
     _wf_classification = {}
@@ -5319,19 +5331,81 @@ async def export_project_ppt():
 # Workflow 세션 관리 API
 # ─────────────────────────────────────────────────────────────────────────────
 
-@app.get("/api/workflow/sessions", tags=["Workflow"])
-async def list_workflow_sessions():
-    """저장된 Workflow 세션 목록을 반환합니다."""
+@app.get("/api/workflow/sessions/overview", tags=["Workflow"])
+async def get_workflow_sessions_overview():
+    """전체 세션을 user_id 기준으로 그룹핑하여 PM 대시보드용으로 반환합니다."""
     _load_sessions_manifest()
-    sessions = [
+    all_sessions = [
         v for k, v in _sessions_manifest.items()
         if k != "_current" and isinstance(v, dict)
     ]
-    sessions.sort(key=lambda s: s.get("updated_at", s.get("created_at", "")), reverse=True)
+
+    # user_id별 그룹핑
+    user_map: dict[str, list] = {}
+    for sess in all_sessions:
+        uid = sess.get("user_id", "unknown") or "unknown"
+        if uid not in user_map:
+            user_map[uid] = []
+
+        # session_data.json에서 진행 상태 읽기
+        import re as _re
+        safe_sid = _re.sub(r'[^\w가-힣\-]', '_', sess["id"])[:80] or "default"
+        sess_data_path = _SESSIONS_DIR / safe_sid / "session_data.json"
+        has_step1 = False
+        has_step2 = False
+        has_benchmark = False
+        has_gap = False
+        try:
+            if sess_data_path.exists():
+                sd = json.loads(sess_data_path.read_text(encoding="utf-8"))
+                has_step1 = bool(sd.get("step1"))
+                has_step2 = bool(sd.get("step2"))
+                has_benchmark = bool(sd.get("benchmark_table"))
+                has_gap = bool(sd.get("gap_analysis"))
+        except Exception:
+            pass
+
+        user_map[uid].append({
+            "id": sess["id"],
+            "name": sess.get("name", sess["id"]),
+            "created_at": sess.get("created_at", ""),
+            "updated_at": sess.get("updated_at"),
+            "has_step1": has_step1,
+            "has_step2": has_step2,
+            "has_benchmark": has_benchmark,
+            "has_gap": has_gap,
+        })
+
+    users = [
+        {"user_id": uid, "sessions": sorted(sess_list, key=lambda s: s.get("updated_at") or s.get("created_at") or "", reverse=True)}
+        for uid, sess_list in user_map.items()
+    ]
+    users.sort(key=lambda u: u["user_id"])
+    return {"ok": True, "users": users}
+
+
+@app.get("/api/workflow/sessions", tags=["Workflow"])
+async def list_workflow_sessions(request: Request, all: bool = Query(False)):
+    """저장된 Workflow 세션 목록을 반환합니다.
+    - ?all=true: 전체 세션 (PM 뷰)
+    - 기본: X-User-Id 헤더 또는 ?user= 파라미터와 일치하는 세션만 반환
+    """
+    _load_sessions_manifest()
+    all_sessions = [
+        v for k, v in _sessions_manifest.items()
+        if k != "_current" and isinstance(v, dict)
+    ]
+    all_sessions.sort(key=lambda s: s.get("updated_at", s.get("created_at", "")), reverse=True)
+
+    if not all:
+        user_id = request.headers.get("X-User-Id", "") or request.query_params.get("user", "")
+        if user_id:
+            all_sessions = [s for s in all_sessions if s.get("user_id", "unknown") == user_id]
+
     return {
         "ok": True,
         "current": _sessions_manifest.get("_current", _current_session_id),
-        "sessions": sessions,
+        "sessions": all_sessions,
     }
 
 

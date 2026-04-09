@@ -136,11 +136,22 @@ function clearAuthToken(): void {
 
 // ── 기본 fetch 헬퍼 ──────────────────────────────────────────────────────────
 
+export function getWorkflowUserId(): string {
+  if (typeof window === "undefined") return "";
+  return localStorage.getItem("wf_user_id") || "";
+}
+
+export function setWorkflowUserId(userId: string): void {
+  if (typeof window !== "undefined") localStorage.setItem("wf_user_id", userId);
+}
+
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const token = getAuthToken();
+  const userId = getWorkflowUserId();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(userId ? { "X-User-Id": userId } : {}),
   };
   const res = await fetch(`${BACKEND_DIRECT}/api${path}`, {
     headers,
@@ -1130,8 +1141,28 @@ export interface WorkflowSessionsResult {
   sessions: WorkflowSession[];
 }
 
+export interface PMSessionSummary {
+  id: string;
+  name: string;
+  created_at: string;
+  updated_at?: string;
+  has_step1: boolean;
+  has_step2: boolean;
+  has_benchmark: boolean;
+  has_gap: boolean;
+}
+
+export interface PMUserSessions {
+  user_id: string;
+  sessions: PMSessionSummary[];
+}
+
 export async function listWorkflowSessions(): Promise<WorkflowSessionsResult> {
   return apiFetch("/workflow/sessions");
+}
+
+export async function getSessionsOverview(): Promise<{ ok: boolean; users: PMUserSessions[] }> {
+  return apiFetch("/workflow/sessions/overview");
 }
 
 export async function loadWorkflowSession(sessionId: string): Promise<{

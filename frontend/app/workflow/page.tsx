@@ -28,6 +28,9 @@ import {
   selectWorkflowFile,
   renameWorkflowSession,
   saveCurrentSession,
+  getSessionsOverview,
+  getWorkflowUserId,
+  setWorkflowUserId,
   type WorkflowSummary,
   type WorkflowExcelTask,
   type WorkflowExcelUploadResult,
@@ -38,6 +41,7 @@ import {
   type TobeFlowResult,
   type WorkflowSession,
   type SessionFileInfo,
+  type PMUserSessions,
 } from "@/lib/api";
 import { ToBeSwimlane } from "./ToBeSwimlane";
 import WorkflowEditor from "@/components/WorkflowEditor";
@@ -127,6 +131,16 @@ export default function WorkflowPage() {
   const [showFilePicker, setShowFilePicker] = useState(false);
   const [filePickerLoading, setFilePickerLoading] = useState(false);
 
+  // 사용자 ID
+  const [userId, setUserId] = useState<string>("");
+  const [showUserModal, setShowUserModal] = useState(false);
+  const [userInput, setUserInput] = useState("");
+
+  // PM 대시보드
+  const [showPMDashboard, setShowPMDashboard] = useState(false);
+  const [pmData, setPmData] = useState<PMUserSessions[]>([]);
+  const [pmLoading, setPmLoading] = useState(false);
+
   // 공통
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -137,6 +151,40 @@ export default function WorkflowPage() {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatMessages]);
+
+  // 사용자 ID 초기화 — localStorage에서 읽거나 모달 표시
+  useEffect(() => {
+    const saved = getWorkflowUserId();
+    if (saved) {
+      setUserId(saved);
+    } else {
+      setShowUserModal(true);
+    }
+  }, []);
+
+  // PM 대시보드 열기
+  const handleOpenPMDashboard = useCallback(async () => {
+    setShowPMDashboard(true);
+    setPmLoading(true);
+    try {
+      const res = await getSessionsOverview();
+      setPmData(res.users);
+    } catch (e) {
+      console.error("PM 대시보드 로드 실패", e);
+    } finally {
+      setPmLoading(false);
+    }
+  }, []);
+
+  // 사용자 이름 저장
+  const handleSaveUserId = useCallback(() => {
+    const name = userInput.trim();
+    if (!name) return;
+    setWorkflowUserId(name);
+    setUserId(name);
+    setShowUserModal(false);
+    setUserInput("");
+  }, [userInput]);
 
   // 페이지 전체 Ctrl+V 이미지 감지 (textarea 포커스 없이도 동작)
   useEffect(() => {
@@ -663,13 +711,25 @@ export default function WorkflowPage() {
   return (
     <div className="space-y-6">
       {/* ═══ 헤더 + 스텝 네비게이션 ═══ */}
-      <div>
-        <h1 className="text-2xl font-bold" style={{ color: PWC.primary }}>
-          Workflow 설계
-        </h1>
-        <p className="mt-1 text-sm text-gray-500">
-          엑셀 업로드 → As-Is 워크플로우 연결 → 벤치마킹 기본 설계 → 상세 설계
-        </p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-bold" style={{ color: PWC.primary }}>
+            Workflow 설계
+          </h1>
+          <p className="mt-1 text-sm text-gray-500">
+            엑셀 업로드 → As-Is 워크플로우 연결 → 벤치마킹 기본 설계 → 상세 설계
+          </p>
+        </div>
+        {/* 우상단 사용자 표시 */}
+        <button
+          onClick={() => { setUserInput(userId); setShowUserModal(true); }}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition hover:bg-gray-100"
+          style={{ borderColor: "#d1d5db", color: "#374151" }}
+          title="클릭하여 이름 변경"
+        >
+          <span>👤</span>
+          <span>{userId || "이름 없음"}</span>
+        </button>
       </div>
 
       {/* ═══ 프로젝트 관리 바 ═══ */}
@@ -678,6 +738,15 @@ export default function WorkflowPage() {
         <div className="flex items-center justify-between px-4 py-2 border-b border-gray-200 bg-white">
           <span className="text-xs font-bold text-gray-600">📁 프로젝트</span>
           <div className="flex items-center gap-2">
+            {/* PM 전체 보기 버튼 */}
+            <button
+              onClick={handleOpenPMDashboard}
+              className="flex items-center gap-1 px-3 py-1 rounded-lg text-[11px] font-bold border transition hover:bg-gray-100"
+              style={{ borderColor: "#6b7280", color: "#374151", backgroundColor: "#f9fafb" }}
+              title="전체 사용자 프로젝트 현황 보기"
+            >
+              👥 전체 보기
+            </button>
             {/* 저장 토스트 */}
             {saveToast && (
               <span className="text-[10px] font-semibold text-green-600 bg-green-50 px-2 py-0.5 rounded-full border border-green-200 animate-pulse">
@@ -2289,6 +2358,137 @@ export default function WorkflowPage() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ═══ 사용자 이름 입력 모달 ═══ */}
+      {showUserModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-2xl shadow-xl p-8 w-80 space-y-5">
+            <h2 className="text-lg font-bold text-gray-800">이름을 입력해주세요</h2>
+            <p className="text-sm text-gray-500">프로젝트 관리에서 내 작업을 구분하는 데 사용됩니다.</p>
+            <input
+              autoFocus
+              type="text"
+              value={userInput}
+              onChange={(e) => setUserInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") handleSaveUserId(); }}
+              placeholder="예: 홍길동"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-400"
+            />
+            <div className="flex gap-2 justify-end">
+              {userId && (
+                <button
+                  onClick={() => setShowUserModal(false)}
+                  className="px-4 py-2 text-sm text-gray-500 hover:text-gray-700"
+                >
+                  취소
+                </button>
+              )}
+              <button
+                onClick={handleSaveUserId}
+                disabled={!userInput.trim()}
+                className="px-4 py-2 rounded-lg text-sm font-bold text-white disabled:opacity-40"
+                style={{ backgroundColor: "#A62121" }}
+              >
+                저장
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ PM 대시보드 모달 ═══ */}
+      {showPMDashboard && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-2xl shadow-xl w-[780px] max-h-[80vh] flex flex-col overflow-hidden">
+            {/* 모달 헤더 */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+              <h2 className="text-base font-bold text-gray-800">👥 전체 프로젝트 현황</h2>
+              <button
+                onClick={() => setShowPMDashboard(false)}
+                className="text-gray-400 hover:text-gray-600 text-xl leading-none"
+              >
+                ×
+              </button>
+            </div>
+            {/* 모달 바디 */}
+            <div className="overflow-y-auto flex-1 px-6 py-4 space-y-6">
+              {pmLoading && (
+                <p className="text-sm text-gray-400 animate-pulse">불러오는 중…</p>
+              )}
+              {!pmLoading && pmData.length === 0 && (
+                <p className="text-sm text-gray-400">세션이 없습니다.</p>
+              )}
+              {!pmLoading && pmData.map((user) => (
+                <div key={user.user_id}>
+                  <h3 className="text-xs font-bold text-gray-500 uppercase mb-2 tracking-wide">
+                    👤 {user.user_id}
+                  </h3>
+                  <div className="rounded-xl border border-gray-200 overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-gray-50 text-xs text-gray-500 font-semibold">
+                          <th className="text-left px-4 py-2">프로젝트명</th>
+                          <th className="text-left px-4 py-2">수정일</th>
+                          <th className="text-center px-3 py-2">벤치마킹</th>
+                          <th className="text-center px-3 py-2">Gap분석</th>
+                          <th className="text-center px-3 py-2">기본설계</th>
+                          <th className="text-center px-3 py-2">상세설계</th>
+                          <th className="px-3 py-2"></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {user.sessions.map((sess) => (
+                          <tr key={sess.id} className="border-t border-gray-100 hover:bg-gray-50">
+                            <td className="px-4 py-2 font-medium text-gray-800 max-w-[180px] truncate">
+                              {sess.name || sess.id}
+                            </td>
+                            <td className="px-4 py-2 text-xs text-gray-400">
+                              {sess.updated_at
+                                ? new Date(sess.updated_at).toLocaleDateString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
+                                : "-"}
+                            </td>
+                            <td className="px-3 py-2 text-center">
+                              <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded-full ${sess.has_benchmark ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-400"}`}>
+                                {sess.has_benchmark ? "✓" : "-"}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2 text-center">
+                              <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded-full ${sess.has_gap ? "bg-orange-100 text-orange-700" : "bg-gray-100 text-gray-400"}`}>
+                                {sess.has_gap ? "✓" : "-"}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2 text-center">
+                              <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded-full ${sess.has_step1 ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-400"}`}>
+                                {sess.has_step1 ? "✓" : "-"}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2 text-center">
+                              <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded-full ${sess.has_step2 ? "bg-purple-100 text-purple-700" : "bg-gray-100 text-gray-400"}`}>
+                                {sess.has_step2 ? "✓" : "-"}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2">
+                              <button
+                                onClick={() => {
+                                  setShowPMDashboard(false);
+                                  handleLoadSession(sess.id);
+                                }}
+                                className="px-2 py-1 rounded text-[11px] font-semibold border border-gray-300 text-gray-600 hover:bg-gray-100 transition"
+                              >
+                                열기
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       )}
     </div>
