@@ -1058,6 +1058,34 @@ export async function deleteWorkflowSession(sessionId: string): Promise<{ ok: bo
   return apiFetch(`/workflow/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
 }
 
+export interface SessionFileInfo {
+  filename: string;
+  size_kb: number;
+  modified: string;
+  is_current: boolean;
+}
+
+export async function listSessionFiles(sessionId: string): Promise<{
+  ok: boolean;
+  session_id: string;
+  excels: SessionFileInfo[];
+  ppts: SessionFileInfo[];
+  has_json: boolean;
+}> {
+  return apiFetch(`/workflow/sessions/${encodeURIComponent(sessionId)}/files`);
+}
+
+export async function selectWorkflowFile(sessionId: string, filename: string): Promise<WorkflowExcelUploadResult & { ok: boolean }> {
+  return apiFetch("/workflow/select-file", {
+    method: "POST",
+    body: JSON.stringify({ session_id: sessionId, filename }),
+  });
+}
+
+export async function getUploadHistory(): Promise<{ ok: boolean; files: SessionFileInfo[] }> {
+  return apiFetch("/upload/history");
+}
+
 export async function generateWorkflowStep1(params: {
   prompt?: string;
   process_name?: string;
