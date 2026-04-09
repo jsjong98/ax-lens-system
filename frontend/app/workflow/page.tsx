@@ -226,6 +226,31 @@ export default function WorkflowPage() {
     }
   }, [loadSessions]);
 
+  // 새 프로젝트 시작 — 프론트엔드 상태 초기화 (백엔드는 새 엑셀 업로드 시 새 세션 생성)
+  const handleNewProject = useCallback(() => {
+    if (!confirm("현재 작업 내용이 세션에 저장되어 있습니다.\n새 프로젝트를 시작하면 현재 화면이 초기화됩니다.\n계속할까요?")) return;
+    setExcelResult(null);
+    setExcelTasks([]);
+    setExcelSheets([]);
+    setSummary(null);
+    setPptResult(null);
+    setStep1Result(null);
+    setStep2Result(null);
+    setBenchmarkTableBySheet({});
+    setBenchmarkSummary("");
+    setGapAnalysis(null);
+    setTobeFlow(null);
+    setTobeActiveSheet(0);
+    setChatMessages([]);
+    setChatInput("");
+    setPendingImages([]);
+    setUserResources([]);
+    setShowResources(false);
+    setSearchLog([]);
+    setError(null);
+    setCurrentStep(0);
+  }, []);
+
   // 세션 삭제
   const handleDeleteSession = useCallback(async (sessionId: string) => {
     if (!confirm(`"${sessionId}" 세션을 삭제할까요?`)) return;
@@ -610,44 +635,51 @@ export default function WorkflowPage() {
       </div>
 
       {/* ═══ 세션 바 ═══ */}
-      {sessions.length > 0 && (
-        <div className="flex items-center gap-3 p-3 rounded-xl border border-gray-200 bg-gray-50 flex-wrap">
-          <span className="text-xs font-semibold text-gray-500 shrink-0">저장된 프로세스</span>
-          <div className="flex gap-2 flex-wrap flex-1">
-            {sessions.map((s) => (
-              <div
-                key={s.id}
-                className="flex items-center gap-1 rounded-full border text-xs px-3 py-1"
-                style={{
-                  background: s.id === currentSessionId ? PWC.bg : "#fff",
-                  borderColor: s.id === currentSessionId ? PWC.primary : "#d1d5db",
-                  color: s.id === currentSessionId ? PWC.primary : "#374151",
-                  fontWeight: s.id === currentSessionId ? 700 : 400,
-                }}
+      <div className="flex items-center gap-3 p-3 rounded-xl border border-gray-200 bg-gray-50 flex-wrap">
+        <span className="text-xs font-semibold text-gray-500 shrink-0">프로젝트</span>
+        <div className="flex gap-2 flex-wrap flex-1">
+          {sessions.map((s) => (
+            <div
+              key={s.id}
+              className="flex items-center gap-1 rounded-full border text-xs px-3 py-1"
+              style={{
+                background: s.id === currentSessionId ? PWC.bg : "#fff",
+                borderColor: s.id === currentSessionId ? PWC.primary : "#d1d5db",
+                color: s.id === currentSessionId ? PWC.primary : "#374151",
+                fontWeight: s.id === currentSessionId ? 700 : 400,
+              }}
+            >
+              <button
+                onClick={() => handleLoadSession(s.id)}
+                disabled={sessionLoading || s.id === currentSessionId}
+                className="hover:underline disabled:opacity-50"
               >
+                {s.name}
+                {s.id === currentSessionId && " ●"}
+              </button>
+              {s.id !== currentSessionId && (
                 <button
-                  onClick={() => handleLoadSession(s.id)}
-                  disabled={sessionLoading || s.id === currentSessionId}
-                  className="hover:underline disabled:opacity-50"
+                  onClick={() => handleDeleteSession(s.id)}
+                  className="ml-1 text-gray-400 hover:text-red-500 leading-none"
+                  title="삭제"
                 >
-                  {s.name}
-                  {s.id === currentSessionId && " ●"}
+                  ×
                 </button>
-                {s.id !== currentSessionId && (
-                  <button
-                    onClick={() => handleDeleteSession(s.id)}
-                    className="ml-1 text-gray-400 hover:text-red-500 leading-none"
-                    title="삭제"
-                  >
-                    ×
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-          {sessionLoading && <span className="text-xs text-gray-400 animate-pulse">불러오는 중…</span>}
+              )}
+            </div>
+          ))}
         </div>
-      )}
+        {sessionLoading && <span className="text-xs text-gray-400 animate-pulse">불러오는 중…</span>}
+        {/* 새 프로젝트 버튼 */}
+        <button
+          onClick={handleNewProject}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border-2 transition whitespace-nowrap"
+          style={{ borderColor: PWC.primary, color: PWC.primary, backgroundColor: PWC.bg }}
+          title="현재 작업은 세션에 저장됩니다. 새 프로젝트를 시작합니다."
+        >
+          + 새 프로젝트
+        </button>
+      </div>
 
       {/* 스텝 인디케이터 */}
       <div className="flex items-center gap-1">
