@@ -15,6 +15,7 @@ import {
   getWorkflowStepResults,
   generateGapAnalysis,
   deleteBenchmarkRow,
+  generateTobeFlow,
   listWorkflowSessions,
   loadWorkflowSession,
   deleteWorkflowSession,
@@ -27,9 +28,11 @@ import {
   type BenchmarkTableRow,
   type SearchLogItem,
   type GapAnalysisResult,
+  type TobeFlowResult,
   type WorkflowSession,
   type SessionFileInfo,
 } from "@/lib/api";
+import { ToBeSwimlane } from "./ToBeSwimlane";
 import WorkflowEditor from "@/components/WorkflowEditor";
 import ToBeWorkflowModal from "@/components/ToBeWorkflowModal";
 import MappingCheckPanel from "@/components/MappingCheckPanel";
@@ -88,6 +91,11 @@ export default function WorkflowPage() {
   // Gap 분석
   const [gapAnalysis, setGapAnalysis] = useState<GapAnalysisResult | null>(null);
   const [gapLoading, setGapLoading] = useState(false);
+
+  // To-Be Swim Lane
+  const [tobeFlow, setTobeFlow] = useState<TobeFlowResult | null>(null);
+  const [tobeLoading, setTobeLoading] = useState(false);
+  const [tobeActiveSheet, setTobeActiveSheet] = useState<number>(0);
 
   // L3/L4 스코프 선택
   const [bmScope, setBmScope] = useState<"l3" | "l4">("l4");
@@ -399,6 +407,21 @@ export default function WorkflowPage() {
       setError((e as Error).message);
     } finally {
       setGapLoading(false);
+    }
+  }, []);
+
+  /* ── To-Be Swim Lane 생성 ───────────────────────────────── */
+  const handleGenerateTobeFlow = useCallback(async () => {
+    setTobeLoading(true);
+    setError(null);
+    try {
+      const result = await generateTobeFlow();
+      setTobeFlow(result);
+      setTobeActiveSheet(0);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setTobeLoading(false);
     }
   }, []);
 
@@ -1705,6 +1728,75 @@ export default function WorkflowPage() {
                         </div>
                       );
                     })}
+                  </div>
+                )}
+              </div>
+
+              {/* ── To-Be Workflow Swim Lane ── */}
+              <div className="border-t border-gray-200 pt-5 mt-2">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <span className="text-sm font-bold text-gray-800">To-Be Workflow 다이어그램</span>
+                    <span className="ml-2 text-xs text-gray-400">— L4(시트) 단위 Swim Lane</span>
+                  </div>
+                  <button
+                    onClick={handleGenerateTobeFlow}
+                    disabled={tobeLoading}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-bold border-2 transition disabled:opacity-50 whitespace-nowrap"
+                    style={{
+                      borderColor: tobeFlow ? "#16A34A" : "#7C3AED",
+                      color: tobeFlow ? "#16A34A" : "#7C3AED",
+                      backgroundColor: tobeFlow ? "#F0FDF4" : "#F5F3FF",
+                    }}
+                  >
+                    {tobeLoading ? (
+                      <span className="flex items-center gap-1.5">
+                        <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-purple-300 border-t-purple-600" />
+                        생성 중...
+                      </span>
+                    ) : tobeFlow ? "↺ 재생성" : "⚡ Swim Lane 생성"}
+                  </button>
+                </div>
+
+                {tobeFlow && tobeFlow.tobe_sheets && tobeFlow.tobe_sheets.length > 0 && (
+                  <div className="space-y-3">
+                    {/* L4 시트 탭 */}
+                    {tobeFlow.tobe_sheets.length > 1 && (
+                      <div className="flex gap-1 flex-wrap">
+                        {tobeFlow.tobe_sheets.map((sheet, idx) => (
+                          <button
+                            key={sheet.l4_id}
+                            onClick={() => setTobeActiveSheet(idx)}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition border ${
+                              tobeActiveSheet === idx
+                                ? "bg-purple-700 text-white border-purple-700"
+                                : "bg-white text-gray-600 border-gray-200 hover:border-purple-300"
+                            }`}
+                          >
+                            {sheet.l4_name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* 현재 선택된 시트의 Swim Lane */}
+                    {(() => {
+                      const sheet = tobeFlow.tobe_sheets[tobeActiveSheet] ?? tobeFlow.tobe_sheets[0];
+                      return (
+                        <div>
+                          {/* 사용된 액터 배지 */}
+                          <div className="flex items-center gap-1.5 mb-2 flex-wrap">
+                            <span className="text-[10px] text-gray-400">등장 액터:</span>
+                            {sheet.actors_used.map(a => (
+                              <span key={a} className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-gray-100 text-gray-600 border border-gray-200">
+                                {a}
+                              </span>
+                            ))}
+                          </div>
+                          <ToBeSwimlane sheet={sheet} />
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
               </div>

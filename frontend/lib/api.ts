@@ -1035,6 +1035,40 @@ export async function deleteBenchmarkRow(source: string, sheetId?: string): Prom
   });
 }
 
+// ── To-Be Workflow Swim Lane ──────────────────────────────────────────────────
+
+export type TobeActor =
+  | "임원" | "현업 팀장" | "HR 임원" | "HR 담당자"
+  | "Senior AI" | "Junior AI" | "현업 구성원" | "그 외";
+
+export type TobeNodeType = "start" | "task" | "decision" | "end";
+
+export interface TobeNode {
+  id: string;
+  label: string;
+  actor: TobeActor;
+  type: TobeNodeType;
+  ai_support?: string | null;
+  next: string[];
+}
+
+export interface TobeSheet {
+  l4_id: string;
+  l4_name: string;
+  actors_used: TobeActor[];
+  nodes: TobeNode[];
+}
+
+export interface TobeFlowResult {
+  ok: boolean;
+  process_name: string;
+  tobe_sheets: TobeSheet[];
+}
+
+export async function generateTobeFlow(): Promise<TobeFlowResult> {
+  return apiFetch("/workflow/generate-tobe-flow", { method: "POST", body: "{}" });
+}
+
 // ── 멀티 세션 ────────────────────────────────────────────────────────────────
 
 export interface WorkflowSession {

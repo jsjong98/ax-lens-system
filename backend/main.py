@@ -3036,6 +3036,139 @@ async def generate_workflow_step1(request: Request):
     return {"ok": True, **result_dict}
 
 
+# ── To-Be Workflow Swim Lane 생성 ─────────────────────────────
+
+@app.post("/api/workflow/generate-tobe-flow", tags=["Workflow"])
+async def generate_tobe_flow(request: Request):
+    """
+    To-Be Workflow를 Swim Lane 형식으로 생성.
+    Step 1 기본 설계 + Gap 분석 결과 기반, L4(시트) 단위.
+
+    Swim Lane 액터: 임원 / 현업 팀장 / HR 임원 / HR 담당자 /
+                   Senior AI / Junior AI / 현업 구성원 / 그 외
+    """
+    if not _wf_step1_cache:
+        raise HTTPException(400, "Step 1 기본 설계를 먼저 수행해주세요.")
+
+    # L4 시트 목록 수집 (JSON/PPT 우선, 없으면 Step1 결과에서)
+    l4_sheets: list[dict] = []
+    if "parsed" in _workflow_cache:
+        for s in _workflow_cache["parsed"].sheets:
+            l4_sheets.append({"l4_id": s.sheet_id,
+                               "l4_name": (s.name or s.sheet_id).strip()})
+    if not l4_sheets:
+        for l3 in _wf_step1_cache.get("redesigned_process", []):
+            for l4 in l3.get("l4_list", []):
+                l4_sheets.append({"l4_id": l4.get("l4_id", ""),
+                                   "l4_name": l4.get("l4_name", "")})
+
+    process_name = _wf_step1_cache.get("process_name", "HR 프로세스")
+
+    # 기본 설계 컨텍스트 (L3→L4→L5 트리)
+    step1_ctx = json.dumps(
+        _wf_step1_cache.get("redesigned_process", []),
+        ensure_ascii=False)[:3500]
+
+    # Gap 분석 컨텍스트
+    gap_ctx = ""
+    if _wf_gap_analysis:
+        gap_items = _wf_gap_analysis.get("gap_items", [])
+        gap_ctx = "## Gap 분석 결과\n"
+        for g in gap_items[:10]:
+            gap_ctx += (f"- [{g.get('gap_type','')}] {g.get('l4_activity','')}: "
+                        f"{g.get('gap_description','')}\n")
+
+    # As-Is 컨텍스트
+    asis_ctx = _build_mapped_asis_context("")[:1500]
+
+    system_prompt = f"""당신은 AI 기반 업무 혁신 설계 전문가입니다.
+Step 1 기본 설계와 Gap 분석 결과를 기반으로, L4 시트 단위 To-Be Workflow를 Swim Lane JSON으로 생성합니다.
+
+## 프로세스: {process_name}
+
+## Swim Lane 액터 목록 (반드시 이 중에서만 사용)
+- 임원           ← 최종 결재/승인권자
+- 현업 팀장      ← 현업 부서장, 채용 요청 등
+- HR 임원        ← HR 부문 임원 (전략적 의사결정)
+- HR 담당자      ← HR 실무 담당자
+- Senior AI      ← 전체 프로세스 조율·모니터링 오케스트레이터 AI
+- Junior AI      ← 개별 반복 Task 자동화 AI Agent
+- 현업 구성원    ← 일반 직원 (자기신청, 평가 참여 등)
+- 그 외          ← 외부 지원자, 외부 시스템, 타 부서 등
+
+## 설계 규칙
+1. 각 L4 시트를 독립 Swim Lane 다이어그램으로 생성 (시트 순서 준수)
+2. Gap A(신규) → 새 노드 추가, Gap B(전환) → 기존 Task를 AI 노드로 대체,
+   Gap C(폐기) → 해당 Task 생략 또는 통합
+3. Senior AI: 보통 1~2개 (전체 모니터링, 최종 결과 검토/판단)
+4. Junior AI: 자동화 가능 Task (문서 분류, 스크리닝, 데이터 추출, 알림 발송 등)
+5. 사람 노드의 ai_support: 해당 Task에서 AI 보조가 있으면 한 문장 설명, 없으면 null
+6. node label: 최대 14자 (초과 시 줄임), 업무 동사+목적어 형태
+7. next: 다음 노드 id 배열 (종료 노드는 빈 배열 [])
+8. type: "start" | "task" | "decision" | "end"
+9. 사용 안 하는 액터는 actors_used에서 제외
+10. 각 시트 노드는 최소 4개 이상, 자연스러운 업무 흐름으로
+
+## Step 1 기본 설계 (L3→L4→L5)
+{step1_ctx}
+
+{gap_ctx}
+
+## As-Is 참고
+{asis_ctx}
+
+## 생성 대상 L4 시트
+{json.dumps(l4_sheets, ensure_ascii=False)}
+
+## 출력 형식 (JSON만, 마크다운 블록 없음)
+{{
+  "process_name": "{process_name}",
+  "tobe_sheets": [
+    {{
+      "l4_id": "시트ID",
+      "l4_name": "L4 활동명",
+      "actors_used": ["HR 담당자", "Junior AI", "Senior AI", "그 외"],
+      "nodes": [
+        {{
+          "id": "n1",
+          "label": "지원서 접수",
+          "actor": "그 외",
+          "type": "start",
+          "ai_support": null,
+          "next": ["n2"]
+        }},
+        {{
+          "id": "n2",
+          "label": "AI 서류 스크리닝",
+          "actor": "Junior AI",
+          "type": "task",
+          "ai_support": null,
+          "next": ["n3"]
+        }},
+        {{
+          "id": "n3",
+          "label": "스크리닝 결과 검토",
+          "actor": "HR 담당자",
+          "type": "task",
+          "ai_support": "Junior AI 분석 결과 대시보드 참조",
+          "next": ["n4"]
+        }}
+      ]
+    }}
+  ]
+}}"""
+
+    result = await _call_llm_step1(system_prompt, [
+        {"role": "user",
+         "content": "위 L4 시트들의 To-Be Workflow를 Swim Lane JSON으로 생성해주세요."}
+    ])
+
+    if not result:
+        raise HTTPException(500, "To-Be Workflow 생성에 실패했습니다.")
+
+    return {"ok": True, **result}
+
+
 # ── Step 1 채팅 ─────────────────────────────────────────────
 
 @app.post("/api/workflow/chat-step1", tags=["Workflow"])
