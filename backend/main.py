@@ -2524,23 +2524,17 @@ async def benchmark_workflow_step1(request: Request):
 - 관련 사례가 없으면 → benchmark_table을 빈 배열로 반환하고 no_cases_note에 이유 명시
 
 ## 영어 검색 결과 해석 규칙
-검색 결과가 영어여도 아래 대응 관계를 이용해 관련성을 판단하세요:
-- "personnel action / position change / job transfer" → 발령 관련 활동
-- "appointment workflow / HCM automation" → 발령 처리 프로세스
-- "employee onboarding" → 입사·신규 발령 관련
-- "HR workflow automation / RPA" → 인사 업무 자동화 (발령, 승인 등)
-- "approval workflow / document routing" → 품의·결재 프로세스
-- "notification / announcement automation" → 발령 공지·통보 자동화
-- "payroll processing" → 급여 관련
-- "labor relations / collective bargaining" → 노사 관련
-- "recruitment / talent acquisition" → 채용 관련
-- "performance management" → 평가 관련
+검색 결과가 영어여도 아래 L4 활동의 영어 대응 관계를 이용해 관련성을 판단하세요:
+{chr(10).join(f'- "{_bm_translate(d["name"])}" → {d["name"]}' for d in l4_details[:8]) if l4_details else "- 위 L4 세부 활동 목록 참조"}
+
+## ⚠️ process_area 필드 규칙 (매우 중요)
+`process_area` 필드에는 반드시 위 **"L4 세부 활동"** 목록에 있는 이름 중 하나만 입력하세요.
+- 목록에 없는 값 절대 금지 (창작 금지)
+- 목록: {", ".join(f'"{n}"' for n in l4_names[:8])}
+- 해당하는 L4가 없을 때만 L3명 사용: {", ".join(f'"{n}"' for n in l3_names[:3])}
 
 ## 관련성 판단 기준
 - 완전 동일하지 않아도, **동일한 HR 업무 기능**이면 포함
-  - "발령요청 접수" ↔ "HR request intake automation" ✅
-  - "발령 확정" ↔ "position change final approval AI" ✅
-  - "발령 공지" ↔ "automated HR notification/announcement" ✅
 - L4 단위 매칭이 안 되면 L3 단위로 매핑
 - L3도 안 되면 L2 단위로 매핑
 
@@ -2663,6 +2657,19 @@ async def benchmark_workflow_step1(request: Request):
             and not _is_news_url(row.get("url", ""))
             and (row.get("use_case") or row.get("outcome"))
         ]
+        # process_area 검증: l4_names 목록에 없는 값은 정규화
+        # (LLM이 목록 외 값을 창작하는 것을 방지)
+        valid_areas = set(l4_names) | set(l3_names)
+        fallback_area = l4_names[0] if l4_names else (l3_names[0] if l3_names else process_name)
+        for row in sheet_rows:
+            area = row.get("process_area", "")
+            if area not in valid_areas:
+                # 부분 문자열로 가장 가까운 L4 찾기
+                matched_l4 = next(
+                    (ln for ln in l4_names if ln in area or area in ln),
+                    None,
+                )
+                row["process_area"] = matched_l4 if matched_l4 else fallback_area
 
     # 시트별로 저장 (기존 결과에 덮어쓰기)
     _wf_benchmark_table[sheet_key] = sheet_rows
