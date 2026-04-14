@@ -2600,11 +2600,15 @@ async def benchmark_workflow_step1(request: Request):
             if sheet_l4_name and sheet_l4_name not in seen_l4:
                 seen_l4.add(sheet_l4_name)
                 # 이 시트(L4)에 해당하는 엑셀 task 매칭
-                # task_id 기반 → l4_id 기반 → l3_id 기반 순으로 탐색
+                # ── L4 scope: L5 노드 task_id만 사용 (connector L4 노드 제외)
+                # ── L3 scope: 모든 노드 task_id 사용 (전체 L3 범위)
                 sheet_tids: set[str] = set()
                 sheet_l4_ids: set[str] = set()
                 sheet_l3_ids: set[str] = set()
-                for node in s.nodes.values():
+                # L5 노드만 필터링 (connector L4 노드의 task_id가 섞이지 않도록)
+                l5_only_nodes = [n for n in s.nodes.values() if n.level == "L5"]
+                source_nodes = l5_only_nodes if (scope != "l3" and l5_only_nodes) else s.nodes.values()
+                for node in source_nodes:
                     if node.task_id:
                         sheet_tids.add(node.task_id)
                         parts = node.task_id.split(".")
@@ -2623,6 +2627,8 @@ async def benchmark_workflow_step1(request: Request):
                     "pain_points": _get_pain_points(matched),
                     "description": "; ".join(t.description for t in matched[:3] if t.description),
                     "task_names": [t.name for t in matched[:5]],
+                    # matched 직접 저장 → l5_tasks 빌드 시 정확히 이 L4 범위만 사용
+                    "_matched_tasks": matched,
                 })
 
             # L3/L2는 시트 내부 노드에서 추출 (파일 수준 컨텍스트)
@@ -2673,8 +2679,15 @@ async def benchmark_workflow_step1(request: Request):
     # L5 task — 이 L4(시트) 범위에 속하는 엑셀 task 수집
     l5_tasks = []
     for d in l4_details:
-        for t in (excel_by_l4.get(d.get("task_id", ""), []) or
-                  [t for t in _wf_excel_tasks if t.name in (d.get("task_names") or [])]):
+        # _matched_tasks: 이 L4 시트 범위에서 정확히 매칭된 엑셀 태스크
+        # (L4 scope면 L5 노드 task_id 기반 매칭, L3 scope면 전체 노드 기반)
+        direct_tasks = d.pop("_matched_tasks", None)
+        task_source = (
+            direct_tasks
+            or excel_by_l4.get(d.get("task_id", ""), [])
+            or [t for t in _wf_excel_tasks if t.name in (d.get("task_names") or [])]
+        )
+        for t in task_source:
             if t.name and not any(x["name"] == t.name for x in l5_tasks):
                 l5_tasks.append({
                     "name": t.name,
