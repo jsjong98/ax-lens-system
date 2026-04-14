@@ -27,24 +27,16 @@ MAX_SESSIONS_PER_USER = 2
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "")
 
 # ── 프로젝트 배정 ────────────────────────────────────────────────────────────
-# 사용자 이름 → 프로젝트 매핑 (이름 기반, 이메일 매핑은 users.json의 name 필드 사용)
-# "공통" 멤버는 모든 프로젝트 데이터에 접근 가능
+# Railway 환경변수 PROJECT_ASSIGNMENTS (JSON) 로만 관리.
+# 코드에 이름을 직접 넣지 않음 (보안).
 PROJECT_ASSIGNMENTS: dict[str, list[str]] = json.loads(
     os.getenv("PROJECT_ASSIGNMENTS", '{}')
-) or {
-    "공통": ["오종환", "조혜수", "김지동"],
-    "SKI":  ["이선영", "이채원", "김동욱", "정창원"],
-    "두산": ["정희진", "윤솔이", "백소연"],
-}
+)
 
-# 프로젝트별 PM (승인 권한)
+# 프로젝트별 PM (승인 권한) — 환경변수 PROJECT_PMS (JSON) 로만 관리.
 PROJECT_PMS: dict[str, str] = json.loads(
     os.getenv("PROJECT_PMS", '{}')
-) or {
-    "공통": "조혜수",
-    "두산": "정희진",
-    "SKI":  "이선영",
-}
+)
 
 # 전체 프로젝트 목록
 ALL_PROJECTS = list(PROJECT_ASSIGNMENTS.keys())
