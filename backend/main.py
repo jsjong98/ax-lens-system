@@ -2251,40 +2251,70 @@ def _build_task_and_pain_summary(sheet_id: str = "") -> tuple[str, str, str]:
 
 
 def _step1_system_prompt(process_name: str, task_summary: str, pain_summary: str,
-                         benchmark_text: str = "") -> str:
-    return f"""당신은 AI 기반 업무 혁신 설계 전문가입니다.
-벤치마킹 선도사례와 Gap 분석 결과를 동시에 활용하여, 기존 As-Is 프로세스를 재구조화하고 각 Task에 AI 적용 기본 설계를 수행합니다.
+                         benchmark_text: str = "",
+                         scope: str = "l3") -> str:
+    """scope='l4': 특정 L4 Activity 내 L5 Task AI 적용 설계
+       scope='l3': 전체 L3 프로세스 재구조화 + L4/L5 AI 적용 설계"""
 
-## ⚠️ 핵심 원칙
-- 아래 L5 Task 목록({process_name})이 설계의 기준입니다. 기존 Task는 최대한 유지하되, 필요 시 통합·세분화·추가·삭제를 제안할 수 있습니다.
-- `task_id`는 반드시 아래 Task 목록의 실제 ID를 사용하세요. 신규 추가 Task는 "NEW_xxx" 형식으로 표기하세요.
-- 에이전트 아키텍처(오케스트레이터/Junior AI 등)를 설계하는 것이 아닙니다. **프로세스 계층(L3→L4→L5)을 재설계하고, 각 L5 Task에 AI 적용 방안을 기술하는 것**이 목표입니다.
-- **Gap 분석 결과를 최우선으로 반영**: A.신규(도입), B.전환(AI 전환), C.폐기/통합(삭제/흡수) 방향을 설계에 직접 반영하세요.
+    redesign_scope_note = (
+        "- **재설계 가능**: HR 담당자, HR 임원, 지주, 자회사, BG, 계열사 등 두산 내부 조직이 수행하는 Task\n"
+        "- **재설계 불가 (현행 유지)**: 큐벡스, 업체 등 외부 업체/시스템이 수행하는 Task — "
+        "`change_type: \"유지\"`, `ai_application: \"해당 없음\"`으로 처리\n"
+        "- As-Is 컨텍스트에서 수행주체 라인에 `[외부 업체/시스템 — 재설계 제외]` 표시된 Task는 반드시 현행 유지"
+    )
 
-## ⚠️ 재설계 범위 (swim lane 기준)
-- **재설계 가능**: HR 담당자, HR 임원, 지주, 자회사, BG, 계열사 등 두산 내부 조직이 수행하는 Task
-- **재설계 불가 (현행 유지)**: 큐벡스, 업체 등 외부 업체/시스템이 수행하는 Task — 두산 HR이 직접 통제할 수 없으므로 `change_type: "유지"`, `ai_application: "해당 없음"`으로 처리
-- As-Is 컨텍스트에서 수행주체 라인에 `[외부 업체/시스템 — 재설계 제외]` 표시된 Task는 반드시 현행 유지
-
-## 프로세스: {process_name}
-
-## As-Is L5 Task 목록 (설계의 기준)
-{task_summary}
-
-## Pain Point 현황
-{pain_summary}
-
-{benchmark_text}
-
-## 설계 방향
-- **L2~L3 재구조화**: 선도사례를 참고하여 L3 프로세스 그룹의 통합·세분화·추가·삭제 방향 제시
-- **L4~L5 AI 적용 기본 설계**: 각 L4 Activity / L5 Task별로 AI 적용 여부와 방식 기술
-  - change_type: "유지" / "통합" / "세분화" / "추가" / "삭제" 중 하나
-  - AI 미적용 Task는 ai_application을 "해당 없음"으로
-  - automation_level: "Full-Auto" / "Human-in-Loop" / "Human-on-the-Loop" / "Human" 중 하나
-
-## 출력 형식 (JSON만 출력, 마크다운 코드 블록 없음)
-{{
+    if scope == "l4":
+        # ── L4 단위: 이 L4의 L5 Task AI 적용 설계만 ──────────────────
+        design_direction = (
+            "- **L5 Task AI 적용 설계**: 이 L4 Activity의 각 L5 Task별로 AI 적용 여부와 방식 기술\n"
+            "  - change_type: \"유지\" / \"통합\" / \"세분화\" / \"추가\" / \"삭제\" 중 하나\n"
+            "  - AI 미적용 Task는 ai_application을 \"해당 없음\"으로\n"
+            "  - automation_level: \"Full-Auto\" / \"Human-in-Loop\" / \"Human-on-the-Loop\" / \"Human\" 중 하나\n"
+            "- **L3 재구조화 불필요**: L4 단위 설계이므로 상위 L3 변경은 제안하지 마세요."
+        )
+        output_format = f"""{{
+  "blueprint_summary": "이 L4 Activity 기본 설계 요약 (3~5문장)",
+  "process_name": "{process_name}",
+  "benchmark_insights": [
+    {{"source": "기업명", "insight": "구체적 사례", "application": "두산 적용 방안"}}
+  ],
+  "redesigned_process": [
+    {{
+      "l3_id": "",
+      "l3_name": "",
+      "change_type": "유지",
+      "change_reason": "L4 단위 설계 — L3 변경 없음",
+      "l4_list": [
+        {{
+          "l4_id": "기존 L4 ID (예: 3.1.1)",
+          "l4_name": "{process_name}",
+          "change_type": "유지|통합|세분화|추가|삭제",
+          "change_reason": "변경 이유 (1문장)",
+          "l5_list": [
+            {{
+              "task_id": "기존 task_id 또는 NEW_xxx",
+              "task_name": "Task명",
+              "change_type": "유지|통합|세분화|추가|삭제",
+              "ai_application": "AI 적용 내용 또는 해당 없음",
+              "automation_level": "Full-Auto|Human-in-Loop|Human-on-the-Loop|Human",
+              "ai_technique": "사용 AI 기법 (예: LLM 요약, RAG, 분류모델, 해당 없음)"
+            }}
+          ]
+        }}
+      ]
+    }}
+  ]
+}}"""
+    else:
+        # ── L3 단위: 전체 프로세스 재구조화 + L4/L5 AI 적용 ─────────
+        design_direction = (
+            "- **L2~L3 재구조화**: 선도사례를 참고하여 L3 프로세스 그룹의 통합·세분화·추가·삭제 방향 제시\n"
+            "- **L4~L5 AI 적용 기본 설계**: 각 L4 Activity / L5 Task별로 AI 적용 여부와 방식 기술\n"
+            "  - change_type: \"유지\" / \"통합\" / \"세분화\" / \"추가\" / \"삭제\" 중 하나\n"
+            "  - AI 미적용 Task는 ai_application을 \"해당 없음\"으로\n"
+            "  - automation_level: \"Full-Auto\" / \"Human-in-Loop\" / \"Human-on-the-Loop\" / \"Human\" 중 하나"
+        )
+        output_format = f"""{{
   "blueprint_summary": "전체 기본 설계 요약 (3~5문장)",
   "process_name": "{process_name}",
   "benchmark_insights": [
@@ -2317,7 +2347,34 @@ def _step1_system_prompt(process_name: str, task_summary: str, pain_summary: str
       ]
     }}
   ]
-}}
+}}"""
+
+    return f"""당신은 AI 기반 업무 혁신 설계 전문가입니다.
+벤치마킹 선도사례와 Gap 분석 결과를 동시에 활용하여, 기존 As-Is 프로세스를 재구조화하고 각 Task에 AI 적용 기본 설계를 수행합니다.
+
+## ⚠️ 핵심 원칙
+- 아래 L5 Task 목록({process_name})이 설계의 기준입니다. 기존 Task는 최대한 유지하되, 필요 시 통합·세분화·추가·삭제를 제안할 수 있습니다.
+- `task_id`는 반드시 아래 Task 목록의 실제 ID를 사용하세요. 신규 추가 Task는 "NEW_xxx" 형식으로 표기하세요.
+- **Gap 분석 결과를 최우선으로 반영**: A.신규(도입), B.전환(AI 전환), C.폐기/통합(삭제/흡수) 방향을 설계에 직접 반영하세요.
+
+## ⚠️ 재설계 범위 (swim lane 기준)
+{redesign_scope_note}
+
+## 프로세스: {process_name}
+
+## As-Is L5 Task 목록 (설계의 기준)
+{task_summary}
+
+## Pain Point 현황
+{pain_summary}
+
+{benchmark_text}
+
+## 설계 방향
+{design_direction}
+
+## 출력 형식 (JSON만 출력, 마크다운 코드 블록 없음)
+{output_format}
 """
 
 
@@ -3202,22 +3259,35 @@ async def generate_workflow_step1(request: Request):
     body = await request.json()
     user_prompt = body.get("prompt", "")
     process_name_override = body.get("process_name", "")
+    # 벤치마킹·Gap 분석과 동일한 sheet_id 스코프 유지
+    step1_sheet_id: str = body.get("sheet_id", "") or ""
 
-    # 기본 설계는 JSON/PPT 전체(L3 단위) 기준
-    process_name, task_summary, pain_summary = _build_task_and_pain_summary("")
+    # 벤치마킹과 동일한 스코프로 컨텍스트 구성
+    # sheet_id 있으면 L4 단위, 없으면 L3 전체
+    process_name, task_summary, pain_summary = _build_task_and_pain_summary(step1_sheet_id)
     if process_name_override:
         process_name = process_name_override
 
-    # 전체 시트 벤치마킹 결과 합산
-    benchmark_text = f"## 벤치마킹 결과 (전체 {len(_wf_benchmark_table)}개 시트, 총 {len(all_bm_rows)}건)\n"
-    for sheet_key, rows in _wf_benchmark_table.items():
-        if rows:
-            benchmark_text += f"\n### 시트: {sheet_key}\n"
-            for bm in rows[:5]:
-                benchmark_text += (
-                    f"- **{bm.get('source', '')}** ({bm.get('industry', '')}): "
-                    f"{bm.get('use_case', '')} → {bm.get('outcome', '')}\n"
-                )
+    # 같은 스코프의 벤치마킹 결과만 사용
+    if step1_sheet_id and step1_sheet_id in _wf_benchmark_table:
+        scoped_bm_rows = _wf_benchmark_table[step1_sheet_id]
+        benchmark_text = f"## 벤치마킹 결과 (시트: {step1_sheet_id}, {len(scoped_bm_rows)}건)\n"
+        for bm in scoped_bm_rows[:10]:
+            benchmark_text += (
+                f"- **{bm.get('source', '')}** ({bm.get('industry', '')}): "
+                f"{bm.get('use_case', '')} → {bm.get('outcome', '')}\n"
+            )
+    else:
+        # L3 전체 or fallback: 전체 시트 합산
+        benchmark_text = f"## 벤치마킹 결과 (전체 {len(_wf_benchmark_table)}개 시트, 총 {len(all_bm_rows)}건)\n"
+        for sheet_key, rows in _wf_benchmark_table.items():
+            if rows:
+                benchmark_text += f"\n### 시트: {sheet_key}\n"
+                for bm in rows[:5]:
+                    benchmark_text += (
+                        f"- **{bm.get('source', '')}** ({bm.get('industry', '')}): "
+                        f"{bm.get('use_case', '')} → {bm.get('outcome', '')}\n"
+                    )
 
     # Gap 분석 결과 — 기본 설계의 핵심 인풋
     gap_text = ""
@@ -3239,11 +3309,13 @@ async def generate_workflow_step1(request: Request):
                 f"{g.get('gap_description', '')} → {g.get('action_plan', '')}\n"
             )
 
-    # As-Is + 엑셀 매핑 컨텍스트
-    asis_context = _build_mapped_asis_context("")
+    # As-Is + 엑셀 매핑 컨텍스트 (벤치마킹·Gap과 동일 스코프)
+    asis_context = _build_mapped_asis_context(step1_sheet_id)
 
+    step1_scope = "l4" if step1_sheet_id else "l3"
     system = _step1_system_prompt(process_name, task_summary, pain_summary,
-                                  benchmark_text + gap_text + "\n\n" + asis_context)
+                                  benchmark_text + gap_text + "\n\n" + asis_context,
+                                  scope=step1_scope)
 
     global _wf_chat_history
     actual_prompt = user_prompt or "선도사례를 분석하여 To-Be Workflow 기본 설계를 수행해주세요."
