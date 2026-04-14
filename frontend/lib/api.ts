@@ -2010,10 +2010,14 @@ export async function getAdminUploadsAll(): Promise<AdminUploadsAll> {
   return apiFetch("/admin/uploads-all");
 }
 
-export async function downloadAdminFile(filename: string): Promise<void> {
+export async function downloadAdminFile(filename: string, sessionId?: string): Promise<void> {
   const token = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null;
   const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
-  const res = await fetch(`${BACKEND_DIRECT}/api/admin/download/${encodeURIComponent(filename)}`, { headers });
+  const qs = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : "";
+  const res = await fetch(
+    `${BACKEND_DIRECT}/api/admin/download/${encodeURIComponent(filename)}${qs}`,
+    { headers },
+  );
   if (!res.ok) throw new Error("다운로드 실패");
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);

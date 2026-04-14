@@ -525,7 +525,7 @@ export default function AdminPage() {
               fileSubTab === "wf_ppt"       ? (uploadsAll?.wf_ppt ?? []) :
                                               (uploadsAll?.new_workflow ?? [])
             }
-            onDownload={downloadAdminFile}
+            onDownload={(name, sid) => downloadAdminFile(name, sid)}
             onDelete={async (file) => {
               const sid = (file as { session_id?: string }).session_id;
               const isWfTab = ["wf_excel", "wf_json", "wf_ppt"].includes(fileSubTab);
@@ -572,7 +572,7 @@ function FileTable({
   files, onDownload, onDelete, showDelete,
 }: {
   files: FileRow[];
-  onDownload: (name: string) => Promise<void>;
+  onDownload: (name: string, sessionId?: string) => Promise<void>;
   onDelete?: (file: FileRow) => Promise<void>;
   showDelete?: boolean;
 }) {
@@ -601,7 +601,7 @@ function FileTable({
               <td className="px-4 py-2 text-xs text-gray-500">{f.modified.replace("T", " ").slice(0, 19)}</td>
               <td className="px-4 py-2 text-center">
                 <button
-                  onClick={async () => { try { await onDownload(f.filename); } catch (e) { alert((e as Error).message); } }}
+                  onClick={async () => { try { await onDownload(f.filename, f.session_id); } catch (e) { alert((e as Error).message); } }}
                   className="text-xs text-blue-600 hover:text-blue-800 underline"
                 >
                   다운로드

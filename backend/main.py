@@ -6222,24 +6222,62 @@ async def admin_reset_all_workflow(request: Request):
 
 
 @app.get("/api/admin/download/{filename}", tags=["Admin"])
-async def admin_download_file(filename: str, request: Request):
-    """업로드된 파일 다운로드 (Task 분류 엑셀 또는 Workflow 파일)."""
+async def admin_download_file(
+    filename: str,
+    request: Request,
+    session_id: str = Query(default=""),
+):
+    """업로드된 파일 다운로드 (Task 분류 엑셀 또는 Workflow 파일).
+    session_id 쿼리 파라미터가 있으면 해당 세션 디렉토리에서 먼저 찾는다.
+    없으면 uploads → workflow 세션 전체 검색 → workflow 루트 순서로 탐색.
+    """
     _require_admin(request)
     # 경로 순회 방지
+    import re as _re
     safe_name = Path(filename).name
-    # Task 분류 엑셀 먼저, 없으면 Workflow 디렉토리에서 찾기
-    file_path = _UPLOAD_DIR / safe_name
-    if not file_path.exists():
-        file_path = _WF_DIR / safe_name
-    if not file_path.exists() or not file_path.is_file():
-        raise HTTPException(404, f"파일을 찾을 수 없습니다: {safe_name}")
-    from urllib.parse import quote
-    encoded = quote(safe_name)
-    return StreamingResponse(
-        open(file_path, "rb"),
-        media_type="application/octet-stream",
-        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"},
-    )
+
+    def _make_response(fp: Path) -> StreamingResponse:
+        from urllib.parse import quote
+        encoded = quote(safe_name)
+        return StreamingResponse(
+            open(fp, "rb"),
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"},
+        )
+
+    # 1) Task 분류 엑셀
+    fp = _UPLOAD_DIR / safe_name
+    if fp.is_file():
+        return _make_response(fp)
+
+    # 2) session_id 지정 시 해당 세션 디렉토리 직접 확인
+    if session_id:
+        safe_sid = _re.sub(r'[^\w가-힣\-]', '_', session_id)[:80]
+        fp = _SESSIONS_DIR / safe_sid / safe_name
+        if fp.is_file():
+            return _make_response(fp)
+
+    # 3) 세션 디렉토리 전체 검색 (최신 수정 파일 우선)
+    if _SESSIONS_DIR.exists():
+        candidates = sorted(
+            _SESSIONS_DIR.rglob(safe_name),
+            key=lambda f: f.stat().st_mtime,
+            reverse=True,
+        )
+        if candidates:
+            return _make_response(candidates[0])
+
+    # 4) New Workflow 디렉토리
+    fp = _NW_DIR / safe_name
+    if fp.is_file():
+        return _make_response(fp)
+
+    # 5) WF 루트 (레거시)
+    fp = _WF_DIR / safe_name
+    if fp.is_file():
+        return _make_response(fp)
+
+    raise HTTPException(404, f"파일을 찾을 수 없습니다: {safe_name}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
