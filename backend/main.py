@@ -2053,6 +2053,26 @@ def _build_mapped_asis_context(sheet_id: str = "") -> str:
                     result.append(f"{indent}→ 조건: \"{e.label}\" → [{tgt.level}] {tgt.label}")
             return result
 
+        # 외부 업체/시스템 키워드 (재설계 불가) vs 두산 내부 조직 (재설계 가능)
+        _EXTERNAL_KEYWORDS = {"큐벡스", "업체", "외부", "벤더", "vendor"}
+        _INTERNAL_ORG_KEYWORDS = {"지주", "자회사", "bg", "계열사", "그룹사"}
+
+        def _classify_role(actor_label: str) -> str:
+            """'그 외' swim lane의 수행주체를 외부/내부로 분류한다."""
+            lower = actor_label.lower()
+            # "그 외:" 접두사 포함 여부 확인
+            is_extra = "그 외" in actor_label
+            if not is_extra:
+                return ""  # 일반 HR/임원 swim lane — 분류 불필요
+            # 콜론 뒤 실제 이름 추출 (예: "그 외:큐벡스" → "큐벡스")
+            name_part = actor_label.split(":")[-1].strip().lower() if ":" in actor_label else lower
+            if any(k in name_part for k in _EXTERNAL_KEYWORDS):
+                return "외부 업체/시스템 — 재설계 제외 (HR 업무 범위 밖)"
+            if any(k in name_part for k in _INTERNAL_ORG_KEYWORDS):
+                return "두산 내부 조직 — 재설계 가능 (HR 협의·협업 범위)"
+            # "그 외"이지만 키워드 불명확 → 외부로 보수적 처리
+            return "외부/비HR 주체 — 재설계 여부 검토 필요"
+
         def _node_meta_lines(node: "WorkflowNode", indent: str = "      ") -> list[str]:
             """노드 메타데이터(수행주체·시스템·협의관계)를 텍스트 라인으로 반환."""
             meta_lines = []
@@ -2065,10 +2085,20 @@ def _build_mapped_asis_context(sheet_id: str = "") -> str:
             if actor_label:
                 # "/ " 로 구분된 복수 수행주체 → 협의 관계 명시
                 actor_parts = [a.strip() for a in actor_label.replace("，", ",").split("/") if a.strip()]
-                if len(actor_parts) > 1:
-                    meta_lines.append(f"{indent}수행주체: {' / '.join(actor_parts)} (복수 주체 — 협의 관계)")
+                # 각 파트별 외부/내부 분류
+                classified_parts = []
+                redesign_notes = []
+                for part in actor_parts:
+                    cls = _classify_role(part)
+                    if cls:
+                        classified_parts.append(f"{part} [{cls}]")
+                        redesign_notes.append(cls)
+                    else:
+                        classified_parts.append(part)
+                if len(classified_parts) > 1:
+                    meta_lines.append(f"{indent}수행주체: {' / '.join(classified_parts)} (복수 주체 — 협의 관계)")
                 else:
-                    meta_lines.append(f"{indent}수행주체: {actor_label}")
+                    meta_lines.append(f"{indent}수행주체: {' / '.join(classified_parts)}")
             # 사용 시스템 / 고유명사 (큐벡스 등)
             sys_val = node.metadata.get("system", "") or node.metadata.get("systems", "")
             sys_label = (
@@ -2219,6 +2249,11 @@ def _step1_system_prompt(process_name: str, task_summary: str, pain_summary: str
 - `task_id`는 반드시 아래 Task 목록의 실제 ID를 사용하세요. 신규 추가 Task는 "NEW_xxx" 형식으로 표기하세요.
 - 에이전트 아키텍처(오케스트레이터/Junior AI 등)를 설계하는 것이 아닙니다. **프로세스 계층(L3→L4→L5)을 재설계하고, 각 L5 Task에 AI 적용 방안을 기술하는 것**이 목표입니다.
 - **Gap 분석 결과를 최우선으로 반영**: A.신규(도입), B.전환(AI 전환), C.폐기/통합(삭제/흡수) 방향을 설계에 직접 반영하세요.
+
+## ⚠️ 재설계 범위 (swim lane 기준)
+- **재설계 가능**: HR 담당자, HR 임원, 지주, 자회사, BG, 계열사 등 두산 내부 조직이 수행하는 Task
+- **재설계 불가 (현행 유지)**: 큐벡스, 업체 등 외부 업체/시스템이 수행하는 Task — 두산 HR이 직접 통제할 수 없으므로 `change_type: "유지"`, `ai_application: "해당 없음"`으로 처리
+- As-Is 컨텍스트에서 수행주체 라인에 `[외부 업체/시스템 — 재설계 제외]` 표시된 Task는 반드시 현행 유지
 
 ## 프로세스: {process_name}
 
@@ -3870,6 +3905,11 @@ Step 1에서 도출된 기본 설계를 기반으로, 두산에 최적화된 **A
 - **Bottom-Up 접근**: As-Is 프로세스의 Pain Point를 Deep-dive 분석
 - **Senior AI 기반 End-to-End 오케스트레이션 구조로 전환**
 - Step 1(Top-Down)의 벤치마킹 인사이트 + Step 2(Bottom-Up)의 Pain Point 분석을 융합
+
+## ⚠️ 재설계 범위 (swim lane 기준)
+- **재설계 가능**: HR 담당자, HR 임원, 지주, 자회사, BG, 계열사 등 두산 내부 조직이 수행하는 Task
+- **재설계 불가 (현행 유지)**: 큐벡스, 업체 등 외부 업체/시스템이 수행하는 Task — AI Agent 설계 대상에서 제외하고 "현행 유지" 처리
+- As-Is 컨텍스트에서 수행주체 라인에 `[외부 업체/시스템 — 재설계 제외]` 표시된 Task는 Agent에 할당하지 말 것
 
 ## 프로세스: {process_name}
 
