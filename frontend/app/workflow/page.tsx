@@ -380,54 +380,95 @@ export default function WorkflowPage() {
     }
   }, [currentSessionId]);
 
+  // currentSessionId → localStorage 동기화 (새로고침 후 자동 복원용)
+  useEffect(() => {
+    if (currentSessionId) {
+      localStorage.setItem("lastWorkflowSessionId", currentSessionId);
+    }
+  }, [currentSessionId]);
+
   // 이전 상태 복원
   useEffect(() => {
-    loadSessions();
-    getWorkflowStepResults()
-      .then((r) => {
-        if (r.has_step2 && r.step2) {
-          setStep2Result(r.step2);
-        }
-        if (r.has_step1 && r.step1) {
-          setStep1Result(r.step1);
-          setChatMessages(r.chat_history || []);
-        }
-        // 벤치마킹·Gap 분석 결과 복원
-        if (r.benchmark_table && Object.keys(r.benchmark_table).length > 0) {
-          setBenchmarkTableBySheet(r.benchmark_table);
-        }
-        if (r.gap_analysis) {
-          setGapAnalysis(r.gap_analysis);
-        }
-        if (r.has_excel) {
-          // 엑셀 로드되어 있음 표시
-          getWorkflowExcelTasks()
-            .then((et) => {
-              if (et.total > 0) {
-                setExcelTasks(et.tasks);
-                setExcelResult({
-                  ok: true,
-                  filename: "이전 업로드",
-                  task_count: et.total,
-                  has_classification: et.classified > 0,
-                  classified_count: et.classified,
-                  sheets: [],
-                });
-              }
-            })
-            .catch(() => {});
-        }
-        if (r.has_asis) {
-          getWorkflowSummary()
-            .then((ws) => {
-              setSummary(ws);
-              if (ws.sheets.length > 0) setActiveSheet(ws.sheets[0].sheet_id);
-            })
-            .catch(() => {});
-        }
-      })
-      .catch(() => {});
-  }, []);
+    const lastSessionId = localStorage.getItem("lastWorkflowSessionId");
+
+    if (lastSessionId) {
+      // 마지막 세션 자동 복원 (벤치마킹·Gap 등 모두 session_data.json에서 복구)
+      loadWorkflowSession(lastSessionId)
+        .then(() => {
+          setCurrentSessionId(lastSessionId);
+          return Promise.allSettled([
+            getWorkflowSummary(),
+            getWorkflowExcelTasks(),
+            getWorkflowStepResults(),
+            listWorkflowSessions(),
+          ]);
+        })
+        .then((results) => {
+          const [ws, et, sr, sl] = results;
+          if (ws.status === "fulfilled" && ws.value.sheets.length > 0) {
+            setSummary(ws.value);
+            setActiveSheet(ws.value.sheets[0].sheet_id);
+            setCurrentStep(1);
+          }
+          if (et.status === "fulfilled" && et.value.total > 0) {
+            setExcelTasks(et.value.tasks);
+            setExcelResult({
+              ok: true, filename: lastSessionId,
+              task_count: et.value.total,
+              has_classification: et.value.classified > 0,
+              classified_count: et.value.classified,
+              sheets: [],
+            });
+          }
+          if (sr.status === "fulfilled") {
+            const r = sr.value;
+            if (r.has_step1 && r.step1) { setStep1Result(r.step1); setChatMessages(r.chat_history || []); setCurrentStep(2); }
+            if (r.has_step2 && r.step2) { setStep2Result(r.step2); setCurrentStep(3); }
+            if (r.benchmark_table && Object.keys(r.benchmark_table).length > 0) {
+              setBenchmarkTableBySheet(r.benchmark_table);
+            }
+            if (r.gap_analysis) setGapAnalysis(r.gap_analysis);
+          }
+          if (sl.status === "fulfilled") setSessions(sl.value.sessions);
+        })
+        .catch(() => {
+          // 세션이 삭제됐거나 없는 경우 → 클리어 후 기존 방식 폴백
+          localStorage.removeItem("lastWorkflowSessionId");
+          loadSessions();
+        });
+    } else {
+      // 저장된 세션 없음 → 백엔드 메모리에서 복원 시도 (서버 재시작 없는 경우)
+      loadSessions();
+      getWorkflowStepResults()
+        .then((r) => {
+          if (r.has_step2 && r.step2) setStep2Result(r.step2);
+          if (r.has_step1 && r.step1) {
+            setStep1Result(r.step1);
+            setChatMessages(r.chat_history || []);
+          }
+          if (r.benchmark_table && Object.keys(r.benchmark_table).length > 0) {
+            setBenchmarkTableBySheet(r.benchmark_table);
+          }
+          if (r.gap_analysis) setGapAnalysis(r.gap_analysis);
+          if (r.has_excel) {
+            getWorkflowExcelTasks()
+              .then((et) => {
+                if (et.total > 0) {
+                  setExcelTasks(et.tasks);
+                  setExcelResult({ ok: true, filename: "이전 업로드", task_count: et.total, has_classification: et.classified > 0, classified_count: et.classified, sheets: [] });
+                }
+              })
+              .catch(() => {});
+          }
+          if (r.has_asis) {
+            getWorkflowSummary()
+              .then((ws) => { setSummary(ws); if (ws.sheets.length > 0) setActiveSheet(ws.sheets[0].sheet_id); })
+              .catch(() => {});
+          }
+        })
+        .catch(() => {});
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ── Step 0: 엑셀 업로드 ───────────────────────────────── */
   const handleExcelUpload = useCallback(async (file: File) => {
