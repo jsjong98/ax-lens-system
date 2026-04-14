@@ -2024,6 +2024,13 @@ def _build_mapped_asis_context(sheet_id: str = "") -> str:
         for e in s.edges:
             outgoing_map.setdefault(e.source, []).append(e)
 
+        # 양방향 엣지 맵 (노드 ID → 협의/상호작용 관계 상대 노드 ID 목록)
+        bidir_map: dict[str, list[str]] = {}
+        for e in s.edges:
+            if e.bidirectional:
+                bidir_map.setdefault(e.source, []).append(e.target)
+                bidir_map.setdefault(e.target, []).append(e.source)
+
         decision_nodes_map = {n.id: n for n in s.nodes.values() if n.level == "DECISION"}
 
         def _render_branches(node_id: str, indent: str = "    ") -> list[str]:
@@ -2046,6 +2053,37 @@ def _build_mapped_asis_context(sheet_id: str = "") -> str:
                     result.append(f"{indent}→ 조건: \"{e.label}\" → [{tgt.level}] {tgt.label}")
             return result
 
+        def _node_meta_lines(node: "WorkflowNode", indent: str = "      ") -> list[str]:
+            """노드 메타데이터(수행주체·시스템·협의관계)를 텍스트 라인으로 반환."""
+            meta_lines = []
+            # 수행주체 (role > actors 우선)
+            role_val = node.metadata.get("role", "")
+            actors_val = node.metadata.get("actors", "")
+            actor_label = role_val or (
+                ", ".join(actors_val) if isinstance(actors_val, list) else str(actors_val)
+            )
+            if actor_label:
+                # "/ " 로 구분된 복수 수행주체 → 협의 관계 명시
+                actor_parts = [a.strip() for a in actor_label.replace("，", ",").split("/") if a.strip()]
+                if len(actor_parts) > 1:
+                    meta_lines.append(f"{indent}수행주체: {' / '.join(actor_parts)} (복수 주체 — 협의 관계)")
+                else:
+                    meta_lines.append(f"{indent}수행주체: {actor_label}")
+            # 사용 시스템 / 고유명사 (큐벡스 등)
+            sys_val = node.metadata.get("system", "") or node.metadata.get("systems", "")
+            sys_label = (
+                ", ".join(sys_val) if isinstance(sys_val, list) else str(sys_val)
+            ) if sys_val else ""
+            if sys_label:
+                meta_lines.append(f"{indent}사용시스템: {sys_label}")
+            # 양방향 협의/상호작용 관계
+            bidir_partners = bidir_map.get(node.id, [])
+            if bidir_partners:
+                partner_labels = [s.nodes[pid].label for pid in bidir_partners if pid in s.nodes]
+                if partner_labels:
+                    meta_lines.append(f"{indent}↔ 협의/상호작용: {', '.join(partner_labels)}")
+            return meta_lines
+
         # L3 노드 순회
         if l3_nodes:
             for l3n in sorted(l3_nodes, key=lambda x: x.task_id):
@@ -2064,12 +2102,14 @@ def _build_mapped_asis_context(sheet_id: str = "") -> str:
                 for l4n in sorted(children, key=lambda x: x.task_id):
                     excel_tasks = by_l4.get(l4n.task_id, [])
                     lines.append(f"    - L4 [{l4n.task_id}] {l4n.label}")
+                    lines.extend(_node_meta_lines(l4n, indent="      "))
                     for t in excel_tasks[:5]:
                         lines.append(_format_task_line(t))
                     # L5 자식
                     l5_children = [n for n in l5_nodes if n.task_id.startswith(l4n.task_id + ".")]
                     for l5n in sorted(l5_children, key=lambda x: x.task_id)[:5]:
                         lines.append(f"      └ L5 [{l5n.task_id}] {l5n.label}")
+                        lines.extend(_node_meta_lines(l5n, indent="          "))
                     # Decision 분기
                     branch_lines = _render_branches(l4n.id)
                     lines.extend(branch_lines)
@@ -2078,6 +2118,7 @@ def _build_mapped_asis_context(sheet_id: str = "") -> str:
             for l4n in sorted(l4_nodes, key=lambda x: x.task_id):
                 excel_tasks = by_l4.get(l4n.task_id, [])
                 lines.append(f"\n  - L4 [{l4n.task_id}] {l4n.label}")
+                lines.extend(_node_meta_lines(l4n, indent="      "))
                 for t in excel_tasks[:5]:
                     lines.append(_format_task_line(t))
                 # Decision 분기

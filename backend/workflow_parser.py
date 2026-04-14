@@ -48,6 +48,7 @@ class WorkflowEdge:
     target: str
     label: str = ""
     animated: bool = False
+    bidirectional: bool = False   # 양방향 화살표 (협의/상호작용 관계)
 
 
 @dataclass
@@ -183,6 +184,12 @@ def _parse_node(raw: dict) -> WorkflowNode | None:
     )
     metadata = {k: data[k] for k in meta_keys if k in data}
 
+    # swimlane 액터 — "그 외:큐벡스" 같은 고유명사 포함
+    # hr-workflow-ai는 role 필드에 "HR 담당자 / HR 임원" 또는 "그 외:큐벡스" 형태로 저장
+    raw_role = data.get("role", "")
+    if raw_role and "role" not in metadata:
+        metadata["role"] = raw_role
+
     return WorkflowNode(
         id=node_id,
         level=level,
@@ -203,12 +210,21 @@ def _parse_edge(raw: dict) -> WorkflowEdge | None:
     if not (edge_id and source and target):
         return None
 
+    # 양방향 화살표 감지:
+    # hr-workflow-ai는 markerStart가 있거나 bidirectional: true이면 양방향
+    is_bidir = (
+        raw.get("bidirectional", False)
+        or bool(raw.get("markerStart"))
+        or (isinstance(raw.get("data"), dict) and raw["data"].get("bidirectional", False))
+    )
+
     return WorkflowEdge(
         id=edge_id,
         source=source,
         target=target,
         label=raw.get("label", ""),
         animated=raw.get("animated", False),
+        bidirectional=is_bidir,
     )
 
 
