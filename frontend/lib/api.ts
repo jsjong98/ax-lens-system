@@ -1136,8 +1136,11 @@ export interface GapAnalysisResult {
   strategic_actions: string[];
 }
 
-export async function generateGapAnalysis(): Promise<GapAnalysisResult> {
-  return apiFetch("/workflow/gap-analysis", { method: "POST", body: "{}" });
+export async function generateGapAnalysis(sheetId?: string): Promise<GapAnalysisResult> {
+  return apiFetch("/workflow/gap-analysis", {
+    method: "POST",
+    body: JSON.stringify({ sheet_id: sheetId ?? "" }),
+  });
 }
 
 export async function deleteBenchmarkRow(source: string, sheetId?: string): Promise<{

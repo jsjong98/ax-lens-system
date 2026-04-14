@@ -2009,8 +2009,18 @@ def _build_mapped_asis_context(sheet_id: str = "") -> str:
         # L2/L3 노드를 상위 구조로, L4/L5를 세부 내용으로 표시
         l2_nodes = [n for n in s.nodes.values() if n.level == "L2"]
         l3_nodes = [n for n in s.nodes.values() if n.level == "L3"]
-        l4_nodes = s.l4_nodes
         l5_nodes = [n for n in s.nodes.values() if n.level == "L5"]
+
+        # L4 노드 필터링: 이 시트에 L5 자식이 있는 L4만 포함
+        # (L5 자식 없는 L4는 다른 L4 연계를 표시하는 connector 노드 → 제외)
+        l5_task_id_set = {n.task_id for n in l5_nodes if n.task_id}
+        if l5_task_id_set:
+            l4_nodes = [
+                n for n in s.l4_nodes
+                if any(tid.startswith(n.task_id + ".") for tid in l5_task_id_set)
+            ]
+        else:
+            l4_nodes = s.l4_nodes  # L5가 없는 시트는 전체 L4 사용
 
         # L4를 부모 L3 기준으로 그룹핑 (task_id prefix로 추정)
         l4_by_l3_tid: dict[str, list] = {}
@@ -2961,12 +2971,25 @@ async def generate_gap_analysis(request: Request):
 
     global _wf_gap_analysis
 
-    all_bm_rows = [r for rows in _wf_benchmark_table.values() for r in rows]
+    # sheet_id 수신: 벤치마킹한 L4 시트 단위로 Gap 분석 스코프 제한
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+    gap_sheet_id: str = body.get("sheet_id", "") or ""
+
+    # 해당 시트 벤치마킹 결과만 사용 (없으면 전체 fallback)
+    if gap_sheet_id and gap_sheet_id in _wf_benchmark_table:
+        all_bm_rows = _wf_benchmark_table[gap_sheet_id]
+    else:
+        all_bm_rows = [r for rows in _wf_benchmark_table.values() for r in rows]
+
     if not all_bm_rows:
         raise HTTPException(400, "벤치마킹을 먼저 수행해주세요.")
 
-    process_name, task_summary, pain_summary = _build_task_and_pain_summary("")
-    asis_context = _build_mapped_asis_context("")
+    process_name, task_summary, pain_summary = _build_task_and_pain_summary(gap_sheet_id)
+    asis_context = _build_mapped_asis_context(gap_sheet_id)
 
     # 벤치마킹 요약 (선도사 To-Be)
     benchmark_summary_text = f"## 벤치마킹 결과 (전체 {len(all_bm_rows)}건)\n"

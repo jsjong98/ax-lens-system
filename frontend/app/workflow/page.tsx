@@ -658,14 +658,14 @@ export default function WorkflowPage() {
     setGapLoading(true);
     setError(null);
     try {
-      const result = await generateGapAnalysis();
+      const result = await generateGapAnalysis(activeSheet ?? undefined);
       setGapAnalysis(result);
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setGapLoading(false);
     }
-  }, []);
+  }, [activeSheet]);
 
   /* ── To-Be Swim Lane 생성 ───────────────────────────────── */
   const handleGenerateTobeFlow = useCallback(async () => {
