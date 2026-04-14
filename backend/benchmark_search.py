@@ -482,12 +482,17 @@ async def _plan_search_queries(
 
 쿼리 규칙:
 1. L5 Task 내용을 근거로 — L4 이름만 보고 만들지 말 것 (예: "조직개편"만 보면 의미 오해 가능)
-2. AI 키워드 필수: "AI", "GenAI", "LLM", "intelligent automation", "AI agent" 중 하나 이상
+2. AI 기술 키워드는 아래 유형을 **골고루** 사용할 것 — GenAI/LLM에만 편중 금지:
+   - Generative AI / LLM / AI agent: 3개 이내
+   - ML / predictive analytics / classification model: 2~3개
+   - RPA / intelligent automation / workflow automation: 1~2개
+   - optimization / operations research / scheduling algorithm: 1~2개
+   - OCR / NLP / computer vision / speech recognition: 1개 이상
 3. Forbes Global 500 / Fortune 500 수준만, 스타트업 금지
 4. 시스템 기능 소개 아닌 AI 전환 성과·사례 중심
 
 ## 쿼리 10개 생성
-- L5 Task 행위 기반 AI 자동화 사례 쿼리 10개 (각기 다른 L5 업무 행위 커버)
+- L5 Task 행위 기반 AI 자동화 사례 쿼리 10개 (각기 다른 L5 업무 행위 + 다양한 AI 기술 유형 커버)
 
 JSON만 출력:
 {{"queries": ["q1","q2","q3","q4","q5","q6","q7","q8","q9","q10"], "hypotheses": ["가설1","가설2","가설3"]}}"""
@@ -663,11 +668,12 @@ R1에서 개별 L5 Task 수준의 사례를 탐색했습니다.
 이제 **L4 활동 하나를 L5 Task들을 모두 읽어 실제 의미를 파악한 뒤**, 그 활동 전체를 AI로 전환한 더 넓은 패턴·사례를 찾는 쿼리를 만드세요.
 - L4 이름만 보지 말 것 (예: "조직개편"이라는 L4 이름만 보면 전략 프로세스로 오해 가능 — L5를 읽으면 행정 후처리임을 알 수 있음)
 - R1에서 이미 찾은 방향은 겹치지 않도록
-- AI 키워드 필수: "AI", "GenAI", "LLM", "intelligent automation", "AI agent" 중 하나 이상
+- AI 기술 유형을 다양하게 분산할 것 (GenAI/LLM뿐 아니라 ML, predictive model, RPA, optimization, OCR, NLP 등 포함)
+- R1에서 GenAI 중심 쿼리가 많았다면 R2는 ML·RPA·최적화 쪽으로 균형 보완
 - Forbes Global 500 수준만, 스타트업 금지
 
 ## 쿼리 8개 생성
-- L4 활동별 AI 전환 사례 쿼리 8개 (L5를 이해하고 L4 단위로 추상화한 쿼리)
+- L4 활동별 AI 전환 사례 쿼리 8개 (다양한 AI 기술 유형 커버 — GenAI 2개 이하로 제한)
 
 JSON만: {{"queries": ["q1","q2","q3","q4","q5","q6","q7","q8"], "l4_focus": "어떤 L4 활동에 집중했는지 한 줄"}}"""
 
@@ -741,13 +747,14 @@ R1(L5 구체)/R2(L4 패턴)에서 찾지 못한 것을 파악하고:
 2. R1/R2에서 커버되지 않은 L4 활동이나 관점의 보완 쿼리
 
 규칙:
-- AI 키워드 필수: "AI", "GenAI", "LLM", "intelligent automation" 중 하나 이상
+- R1/R2에서 커버 안 된 AI 기술 유형을 우선 보완 (예: R1/R2가 GenAI 중심이면 R3는 ML·최적화·RPA 중심)
+- AI 기술 키워드: predictive analytics, ML model, RPA, process optimization, computer vision, NLP, scheduling AI 등 폭넓게 사용
 - Forbes Global 500 수준만, 스타트업 금지
 - R1/R2에서 이미 찾은 방향 중복 금지
 
 ## 쿼리 7개 생성
-- L3 전체 AX 전환 종합 사례 쿼리 3개
-- R1/R2 보완 쿼리 4개 (아직 못 찾은 L4 활동 또는 관점)
+- L3 전체 AI 전환 종합 사례 쿼리 2개 (GenAI 외 기술 포함)
+- R1/R2 보완 쿼리 5개 (아직 못 찾은 L4 활동 + GenAI 외 ML·RPA·최적화 관점 보완)
 
 JSON만: {{"queries": ["q1","q2","q3","q4","q5","q6","q7"], "gap": "R1/R2에서 부족했던 점 한 줄"}}"""
 
