@@ -90,6 +90,9 @@ export default function WorkflowPage() {
   const [chatInput, setChatInput] = useState("");
   // 시트별 벤치마킹 결과 {sheet_id: rows[]}
   const [benchmarkTableBySheet, setBenchmarkTableBySheet] = useState<Record<string, BenchmarkTableRow[]>>({});
+  // 벤치마킹이 완료된 시트 ID — Gap 분석·기본 설계의 고정 스코프
+  // (activeSheet는 "보기용 탭 선택"이고, bmSheetId는 "분석 범위"로 분리)
+  const [bmSheetId, setBmSheetId] = useState<string | null>(null);
   const [bmLoading, setBmLoading] = useState(false);
   const [searchLog, setSearchLog] = useState<SearchLogItem[]>([]);
   const [showSearchLog, setShowSearchLog] = useState(false);
@@ -256,6 +259,10 @@ export default function WorkflowPage() {
         // 벤치마킹·Gap 분석 결과 복원
         if (r.benchmark_table && Object.keys(r.benchmark_table).length > 0) {
           setBenchmarkTableBySheet(r.benchmark_table);
+          // 분석 스코프 복원: 가장 많은 결과를 가진 시트 ID
+          const topSheet = Object.entries(r.benchmark_table)
+            .sort((a, b) => b[1].length - a[1].length)[0]?.[0];
+          if (topSheet && topSheet !== "__default__") setBmSheetId(topSheet);
         }
         if (r.gap_analysis) {
           setGapAnalysis(r.gap_analysis);
@@ -426,6 +433,9 @@ export default function WorkflowPage() {
             if (r.has_step2 && r.step2) { setStep2Result(r.step2); setCurrentStep(3); }
             if (r.benchmark_table && Object.keys(r.benchmark_table).length > 0) {
               setBenchmarkTableBySheet(r.benchmark_table);
+              const topSheet2 = Object.entries(r.benchmark_table)
+                .sort((a, b) => b[1].length - a[1].length)[0]?.[0];
+              if (topSheet2 && topSheet2 !== "__default__") setBmSheetId(topSheet2);
             }
             if (r.gap_analysis) setGapAnalysis(r.gap_analysis);
           }
@@ -448,6 +458,9 @@ export default function WorkflowPage() {
           }
           if (r.benchmark_table && Object.keys(r.benchmark_table).length > 0) {
             setBenchmarkTableBySheet(r.benchmark_table);
+            const topSheet3 = Object.entries(r.benchmark_table)
+              .sort((a, b) => b[1].length - a[1].length)[0]?.[0];
+            if (topSheet3 && topSheet3 !== "__default__") setBmSheetId(topSheet3);
           }
           if (r.gap_analysis) setGapAnalysis(r.gap_analysis);
           if (r.has_excel) {
@@ -542,6 +555,8 @@ export default function WorkflowPage() {
       (result) => {
         const sheetKey = result.sheet_id ?? activeSheet ?? "__default__";
         setBenchmarkTableBySheet((prev) => ({ ...prev, [sheetKey]: result.benchmark_table }));
+        // 벤치마킹 완료 시 분석 스코프 고정 — 이후 Gap/기본설계는 이 시트 기준
+        setBmSheetId(sheetKey);
 
         if (result.search_log) setSearchLog(result.search_log);
         setChatMessages((prev) => [
@@ -563,9 +578,11 @@ export default function WorkflowPage() {
     setLoading(true);
     setError(null);
     try {
+      // bmSheetId 우선: 벤치마킹 완료된 시트가 분석 스코프
+      const step1Sheet = bmSheetId ?? activeSheet;
       const result = await generateWorkflowStep1({
         prompt: prompt || "선도사례를 분석하여 To-Be Workflow 기본 설계를 수행해주세요.",
-        ...(activeSheet ? { sheet_id: activeSheet } : {}),
+        ...(step1Sheet ? { sheet_id: step1Sheet } : {}),
       });
       setStep1Result(result);
       setChatMessages((prev) => [
@@ -578,7 +595,7 @@ export default function WorkflowPage() {
     } finally {
       setLoading(false);
     }
-  }, [activeSheet]);
+  }, [bmSheetId, activeSheet]);
 
   /* ── 사용자 리소스 핸들러 ──────────────────────────────────── */
 
@@ -711,14 +728,15 @@ export default function WorkflowPage() {
     setGapLoading(true);
     setError(null);
     try {
-      const result = await generateGapAnalysis(activeSheet ?? undefined);
+      // bmSheetId 우선: 벤치마킹 완료된 시트가 분석 스코프
+      const result = await generateGapAnalysis(bmSheetId ?? activeSheet ?? undefined);
       setGapAnalysis(result);
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setGapLoading(false);
     }
-  }, [activeSheet]);
+  }, [bmSheetId, activeSheet]);
 
   /* ── To-Be Swim Lane 생성 ───────────────────────────────── */
   const handleGenerateTobeFlow = useCallback(async () => {
@@ -753,8 +771,12 @@ export default function WorkflowPage() {
 
   const hasAsIs = summary || pptResult;
   const currentSheet = summary?.sheets.find((s) => s.sheet_id === activeSheet);
-  // 현재 시트의 벤치마킹 결과 (테이블 표시용)
-  const benchmarkTable = activeSheet ? (benchmarkTableBySheet[activeSheet] ?? []) : [];
+  // 분석 스코프 시트 (벤치마킹 완료 시트 → Gap/기본설계 고정 스코프)
+  const analysisSheet = summary?.sheets.find((s) => s.sheet_id === bmSheetId);
+  // 현재 시트의 벤치마킹 결과 (테이블 표시용) — bmSheetId 기준
+  const benchmarkTable = bmSheetId
+    ? (benchmarkTableBySheet[bmSheetId] ?? benchmarkTableBySheet[activeSheet ?? ""] ?? [])
+    : (activeSheet ? (benchmarkTableBySheet[activeSheet] ?? []) : []);
   // 전체 시트 벤치마킹 건수 합산 (기본 설계 활성화 조건)
   const totalBenchmarkCount = Object.values(benchmarkTableBySheet).reduce((s, r) => s + r.length, 0);
 
@@ -1492,6 +1514,13 @@ export default function WorkflowPage() {
                   </div>
                 </div>
               </div>
+              {/* 분석 범위 배지 — bmSheetId 고정 시 표시 */}
+              {analysisSheet && (
+                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-50 border border-blue-200 text-xs text-blue-700 font-semibold shrink-0" title="벤치마킹이 완료된 시트 — Gap 분석·기본 설계의 고정 분석 범위">
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-500 inline-block" />
+                  분석 범위: {analysisSheet.sheet_name || analysisSheet.sheet_id}
+                </div>
+              )}
               {/* 버튼 그룹 — 스코프 토글 · 벤치마킹 · 기본 설계 생성 */}
               <div className="flex items-center gap-2 flex-shrink-0 ml-4">
                 {/* L3/L4 스코프 토글 */}
