@@ -2190,11 +2190,14 @@ def _build_task_and_pain_summary(sheet_id: str = "") -> tuple[str, str, str]:
             target_sheets = parsed.sheets  # L3 전체: 모든 L4 시트 합산
 
         # JSON 노드의 task_id에서 L5→L4→L3 접두사 수집
-        # L5: x.y.z.w → L4: x.y.z, L3: x.y, L2: x
+        # ── sheet_id 지정(L4 scope): L5 노드 task_id만 사용 (connector L4 노드 제외)
+        # ── sheet_id 없음(L3 scope):  모든 노드 task_id 사용
         json_tids: set[str] = set()
         json_l4_ids: set[str] = set()
         for s in target_sheets:
-            for n in s.nodes.values():
+            l5_only = [n for n in s.nodes.values() if n.level == "L5"]
+            source_nodes = l5_only if (sheet_id and l5_only) else s.nodes.values()
+            for n in source_nodes:
                 if n.task_id:
                     json_tids.add(n.task_id)
                     parts = n.task_id.split(".")
@@ -2212,18 +2215,27 @@ def _build_task_and_pain_summary(sheet_id: str = "") -> tuple[str, str, str]:
         if filtered:
             relevant_tasks = filtered
 
-    # process_name = L3 이름
-    # L5 노드의 task_id 앞 두 자리(x.y) = L3 ID → 엑셀 t.l3_id로 매핑하여 L3 이름 추적
-    if json_l3_ids:
+    # process_name 결정
+    # ── L4 scope(sheet_id 지정): 시트 이름(L4명) 사용
+    # ── L3 scope: L3 이름 사용
+    if sheet_id and "parsed" in _workflow_cache:
+        # 시트 이름 = L4 Activity 명
+        matched_sheet = next(
+            (s for s in _workflow_cache["parsed"].sheets if s.sheet_id == sheet_id), None
+        )
+        sheet_l4_name = (matched_sheet.name if matched_sheet else "").strip()
+        process_name = sheet_l4_name or "HR 프로세스"
+    elif json_l3_ids:
         seen_l3n: set[str] = set()
         l3_names: list[str] = []
         for t in _wf_excel_tasks:
             if t.l3_id in json_l3_ids and t.l3 and t.l3 not in seen_l3n:
                 seen_l3n.add(t.l3)
                 l3_names.append(t.l3)
+        process_name = l3_names[0] if l3_names else "HR 프로세스"
     else:
         l3_names = list(dict.fromkeys(t.l3 for t in relevant_tasks if t.l3))
-    process_name = l3_names[0] if l3_names else "HR 프로세스"
+        process_name = l3_names[0] if l3_names else "HR 프로세스"
 
     task_lines = []
     for t in relevant_tasks:
