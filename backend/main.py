@@ -2219,9 +2219,16 @@ def _build_task_and_pain_summary(sheet_id: str = "") -> tuple[str, str, str]:
 
         print(f"[SCOPE] json_tids={sorted(json_tids)[:10]} json_l4_ids={sorted(json_l4_ids)}", flush=True)
 
-        # 1순위: task_id 직접 매칭 → 2순위: l4_id 매칭 → 3순위: l3_id 매칭
-        filtered = [t for t in _wf_excel_tasks if t.id in json_tids]
-        print(f"[SCOPE] 1순위(task_id) matched={len(filtered)}건: {[t.id for t in filtered[:5]]}", flush=True)
+        # 0순위: 시트 이름(L4 Activity 이름)으로 Excel l4 컬럼 직접 매칭
+        # → task_id 번호가 Excel 업데이트로 바뀌어도 이름 기반 매칭은 안정적
+        sheet_names = [s.name.strip() for s in target_sheets if s.name]
+        filtered = [t for t in _wf_excel_tasks if t.l4 and t.l4.strip() in sheet_names]
+        print(f"[SCOPE] 0순위(l4 이름 매칭) matched={len(filtered)}건: sheet_names={sheet_names}", flush=True)
+
+        if not filtered:
+            # 1순위: task_id 직접 매칭 (이름 매칭 실패 시)
+            filtered = [t for t in _wf_excel_tasks if t.id in json_tids]
+            print(f"[SCOPE] 1순위(task_id) matched={len(filtered)}건: {[t.id for t in filtered[:5]]}", flush=True)
         if not filtered:
             filtered = [t for t in _wf_excel_tasks if t.l4_id in json_l4_ids]
             print(f"[SCOPE] 2순위(l4_id) matched={len(filtered)}건: {[t.name for t in filtered[:5]]}", flush=True)
@@ -2705,7 +2712,10 @@ async def benchmark_workflow_step1(request: Request):
                             sheet_l4_ids.add(".".join(parts[:3]))
                         if len(parts) >= 2:
                             sheet_l3_ids.add(".".join(parts[:2]))
-                matched = [t for t in _wf_excel_tasks if t.id in sheet_tids]
+                # 0순위: 시트 이름 = Excel l4 이름으로 매칭 (번호 변경에도 안정적)
+                matched = [t for t in _wf_excel_tasks if t.l4 and t.l4.strip() == sheet_l4_name]
+                if not matched:
+                    matched = [t for t in _wf_excel_tasks if t.id in sheet_tids]
                 if not matched:
                     matched = [t for t in _wf_excel_tasks if t.l4_id in sheet_l4_ids]
                 if not matched:
@@ -2761,9 +2771,25 @@ async def benchmark_workflow_step1(request: Request):
                 l2_details.append({"name": name, "task_id": l2_id, "pain_points": _get_pain_points(tasks)})
 
     l4_details, l3_details, l2_details = l4_details[:8], l3_details[:6], l2_details[:3]
-    l2_names = [d["name"] for d in l2_details]
-    l3_names = [d["name"] for d in l3_details]
     l4_names = [d["name"] for d in l4_details]
+
+    # L3/L2는 Excel에서 l5_tasks의 상위 계층을 역추적해 가져옴
+    # (다이어그램 노드 기반 수집은 다른 L3 노드가 섞여 오염됨)
+    _l3_seen: set[str] = set()
+    _l2_seen: set[str] = set()
+    _l3_from_excel: list[str] = []
+    _l2_from_excel: list[str] = []
+    for d in l4_details:
+        for t in (d.get("_matched_tasks") or excel_by_l4.get(d.get("task_id", ""), [])):
+            if t.l3 and t.l3 not in _l3_seen:
+                _l3_seen.add(t.l3)
+                _l3_from_excel.append(t.l3)
+            if t.l2 and t.l2 not in _l2_seen:
+                _l2_seen.add(t.l2)
+                _l2_from_excel.append(t.l2)
+    # Excel 역추적이 비어 있으면 기존 다이어그램 기반 fallback
+    l3_names = _l3_from_excel or [d["name"] for d in l3_details]
+    l2_names = _l2_from_excel or [d["name"] for d in l2_details]
 
     # L5 task — 이 L4(시트) 범위에 속하는 엑셀 task 수집
     l5_tasks = []
