@@ -1997,9 +1997,14 @@ def _build_mapped_asis_context(sheet_id: str = "") -> str:
         return "\n".join(lines)
 
     parsed = _workflow_cache["parsed"]
-    target_sheets = (
-        [s for s in parsed.sheets if s.sheet_id == sheet_id] or parsed.sheets[:1]
-    ) if sheet_id else parsed.sheets
+    if sheet_id:
+        matched_sheets = [s for s in parsed.sheets if s.sheet_id == sheet_id]
+        if not matched_sheets:
+            print(f"[SCOPE⚠] _build_mapped_asis_context sheet_id='{sheet_id}' 매칭 없음! 전체 시트: {[s.sheet_id for s in parsed.sheets]}", flush=True)
+        target_sheets = matched_sheets if matched_sheets else parsed.sheets
+    else:
+        target_sheets = parsed.sheets
+    print(f"[SCOPE] _build_mapped_asis_context sheet_id='{sheet_id}' → target_sheets={[s.sheet_id+'/'+s.name for s in target_sheets]}", flush=True)
 
     by_id, by_l4, by_l3, by_l2 = _build_excel_index()
     lines = ["## As-Is 워크플로우 + 엑셀 매핑\n"]
@@ -2183,11 +2188,17 @@ def _build_task_and_pain_summary(sheet_id: str = "") -> tuple[str, str, str]:
 
     if "parsed" in _workflow_cache:
         parsed = _workflow_cache["parsed"]
+        all_sheet_ids = [s.sheet_id for s in parsed.sheets]
         # sheet_id 지정 시 해당 시트(=L4)만, 아니면 전체 시트(=L3 전체)
         if sheet_id:
-            target_sheets = [s for s in parsed.sheets if s.sheet_id == sheet_id] or parsed.sheets[:1]
+            matched = [s for s in parsed.sheets if s.sheet_id == sheet_id]
+            if not matched:
+                print(f"[SCOPE⚠] sheet_id='{sheet_id}' 매칭 시트 없음! 전체 시트 목록: {all_sheet_ids}", flush=True)
+            target_sheets = matched if matched else parsed.sheets  # fallback: 전체(L3)
         else:
             target_sheets = parsed.sheets  # L3 전체: 모든 L4 시트 합산
+
+        print(f"[SCOPE] _build_task_and_pain_summary sheet_id='{sheet_id}' → target_sheets={[s.sheet_id+'/'+s.name for s in target_sheets]}", flush=True)
 
         # JSON 노드의 task_id에서 L5→L4→L3 접두사 수집
         # ── sheet_id 지정(L4 scope): L5 노드 task_id만 사용 (connector L4 노드 제외)
@@ -2206,12 +2217,17 @@ def _build_task_and_pain_summary(sheet_id: str = "") -> tuple[str, str, str]:
                     if len(parts) >= 2:
                         json_l3_ids.add(".".join(parts[:2]))  # x.y = L3
 
+        print(f"[SCOPE] json_tids={sorted(json_tids)[:10]} json_l4_ids={sorted(json_l4_ids)}", flush=True)
+
         # 1순위: task_id 직접 매칭 → 2순위: l4_id 매칭 → 3순위: l3_id 매칭
         filtered = [t for t in _wf_excel_tasks if t.id in json_tids]
+        print(f"[SCOPE] 1순위(task_id) matched={len(filtered)}건: {[t.id for t in filtered[:5]]}", flush=True)
         if not filtered:
             filtered = [t for t in _wf_excel_tasks if t.l4_id in json_l4_ids]
+            print(f"[SCOPE] 2순위(l4_id) matched={len(filtered)}건: {[t.name for t in filtered[:5]]}", flush=True)
         if not filtered:
             filtered = [t for t in _wf_excel_tasks if t.l3_id in json_l3_ids]
+            print(f"[SCOPE] 3순위(l3_id) matched={len(filtered)}건 — L3 전체 fallback!", flush=True)
         if filtered:
             relevant_tasks = filtered
 
@@ -2657,11 +2673,15 @@ async def benchmark_workflow_step1(request: Request):
         if scope == "l3":
             target_sheets = parsed.sheets
         elif sheet_id_bm:
-            target_sheets = [s for s in parsed.sheets if s.sheet_id == sheet_id_bm]
-            if not target_sheets:
-                target_sheets = parsed.sheets[:1]  # fallback
+            matched_bm = [s for s in parsed.sheets if s.sheet_id == sheet_id_bm]
+            if not matched_bm:
+                print(f"[SCOPE⚠] benchmark_workflow_step1 sheet_id_bm='{sheet_id_bm}' 매칭 없음! 전체: {[s.sheet_id for s in parsed.sheets]}", flush=True)
+                target_sheets = parsed.sheets  # L3 전체로 fallback (첫 번째만이 아님)
+            else:
+                target_sheets = matched_bm
         else:
-            target_sheets = parsed.sheets[:1]
+            target_sheets = parsed.sheets  # sheet_id 없으면 전체 L3
+        print(f"[SCOPE] benchmark_workflow_step1 scope='{scope}' sheet_id_bm='{sheet_id_bm}' → target_sheets={[s.sheet_id+'/'+s.name for s in target_sheets]}", flush=True)
 
         for s in target_sheets:
             # 시트 이름 자체 = L4 이름 (시트 = L4 단위)
