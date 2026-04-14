@@ -4192,7 +4192,7 @@ Step 1에서 도출된 기본 설계를 기반으로, 두산에 최적화된 **A
 
 @app.get("/api/workflow/step-results", tags=["Workflow"])
 async def get_workflow_step_results():
-    """Step 1 / Step 2 결과를 반환합니다."""
+    """Step 1 / Step 2 결과를 반환합니다. 벤치마킹·Gap 분석 결과도 포함."""
     return {
         "ok": True,
         "has_excel": len(_wf_excel_tasks) > 0,
@@ -4202,6 +4202,9 @@ async def get_workflow_step_results():
         "step1": _wf_step1_cache if _wf_step1_cache else None,
         "step2": _wf_step2_cache if _wf_step2_cache else None,
         "chat_history": _wf_chat_history,
+        # 벤치마킹·Gap 분석 복원용
+        "benchmark_table": _wf_benchmark_table,
+        "gap_analysis": _wf_gap_analysis if _wf_gap_analysis else None,
     }
 
 

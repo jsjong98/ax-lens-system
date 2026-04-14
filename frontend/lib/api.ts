@@ -1365,6 +1365,8 @@ export async function getWorkflowStepResults(): Promise<{
   step1: WorkflowStepResult | null;
   step2: WorkflowStepResult | null;
   chat_history: Array<{ role: string; content: string }>;
+  benchmark_table: Record<string, BenchmarkTableRow[]>;
+  gap_analysis: GapAnalysisResult | null;
 }> {
   return apiFetch("/workflow/step-results");
 }

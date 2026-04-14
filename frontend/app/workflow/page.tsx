@@ -253,6 +253,13 @@ export default function WorkflowPage() {
         const r = sr.value;
         if (r.has_step1 && r.step1) { setStep1Result(r.step1); setChatMessages(r.chat_history || []); setCurrentStep(2); }
         if (r.has_step2 && r.step2) { setStep2Result(r.step2); setCurrentStep(3); }
+        // 벤치마킹·Gap 분석 결과 복원
+        if (r.benchmark_table && Object.keys(r.benchmark_table).length > 0) {
+          setBenchmarkTableBySheet(r.benchmark_table);
+        }
+        if (r.gap_analysis) {
+          setGapAnalysis(r.gap_analysis);
+        }
       }
       // 누적 리서치 자료 복원
       try {
@@ -384,6 +391,13 @@ export default function WorkflowPage() {
         if (r.has_step1 && r.step1) {
           setStep1Result(r.step1);
           setChatMessages(r.chat_history || []);
+        }
+        // 벤치마킹·Gap 분석 결과 복원
+        if (r.benchmark_table && Object.keys(r.benchmark_table).length > 0) {
+          setBenchmarkTableBySheet(r.benchmark_table);
+        }
+        if (r.gap_analysis) {
+          setGapAnalysis(r.gap_analysis);
         }
         if (r.has_excel) {
           // 엑셀 로드되어 있음 표시
