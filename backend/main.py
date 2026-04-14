@@ -2201,13 +2201,13 @@ def _build_task_and_pain_summary(sheet_id: str = "") -> tuple[str, str, str]:
         print(f"[SCOPE] _build_task_and_pain_summary sheet_id='{sheet_id}' → target_sheets={[s.sheet_id+'/'+s.name for s in target_sheets]}", flush=True)
 
         # JSON 노드의 task_id에서 L5→L4→L3 접두사 수집
-        # ── sheet_id 지정(L4 scope): L5 노드 task_id만 사용 (connector L4 노드 제외)
-        # ── sheet_id 없음(L3 scope):  모든 노드 task_id 사용
+        # L4 노드는 흐름 연결용 connector이므로 항상 L5 노드 task_id만 사용
+        # (L4 노드 task_id를 쓰면 다른 시트 태스크가 오염됨)
         json_tids: set[str] = set()
         json_l4_ids: set[str] = set()
         for s in target_sheets:
             l5_only = [n for n in s.nodes.values() if n.level == "L5"]
-            source_nodes = l5_only if (sheet_id and l5_only) else s.nodes.values()
+            source_nodes = l5_only if l5_only else s.nodes.values()  # L5 없으면 전체 fallback
             for n in source_nodes:
                 if n.task_id:
                     json_tids.add(n.task_id)
@@ -2694,9 +2694,9 @@ async def benchmark_workflow_step1(request: Request):
                 sheet_tids: set[str] = set()
                 sheet_l4_ids: set[str] = set()
                 sheet_l3_ids: set[str] = set()
-                # L5 노드만 필터링 (connector L4 노드의 task_id가 섞이지 않도록)
+                # L4 노드는 흐름 연결용 connector이므로 항상 L5만 사용 (scope 무관)
                 l5_only_nodes = [n for n in s.nodes.values() if n.level == "L5"]
-                source_nodes = l5_only_nodes if (scope != "l3" and l5_only_nodes) else s.nodes.values()
+                source_nodes = l5_only_nodes if l5_only_nodes else s.nodes.values()  # L5 없으면 전체 fallback
                 for node in source_nodes:
                     if node.task_id:
                         sheet_tids.add(node.task_id)
