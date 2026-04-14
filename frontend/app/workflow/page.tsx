@@ -46,7 +46,6 @@ import {
 } from "@/lib/api";
 import { ToBeSwimlane } from "./ToBeSwimlane";
 import WorkflowEditor from "@/components/WorkflowEditor";
-import ToBeWorkflowModal from "@/components/ToBeWorkflowModal";
 import MappingCheckPanel from "@/components/MappingCheckPanel";
 
 /* ── 색상 ─────────────────────────────────────────────────── */
@@ -98,7 +97,6 @@ export default function WorkflowPage() {
 
   // Step 3: Step 2 상세 설계
   const [step2Result, setStep2Result] = useState<WorkflowStepResult | null>(null);
-  const [showToBeModal, setShowToBeModal] = useState(false);
 
   // Gap 분석
   const [gapAnalysis, setGapAnalysis] = useState<GapAnalysisResult | null>(null);
@@ -2266,14 +2264,7 @@ export default function WorkflowPage() {
               </div>
 
               {/* 다음 단계 */}
-              <div className="flex justify-between items-center">
-                <button
-                  onClick={() => setShowToBeModal(true)}
-                  className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-bold border-2 transition"
-                  style={{ borderColor: PWC.primary, color: PWC.primary, backgroundColor: PWC.bg }}
-                >
-                  &#9741; 워크플로우 보기 / 편집
-                </button>
+              <div className="flex justify-end items-center">
                 <button
                   onClick={() => setCurrentStep(3)}
                   className="px-6 py-2.5 rounded-lg text-sm font-bold text-white transition"
@@ -2286,9 +2277,6 @@ export default function WorkflowPage() {
           )}
         </div>
       )}
-
-      {/* To-Be Workflow 모달 */}
-      <ToBeWorkflowModal open={showToBeModal} onClose={() => setShowToBeModal(false)} />
 
       {/* ═══ Step 3: Step 2 상세 설계 (Bottom-Up) ═══ */}
       {currentStep === 3 && (
