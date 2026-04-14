@@ -555,8 +555,14 @@ export default function WorkflowPage() {
       (result) => {
         const sheetKey = result.sheet_id ?? activeSheet ?? "__default__";
         setBenchmarkTableBySheet((prev) => ({ ...prev, [sheetKey]: result.benchmark_table }));
-        // 벤치마킹 완료 시 분석 스코프 고정 — 이후 Gap/기본설계는 이 시트 기준
-        setBmSheetId(sheetKey);
+        // 벤치마킹 완료 시 분석 스코프 고정
+        // - L4 단위: 해당 시트 ID로 고정 → Gap/기본설계가 그 L4 기준으로 실행
+        // - L3 전체: null 유지 → Gap/기본설계가 sheet_id="" (전체) 기준으로 실행
+        if (bmScope === "l4" && sheetKey !== "__default__") {
+          setBmSheetId(sheetKey);
+        } else {
+          setBmSheetId(null); // L3 scope는 고정 시트 없음
+        }
 
         if (result.search_log) setSearchLog(result.search_log);
         setChatMessages((prev) => [
