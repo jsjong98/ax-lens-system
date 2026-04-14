@@ -2219,11 +2219,38 @@ def _build_task_and_pain_summary(sheet_id: str = "") -> tuple[str, str, str]:
 
         print(f"[SCOPE] json_tids={sorted(json_tids)[:10]} json_l4_ids={sorted(json_l4_ids)}", flush=True)
 
-        # 0순위: 시트 이름(L4 Activity 이름)으로 Excel l4 컬럼 직접 매칭
-        # → task_id 번호가 Excel 업데이트로 바뀌어도 이름 기반 매칭은 안정적
+        # JSON 파일 전체 = 하나의 L3 → 모든 시트에서 L3 이름·ID 수집 (L3 범위 확정)
+        # L4 이름이 여러 L3에 걸쳐 중복 사용될 수 있으므로 L3 범위로 반드시 좁혀야 함
+        all_l3_names_in_json: set[str] = set()
+        all_l3_ids_in_json: set[str] = set()
+        for s_all in parsed.sheets:
+            for n in s_all.nodes.values():
+                if n.level == "L3" and n.label:
+                    all_l3_names_in_json.add(n.label.strip())
+                if n.level == "L5" and n.task_id:
+                    parts = n.task_id.split(".")
+                    if len(parts) >= 2:
+                        all_l3_ids_in_json.add(".".join(parts[:2]))
+
         sheet_names = [s.name.strip() for s in target_sheets if s.name]
-        filtered = [t for t in _wf_excel_tasks if t.l4 and t.l4.strip() in sheet_names]
-        print(f"[SCOPE] 0순위(l4 이름 매칭) matched={len(filtered)}건: sheet_names={sheet_names}", flush=True)
+        print(f"[SCOPE] L3 범위: names={all_l3_names_in_json} ids={all_l3_ids_in_json}", flush=True)
+
+        # 0순위: L4 이름 + L3 이름 조합 (가장 안정적 — 번호 변경 무관)
+        if all_l3_names_in_json:
+            filtered = [t for t in _wf_excel_tasks
+                        if t.l4 and t.l4.strip() in sheet_names
+                        and t.l3 and t.l3.strip() in all_l3_names_in_json]
+            print(f"[SCOPE] 0순위(l4명+l3명) matched={len(filtered)}건: sheet_names={sheet_names}", flush=True)
+        elif all_l3_ids_in_json:
+            # L3 노드 없으면 task_id prefix로 L3 ID 추정
+            filtered = [t for t in _wf_excel_tasks
+                        if t.l4 and t.l4.strip() in sheet_names
+                        and t.l3_id in all_l3_ids_in_json]
+            print(f"[SCOPE] 0순위(l4명+l3id) matched={len(filtered)}건", flush=True)
+        else:
+            # L3 정보 없으면 L4 이름만 (중복 가능성 있음, 경고)
+            filtered = [t for t in _wf_excel_tasks if t.l4 and t.l4.strip() in sheet_names]
+            print(f"[SCOPE] 0순위(l4명만) matched={len(filtered)}건 — L3 컨텍스트 없음!", flush=True)
 
         if not filtered:
             # 1순위: task_id 직접 매칭 (이름 매칭 실패 시)
@@ -2683,27 +2710,37 @@ async def benchmark_workflow_step1(request: Request):
             matched_bm = [s for s in parsed.sheets if s.sheet_id == sheet_id_bm]
             if not matched_bm:
                 print(f"[SCOPE⚠] benchmark_workflow_step1 sheet_id_bm='{sheet_id_bm}' 매칭 없음! 전체: {[s.sheet_id for s in parsed.sheets]}", flush=True)
-                target_sheets = parsed.sheets  # L3 전체로 fallback (첫 번째만이 아님)
+                target_sheets = parsed.sheets
             else:
                 target_sheets = matched_bm
         else:
-            target_sheets = parsed.sheets  # sheet_id 없으면 전체 L3
+            target_sheets = parsed.sheets
         print(f"[SCOPE] benchmark_workflow_step1 scope='{scope}' sheet_id_bm='{sheet_id_bm}' → target_sheets={[s.sheet_id+'/'+s.name for s in target_sheets]}", flush=True)
+
+        # JSON 파일 전체 = 하나의 L3 → 모든 시트에서 L3 이름·ID 수집
+        # (동일한 L4 이름이 여러 L3에 걸쳐 존재할 수 있으므로 L3로 반드시 좁혀야 함)
+        all_l3_names_bm: set[str] = set()
+        all_l3_ids_bm: set[str] = set()
+        for s_all in parsed.sheets:
+            for n in s_all.nodes.values():
+                if n.level == "L3" and n.label:
+                    all_l3_names_bm.add(n.label.strip())
+                if n.level == "L5" and n.task_id:
+                    parts = n.task_id.split(".")
+                    if len(parts) >= 2:
+                        all_l3_ids_bm.add(".".join(parts[:2]))
 
         for s in target_sheets:
             # 시트 이름 자체 = L4 이름 (시트 = L4 단위)
             sheet_l4_name = (s.name or s.sheet_id).strip()
             if sheet_l4_name and sheet_l4_name not in seen_l4:
                 seen_l4.add(sheet_l4_name)
-                # 이 시트(L4)에 해당하는 엑셀 task 매칭
-                # ── L4 scope: L5 노드 task_id만 사용 (connector L4 노드 제외)
-                # ── L3 scope: 모든 노드 task_id 사용 (전체 L3 범위)
                 sheet_tids: set[str] = set()
                 sheet_l4_ids: set[str] = set()
                 sheet_l3_ids: set[str] = set()
-                # L4 노드는 흐름 연결용 connector이므로 항상 L5만 사용 (scope 무관)
+                # L4 노드는 흐름 연결용 connector이므로 항상 L5만 사용
                 l5_only_nodes = [n for n in s.nodes.values() if n.level == "L5"]
-                source_nodes = l5_only_nodes if l5_only_nodes else s.nodes.values()  # L5 없으면 전체 fallback
+                source_nodes = l5_only_nodes if l5_only_nodes else s.nodes.values()
                 for node in source_nodes:
                     if node.task_id:
                         sheet_tids.add(node.task_id)
@@ -2712,8 +2749,18 @@ async def benchmark_workflow_step1(request: Request):
                             sheet_l4_ids.add(".".join(parts[:3]))
                         if len(parts) >= 2:
                             sheet_l3_ids.add(".".join(parts[:2]))
-                # 0순위: 시트 이름 = Excel l4 이름으로 매칭 (번호 변경에도 안정적)
-                matched = [t for t in _wf_excel_tasks if t.l4 and t.l4.strip() == sheet_l4_name]
+
+                # 0순위: L4 이름 + L3 범위 조합 (동일 L4명이 여러 L3에 걸쳐 있을 때 필수)
+                if all_l3_names_bm:
+                    matched = [t for t in _wf_excel_tasks
+                               if t.l4 and t.l4.strip() == sheet_l4_name
+                               and t.l3 and t.l3.strip() in all_l3_names_bm]
+                elif all_l3_ids_bm:
+                    matched = [t for t in _wf_excel_tasks
+                               if t.l4 and t.l4.strip() == sheet_l4_name
+                               and t.l3_id in all_l3_ids_bm]
+                else:
+                    matched = [t for t in _wf_excel_tasks if t.l4 and t.l4.strip() == sheet_l4_name]
                 if not matched:
                     matched = [t for t in _wf_excel_tasks if t.id in sheet_tids]
                 if not matched:
