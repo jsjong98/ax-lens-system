@@ -430,34 +430,65 @@ def _fill_design_slide(slide, design: dict, definition: dict | None = None):
         _set_text(date_shape, f"작성일: {created_date}   |   작성자: {author}")
 
     # 8. AI 기술 유형 — 체크박스 ✓ 표시
+    # project_design_generator.py의 DEFAULT_TECH_CATEGORIES 기준으로 정렬
     _CHECKBOX_MAP = {
-        # label text → checkbox shape name
-        "정보 추출": "직사각형 34",
-        "텍스트 생성": "직사각형 35",
-        "대화형 인터페이스": "직사각형 36",
-        "멀티모달 처리": "직사각형 57",
-        "예측": "직사각형 134",
-        "군집 · 분류": "직사각형 132",
-        "최적화": "직사각형 147",
-        "추천": "직사각형 145",
-        "RPA": "직사각형 160",
-        "OCR": "직사각형 158",
+        # label text (project_design_generator 기준) → checkbox shape name
+        "정보 추출":           "직사각형 34",
+        "텍스트 생성":         "직사각형 35",
+        "요약·재작성·질의응답": "직사각형 36",   # 구: 대화형 인터페이스
+        "멀티모달 생성·이해":   "직사각형 57",   # 구: 멀티모달 처리
+        "예측":                "직사각형 134",
+        "군집·분류":           "직사각형 132",   # 구: 군집 · 분류
+        "최적화":              "직사각형 147",
+        "추천·랭킹":           "직사각형 145",   # 구: 추천
+        "RPA":                "직사각형 160",
+        "OCR":                "직사각형 158",
+        "음성 인식":           "직사각형 159",   # 템플릿에 없으면 무시됨
     }
+
+    # PPT 템플릿 텍스트 라벨 → 새 이름으로 일괄 교체
+    # (체크박스 옆 텍스트 shape들을 스캔하여 구 명칭 → 신 명칭으로 대체)
+    _LABEL_RENAME = {
+        "대화형 인터페이스": "요약·재작성·질의응답",
+        "멀티모달 처리":    "멀티모달 생성·이해",
+        "군집 · 분류":     "군집·분류",
+        "추천":            "추천·랭킹",
+    }
+
+    def _rename_labels_in_slide(sl, rename_map: dict) -> None:
+        """슬라이드 전체 shape을 순회하여 구 라벨 텍스트를 신 명칭으로 교체."""
+        def _walk(shapes):
+            for shp in shapes:
+                if hasattr(shp, "shapes"):   # 그룹
+                    _walk(shp.shapes)
+                elif shp.has_text_frame:
+                    for para in shp.text_frame.paragraphs:
+                        full = "".join(r.text for r in para.runs)
+                        if full in rename_map:
+                            new_text = rename_map[full]
+                            # 첫 번째 run에 새 텍스트, 나머지 run 비움
+                            for i, run in enumerate(para.runs):
+                                run.text = new_text if i == 0 else ""
+        _walk(sl.shapes)
+
+    _rename_labels_in_slide(slide, _LABEL_RENAME)
+
     tech_types = design.get("ai_tech_info", {}).get("tech_types", [])
     tech_names_joined = " ".join(design.get("ai_tech_info", {}).get("tech_names", [])).upper()
 
     # tech_names에서 checked 자동 보정 (LLM이 누락한 체크 복구)
     _AUTO_CHECK_KEYWORDS = {
-        "정보 추출": ["RAG", "검색", "추출", "RETRIEVAL"],
-        "텍스트 생성": ["LLM", "GPT", "텍스트 생성"],
-        "대화형 인터페이스": ["CHATBOT", "CONVERSATIONAL", "대화"],
-        "멀티모달 처리": ["MULTIMODAL", "멀티모달"],
-        "예측": ["예측", "PREDICTION", "FORECAST"],
-        "군집 · 분류": ["ML MODEL", "ML 모델", "분류", "CLASSIFICATION", "CLUSTERING"],
-        "최적화": ["최적화", "OPTIMIZATION"],
-        "추천": ["추천", "RECOMMENDATION"],
-        "RPA": ["RPA"],
-        "OCR": ["OCR"],
+        "정보 추출":           ["RAG", "검색", "추출", "RETRIEVAL", "정보 추출"],
+        "텍스트 생성":         ["LLM", "GPT", "텍스트 생성", "TEXT GENERATION"],
+        "요약·재작성·질의응답": ["요약", "질의응답", "QA", "SUMMARIZ", "CHATBOT", "CONVERSATIONAL", "대화"],
+        "멀티모달 생성·이해":   ["MULTIMODAL", "멀티모달", "이미지", "IMAGE"],
+        "예측":                ["예측", "PREDICTION", "FORECAST"],
+        "군집·분류":           ["ML MODEL", "ML 모델", "분류", "CLASSIFICATION", "CLUSTERING", "군집"],
+        "최적화":              ["최적화", "OPTIMIZATION"],
+        "추천·랭킹":           ["추천", "RECOMMENDATION", "랭킹", "RANKING"],
+        "RPA":                ["RPA"],
+        "OCR":                ["OCR"],
+        "음성 인식":           ["음성", "SPEECH", "STT", "ASR"],
     }
     checked_labels: set[str] = set()
     for tt in tech_types:
