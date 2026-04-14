@@ -558,11 +558,107 @@ _AGENT_PALETTE: list[str] = [
 ]
 
 # 레인(swimlane) 높이 및 노드 크기 (px)
-_LANE_H   = 220
+_MIN_LANE_H = 160  # 레인 최소 높이
 _NODE_H   = 80
-_STEP_W   = 280   # 실행 스텝 간격
-_X_OFFSET = 120   # 첫 노드 시작 x
-_Y_PAD    = 70    # 레인 상단 여백
+_NODE_GAP = 24     # 같은 레인·스텝 내 노드 수직 간격
+_STEP_W   = 280    # 실행 스텝 간격
+_X_OFFSET = 120    # 첫 노드 시작 x
+_Y_PAD    = 60     # 레인 상단·하단 여백
+
+# swim lane 액터 표준 순서 (상→하)
+_ACTOR_ORDER = [
+    "임원", "현업 팀장", "HR 임원", "HR 담당자",
+    "Senior AI", "Junior AI", "현업 구성원", "그 외",
+]
+
+# 액터별 노드 강조 색상
+_ACTOR_COLOR: dict[str, str] = {
+    "임원":       "#2E3A59",
+    "현업 팀장":  "#3D5A80",
+    "HR 임원":    "#1A3C6E",
+    "HR 담당자":  "#2E75B6",
+    "Senior AI":  "#00827F",
+    "Junior AI":  "#00A6A0",
+    "현업 구성원":"#5B9BD5",
+    "그 외":      "#9E9E9E",
+}
+
+
+def _sort_actors(actors: list[str]) -> list[str]:
+    """표준 swim lane 순서대로 액터 정렬."""
+    def _key(a: str) -> int:
+        try:
+            return _ACTOR_ORDER.index(a)
+        except ValueError:
+            return 99
+    return sorted(actors, key=_key)
+
+
+def _topo_steps(nodes: list[dict]) -> dict[str, int]:
+    """
+    next[] 그래프 위상정렬 → 각 노드의 x-step(0-based) 계산.
+    cycle이 있으면 남은 노드를 순서대로 배정.
+    """
+    from collections import defaultdict, deque
+
+    id_set = {n["id"] for n in nodes}
+    in_degree: dict[str, int] = {n["id"]: 0 for n in nodes}
+    adj: dict[str, list[str]] = defaultdict(list)
+
+    for n in nodes:
+        for nxt in n.get("next", []):
+            if nxt in id_set:
+                adj[n["id"]].append(nxt)
+                in_degree[nxt] += 1
+
+    queue: deque[str] = deque(nid for nid, d in in_degree.items() if d == 0)
+    step_map: dict[str, int] = {}
+    current = 0
+
+    while queue:
+        level_size = len(queue)
+        for _ in range(level_size):
+            nid = queue.popleft()
+            step_map[nid] = current
+            for nxt in adj[nid]:
+                in_degree[nxt] -= 1
+                if in_degree[nxt] == 0:
+                    queue.append(nxt)
+        current += 1
+
+    # cycle 잔여 노드 처리
+    for n in nodes:
+        if n["id"] not in step_map:
+            step_map[n["id"]] = current
+            current += 1
+
+    return step_map
+
+
+def _calc_lane_layout(
+    n_lanes: int,
+    lane_step_count: dict[int, dict[int, int]],
+) -> tuple[list[int], list[int]]:
+    """
+    레인별 동적 높이 + 누적 y 오프셋 계산.
+
+    Returns:
+        lane_heights  : 각 레인의 픽셀 높이 리스트
+        lane_y_offsets: 각 레인의 시작 y 리스트
+    """
+    heights = []
+    for li in range(n_lanes):
+        max_stack = max(lane_step_count.get(li, {}).values(), default=1)
+        h = max(max_stack * (_NODE_H + _NODE_GAP) + 2 * _Y_PAD, _MIN_LANE_H)
+        heights.append(h)
+
+    offsets = []
+    acc = 0
+    for h in heights:
+        offsets.append(acc)
+        acc += h
+
+    return heights, offsets
 
 
 def result_to_hr_workflow_json(result: NewWorkflowResult) -> dict[str, Any]:
@@ -613,6 +709,17 @@ def result_to_hr_workflow_json(result: NewWorkflowResult) -> dict[str, Any]:
                 max_step += 1
                 task_step[t.task_id] = max_step
 
+    # 레인별 동적 높이 계산 — 먼저 (lane, step) 별 노드 수 집계
+    _slc_pre: dict[int, dict[int, int]] = {}
+    for a in result.agents:
+        li = lane_index[a.agent_id]
+        for t in a.assigned_tasks:
+            s = task_step.get(t.task_id, 0)
+            _slc_pre.setdefault(li, {})
+            _slc_pre[li][s] = _slc_pre[li].get(s, 0) + 1
+
+    lane_heights, lane_y_offsets = _calc_lane_layout(len(lanes), _slc_pre)
+
     # 같은 스텝 + 같은 레인 안에서 y 오프셋 (여러 노드가 겹치지 않도록)
     step_lane_count: dict[tuple[int, int], int] = {}
 
@@ -630,7 +737,7 @@ def result_to_hr_workflow_json(result: NewWorkflowResult) -> dict[str, Any]:
             step_lane_count[key] = offset + 1
 
             x = _X_OFFSET + step * _STEP_W
-            y = li * _LANE_H + _Y_PAD + offset * (_NODE_H + 20)
+            y = lane_y_offsets[li] + _Y_PAD + offset * (_NODE_H + _NODE_GAP)
 
             nid = f"nw-{t.task_id.replace('.', '-')}"
             node_id_map[t.task_id] = nid
@@ -759,11 +866,152 @@ def result_to_hr_workflow_json(result: NewWorkflowResult) -> dict[str, Any]:
                 "name": result.process_name or "AI 워크플로우 설계",
                 "type": "swimlane",
                 "lanes": lanes,
+                "laneHeights": lane_heights,
                 "nodes": nodes,
                 "edges": edges,
                 "agentColors": {a.agent_id: agent_color[a.agent_id] for a in result.agents},
             }
         ],
+    }
+
+
+# ── generate-tobe-flow 결과 → hr-workflow-ai JSON 변환 ────────────────────────
+
+def tobe_sheets_to_hr_json(tobe_data: dict) -> dict:
+    """
+    generate-tobe-flow LLM 결과(tobe_sheets) → hr-workflow-ai v2.0 호환 JSON 변환.
+
+    - actors_used 기준으로 swim lane 구성 (표준 순서 정렬)
+    - next[] 그래프 위상정렬 → x 좌표
+    - 레인별 동적 높이 (stack 수 기반)
+    - L4 시트마다 독립 sheet 생성 (multi-sheet)
+    """
+    from datetime import datetime, timezone
+
+    process_name = tobe_data.get("process_name", "To-Be Workflow")
+    raw_sheets = tobe_data.get("tobe_sheets", [])
+
+    sheets_out: list[dict] = []
+
+    for raw_sheet in raw_sheets:
+        sheet_id = str(raw_sheet.get("l4_id", f"sheet-{len(sheets_out) + 1}"))
+        sheet_name = str(raw_sheet.get("l4_name", sheet_id))
+        raw_nodes: list[dict] = raw_sheet.get("nodes", [])
+        actors_used: list[str] = raw_sheet.get("actors_used", [])
+
+        if not raw_nodes:
+            continue
+
+        # 레인 목록 — 표준 순서 정렬
+        lanes = _sort_actors(actors_used) if actors_used else ["HR 담당자", "Senior AI", "Junior AI"]
+        lane_index: dict[str, int] = {actor: i for i, actor in enumerate(lanes)}
+
+        # 위상정렬로 x-step 계산
+        node_step = _topo_steps(raw_nodes)
+
+        # (lane, step) 별 노드 수 집계 → 동적 레인 높이
+        _slc: dict[int, dict[int, int]] = {}
+        for n in raw_nodes:
+            actor = n.get("actor", "그 외")
+            li = lane_index.get(actor, len(lanes) - 1)
+            s = node_step.get(n["id"], 0)
+            _slc.setdefault(li, {})
+            _slc[li][s] = _slc[li].get(s, 0) + 1
+
+        lane_heights, lane_y_offsets = _calc_lane_layout(len(lanes), _slc)
+
+        # 노드 생성
+        nodes_out: list[dict] = []
+        node_id_map: dict[str, str] = {}
+        stack_seen: dict[tuple[int, int], int] = {}
+
+        for n in raw_nodes:
+            actor = n.get("actor", "그 외")
+            li = lane_index.get(actor, len(lanes) - 1)
+            s = node_step.get(n["id"], 0)
+
+            key = (s, li)
+            stack_off = stack_seen.get(key, 0)
+            stack_seen[key] = stack_off + 1
+
+            x = _X_OFFSET + s * _STEP_W
+            y = lane_y_offsets[li] + _Y_PAD + stack_off * (_NODE_H + _NODE_GAP)
+
+            node_type = n.get("type", "task")
+            level = {"start": "L4", "end": "L4", "decision": "DECISION"}.get(node_type, "L5")
+
+            nid = f"tb-{sheet_id}-{n['id']}"
+            node_id_map[n["id"]] = nid
+
+            color = _ACTOR_COLOR.get(actor, "#9E9E9E")
+            ai_support = n.get("ai_support") or ""
+
+            nodes_out.append({
+                "id": nid,
+                "type": "l5" if level == "L5" else ("decision" if level == "DECISION" else "l4"),
+                "position": {"x": x, "y": y},
+                "data": {
+                    "id": n["id"],
+                    "label": n.get("label", "")[:14],   # hr-workflow-ai 14자 제한
+                    "level": level,
+                    "description": ai_support,
+                    "role": actor,
+                    "nodeColor": color,
+                    "isManual": actor not in ("Senior AI", "Junior AI"),
+                    "automationLevel": (
+                        "Full-Auto" if actor == "Senior AI"
+                        else ("Human-in-Loop" if actor == "Junior AI" else "Human")
+                    ),
+                    "actors": {},
+                    "systems": {},
+                    "painPoints": {},
+                    "inputs": {},
+                    "outputs": {},
+                    "logic": {},
+                },
+            })
+
+        # 엣지 생성 — next[] 그래프 기반
+        edges_out: list[dict] = []
+        edge_id = 0
+        for n in raw_nodes:
+            src_nid = node_id_map.get(n["id"])
+            if not src_nid:
+                continue
+            actor = n.get("actor", "그 외")
+            color = _ACTOR_COLOR.get(actor, "#9E9E9E")
+            for nxt in n.get("next", []):
+                tgt_nid = node_id_map.get(nxt)
+                if tgt_nid:
+                    edges_out.append({
+                        "id": f"e-{sheet_id}-{edge_id}",
+                        "source": src_nid,
+                        "target": tgt_nid,
+                        "type": "ortho",
+                        "animated": actor in ("Senior AI", "Junior AI"),
+                        "style": {"stroke": color, "strokeWidth": 2},
+                        "markerEnd": {
+                            "type": "ArrowClosed",
+                            "width": 18, "height": 18, "color": color,
+                        },
+                    })
+                    edge_id += 1
+
+        sheets_out.append({
+            "id": sheet_id,
+            "name": sheet_name,
+            "type": "swimlane",
+            "lanes": lanes,
+            "laneHeights": lane_heights,
+            "nodes": nodes_out,
+            "edges": edges_out,
+        })
+
+    return {
+        "version": "2.0",
+        "exportedAt": datetime.now(timezone.utc).isoformat(),
+        "processName": process_name,
+        "sheets": sheets_out,
     }
 
 

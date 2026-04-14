@@ -2430,23 +2430,40 @@ export default function WorkflowPage() {
                     <span className="text-sm font-bold text-gray-800">To-Be Workflow 다이어그램</span>
                     <span className="ml-2 text-xs text-gray-400">— 상세 설계 기반 L4(시트) 단위 Swim Lane</span>
                   </div>
-                  <button
-                    onClick={handleGenerateTobeFlow}
-                    disabled={tobeLoading}
-                    className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-bold border-2 transition disabled:opacity-50 whitespace-nowrap"
-                    style={{
-                      borderColor: tobeFlow ? "#16A34A" : "#7C3AED",
-                      color: tobeFlow ? "#16A34A" : "#7C3AED",
-                      backgroundColor: tobeFlow ? "#F0FDF4" : "#F5F3FF",
-                    }}
-                  >
-                    {tobeLoading ? (
-                      <span className="flex items-center gap-1.5">
-                        <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-purple-300 border-t-purple-600" />
-                        생성 중...
-                      </span>
-                    ) : tobeFlow ? "↺ 재생성" : "⚡ Swim Lane 생성"}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {tobeFlow && (
+                      <button
+                        onClick={async () => {
+                          try {
+                            const { downloadTobeFlowJson } = await import("@/lib/api");
+                            await downloadTobeFlowJson();
+                          } catch (e) {
+                            setError((e as Error).message);
+                          }
+                        }}
+                        className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold border-2 border-green-600 text-green-700 bg-green-50 hover:bg-green-100 transition whitespace-nowrap"
+                      >
+                        ⬇ hr-workflow-ai JSON
+                      </button>
+                    )}
+                    <button
+                      onClick={handleGenerateTobeFlow}
+                      disabled={tobeLoading}
+                      className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-bold border-2 transition disabled:opacity-50 whitespace-nowrap"
+                      style={{
+                        borderColor: tobeFlow ? "#16A34A" : "#7C3AED",
+                        color: tobeFlow ? "#16A34A" : "#7C3AED",
+                        backgroundColor: tobeFlow ? "#F0FDF4" : "#F5F3FF",
+                      }}
+                    >
+                      {tobeLoading ? (
+                        <span className="flex items-center gap-1.5">
+                          <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-purple-300 border-t-purple-600" />
+                          생성 중...
+                        </span>
+                      ) : tobeFlow ? "↺ 재생성" : "⚡ Swim Lane 생성"}
+                    </button>
+                  </div>
                 </div>
 
                 {tobeFlow && tobeFlow.tobe_sheets && tobeFlow.tobe_sheets.length > 0 && (

@@ -1521,6 +1521,24 @@ export async function downloadToBeWorkflowJson(): Promise<void> {
   URL.revokeObjectURL(url);
 }
 
+/** generate-tobe-flow 결과를 hr-workflow-ai 호환 JSON으로 다운로드 (swim lane 버전) */
+export async function downloadTobeFlowJson(): Promise<void> {
+  const token = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null;
+  const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+  const res = await fetch(`${BACKEND_DIRECT}/api/workflow/export-tobe-flow-json`, { headers });
+  if (!res.ok) throw new Error("To-Be Flow JSON 다운로드 실패");
+  const blob = await res.blob();
+  const cd = res.headers.get("content-disposition") || "";
+  const fnMatch = cd.match(/filename\*?=(?:UTF-8'')?(.+)/i);
+  const filename = fnMatch ? decodeURIComponent(fnMatch[1].replace(/"/g, "")) : "tobe_flow.json";
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 // ── New Workflow ──────────────────────────────────────────────────────────────
 
 export interface ExcelSheet {
