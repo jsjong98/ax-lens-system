@@ -3089,12 +3089,19 @@ async def generate_gap_analysis(request: Request):
     # 새로운 사례 탐색이 아니라, 이미 찾은 사례를 더 깊이 파고드는 것이 목적
     gap_search_context = ""
     try:
-        # L4 이름 추출 (시트 이름 or 엑셀)
+        # L4 이름 추출 — gap_sheet_id 있으면 해당 시트만, 없으면 전체 4개
         _, excel_by_l4, _, _ = _build_excel_index()
-        l4_names_for_search = [d["name"] for d in
-                               (lambda p: [{"name": (s.name or s.sheet_id).strip()}
-                                           for s in p.sheets] if p else [])
-                               (_workflow_cache.get("parsed"))][:4]
+        if gap_sheet_id and "parsed" in _workflow_cache:
+            _matched_sheet = next(
+                (s for s in _workflow_cache["parsed"].sheets if s.sheet_id == gap_sheet_id),
+                None,
+            )
+            l4_names_for_search = [((_matched_sheet.name or _matched_sheet.sheet_id).strip())] if _matched_sheet else []
+        else:
+            l4_names_for_search = [d["name"] for d in
+                                   (lambda p: [{"name": (s.name or s.sheet_id).strip()}
+                                               for s in p.sheets] if p else [])
+                                   (_workflow_cache.get("parsed"))][:4]
         if not l4_names_for_search:
             l4_names_for_search = [tasks[0].l4 for tasks in list(excel_by_l4.values())[:4] if tasks]
 
@@ -3157,8 +3164,13 @@ async def generate_gap_analysis(request: Request):
     except Exception as _e:
         print(f"[gap-analysis] 추가 검색 실패 (무시): {_e}")
 
-    gap_system = f"""당신은 경영 혁신 전문가입니다. 두산 HR 프로세스의 As-Is 현황과 글로벌 선도사 벤치마킹 결과를 비교하여 Gap 분석을 수행합니다.
+    # 분석 스코프 명시 텍스트 (L4 단위면 해당 L4명 강조)
+    scope_notice = ""
+    if gap_sheet_id and l4_names_for_search:
+        scope_notice = f"\n## ⚠️ 분석 범위 한정\n이번 Gap 분석은 **'{l4_names_for_search[0]}'** L4 Activity 단위 분석입니다.\n- gap_items의 l4_activity는 반드시 **'{l4_names_for_search[0]}'** 또는 그 하위에서 파생된 명칭만 사용하세요.\n- 다른 L4(사내 추천, 면접 등 무관한 활동)를 l4_activity로 작성하지 마세요.\n- 벤치마킹 사례가 다른 영역에 해당하면 해당 항목은 Gap_items에서 제외하세요.\n"
 
+    gap_system = f"""당신은 경영 혁신 전문가입니다. 두산 HR 프로세스의 As-Is 현황과 글로벌 선도사 벤치마킹 결과를 비교하여 Gap 분석을 수행합니다.
+{scope_notice}
 ## 벤치마킹 결과 (선도사 To-Be)
 {benchmark_summary_text}
 

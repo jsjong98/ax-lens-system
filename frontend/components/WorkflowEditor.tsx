@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { Plus, Trash2, Save, X } from "lucide-react";
 import type { NewWorkflowResult } from "@/lib/api";
 
@@ -278,6 +278,45 @@ export default function WorkflowEditor({ result, onSave }: WorkflowEditorProps) 
   // 에이전트 수에 따라 자동 줌 계산 (4개 이하: 100%, 5~6개: 70%, 7개+: 50%)
   const autoZoom = data.agents.length <= 3 ? 100 : data.agents.length <= 5 ? 70 : data.agents.length <= 7 ? 55 : 45;
   const [zoom, setZoom] = useState(autoZoom);
+  const diagramRef = useRef<HTMLDivElement>(null);
+
+  const handleSaveHtml = useCallback(() => {
+    onSave(data);
+    const container = diagramRef.current;
+    if (!container) return;
+
+    const processName = result.process_name || "workflow";
+    const filename = `${processName}_상세설계.html`.replace(/[/\\:*?"<>|]/g, "_");
+
+    const htmlContent = `<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${processName} — AI Service Flow 상세 설계</title>
+  <script src="https://cdn.tailwindcss.com"><\/script>
+  <style>
+    body { font-family: 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif; background: #f8f8f6; margin: 0; padding: 24px; }
+    h1 { font-size: 1.1rem; font-weight: 700; color: #1a1a1a; margin-bottom: 16px; }
+    .diagram-wrap { background: #fff; border-radius: 12px; border: 1px solid #D3D1C7; overflow-x: auto; padding: 8px; }
+  </style>
+</head>
+<body>
+  <h1>${processName} — AI Service Flow 상세 설계</h1>
+  <div class="diagram-wrap">
+    ${container.innerHTML}
+  </div>
+</body>
+</html>`;
+
+    const blob = new Blob([htmlContent], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [data, result, onSave]);
 
   return (
     <div className="space-y-3">
@@ -296,17 +335,17 @@ export default function WorkflowEditor({ result, onSave }: WorkflowEditorProps) 
           <span className="text-[11px] font-semibold px-3 py-1 rounded border-[1.5px]" style={{ borderColor: C_RED, color: C_RED }}>Senior AI</span>
           <span className="text-[11px] font-semibold px-3 py-1 rounded border-[1.5px]" style={{ borderColor: C_GOLD, color: C_GOLD }}>Junior AI</span>
           <span className="text-[11px] font-semibold px-3 py-1 rounded border-[1.5px] border-[#B4B2A9] text-[#5F5E5A]">사람</span>
-          <button onClick={() => onSave(data)}
+          <button onClick={handleSaveHtml}
             className="flex items-center gap-2 rounded-lg px-4 py-1.5 text-xs font-semibold text-white"
             style={{ backgroundColor: "#A62121" }}>
-            <Save className="h-3.5 w-3.5" /> 저장
+            <Save className="h-3.5 w-3.5" /> HTML 저장
           </button>
         </div>
       </div>
 
       <div className="overflow-x-auto overflow-y-auto rounded-xl border" style={{ borderColor: "#D3D1C7", maxHeight: "70vh" }}>
         <div style={{ transform: `scale(${zoom / 100})`, transformOrigin: "top left", minWidth: zoom < 100 ? `${100 / (zoom / 100)}%` : "100%" }}>
-        <div style={{ borderColor: "#D3D1C7" }}>
+        <div ref={diagramRef} style={{ borderColor: "#D3D1C7" }}>
 
         {/* ── INPUT 레인 ───────────────────────────────────────────────── */}
         <div className="grid" style={{ gridTemplateColumns: "56px 1fr", borderBottom: "0.5px solid #D3D1C7" }}>
