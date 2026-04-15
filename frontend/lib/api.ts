@@ -1183,8 +1183,11 @@ export interface TobeFlowResult {
   tobe_sheets: TobeSheet[];
 }
 
-export async function generateTobeFlow(): Promise<TobeFlowResult> {
-  return apiFetch("/workflow/generate-tobe-flow", { method: "POST", body: "{}" });
+export async function generateTobeFlow(params?: { sheet_id?: string }): Promise<TobeFlowResult> {
+  return apiFetch("/workflow/generate-tobe-flow", {
+    method: "POST",
+    body: JSON.stringify(params ?? {}),
+  });
 }
 
 // ── 사용자 첨부 리소스 ────────────────────────────────────────────────────────

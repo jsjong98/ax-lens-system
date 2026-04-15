@@ -3633,12 +3633,28 @@ async def generate_tobe_flow(request: Request):
     if not _wf_step2_cache:
         raise HTTPException(400, "상세 설계(Step 2)를 먼저 수행해주세요.")
 
+    # sheet_id 파라미터: L4 단위 벤치마킹 시 해당 시트만, 없으면 전체(L3)
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+    target_sheet_id = body.get("sheet_id", "")
+
     # L4 시트 목록 수집 (JSON/PPT 우선, 없으면 Step1 결과에서)
     l4_sheets: list[dict] = []
     if "parsed" in _workflow_cache:
-        for s in _workflow_cache["parsed"].sheets:
+        all_sheets = _workflow_cache["parsed"].sheets
+        # sheet_id 지정 시 해당 시트만 → L4 단위 To-Be
+        # 미지정 시 전체 시트 → L3 단위 To-Be
+        selected = [s for s in all_sheets if s.sheet_id == target_sheet_id] if target_sheet_id else all_sheets
+        if target_sheet_id and not selected:
+            print(f"[TOBE⚠] sheet_id='{target_sheet_id}' 매칭 없음 — 전체 시트 사용", flush=True)
+            selected = all_sheets
+        for s in selected:
             l4_sheets.append({"l4_id": s.sheet_id,
                                "l4_name": (s.name or s.sheet_id).strip()})
+        print(f"[TOBE] To-Be 대상 시트: {[x['l4_name'] for x in l4_sheets]}", flush=True)
     if not l4_sheets:
         for l3 in _wf_step1_cache.get("redesigned_process", []):
             for l4 in l3.get("l4_list", []):

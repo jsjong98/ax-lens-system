@@ -749,7 +749,8 @@ export default function WorkflowPage() {
     setTobeLoading(true);
     setError(null);
     try {
-      const result = await generateTobeFlow();
+      const tobeSheet = bmSheetId ?? activeSheet;
+      const result = await generateTobeFlow(tobeSheet ? { sheet_id: tobeSheet } : undefined);
       setTobeFlow(result);
       setTobeActiveSheet(0);
     } catch (e) {
@@ -757,15 +758,16 @@ export default function WorkflowPage() {
     } finally {
       setTobeLoading(false);
     }
-  }, []);
+  }, [bmSheetId, activeSheet]);
 
   /* ── Step 3: Step 2 상세 설계 생성 ──────────────────────── */
   const handleGenerateStep2 = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
+      const step2Sheet = bmSheetId ?? activeSheet;
       const result = await generateWorkflowStep2({
-        ...(activeSheet ? { sheet_id: activeSheet } : {}),
+        ...(step2Sheet ? { sheet_id: step2Sheet } : {}),
       });
       setStep2Result(result);
     } catch (e) {
@@ -773,7 +775,7 @@ export default function WorkflowPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [bmSheetId, activeSheet]);
 
   const hasAsIs = summary || pptResult;
   const currentSheet = summary?.sheets.find((s) => s.sheet_id === activeSheet);
@@ -2435,7 +2437,29 @@ export default function WorkflowPage() {
                 {/* Agent 상세 */}
                 {step2Result.agents && (
                   <div className="space-y-3">
-                    {step2Result.agents.map((agent) => (
+                    {/* Senior AI를 맨 위에 풀 스팬으로 표시 */}
+                    {step2Result.agents.filter((a) => a.agent_type === "Senior AI").map((agent) => (
+                      <div key={agent.agent_id} className="rounded-xl p-4 border-2" style={{ borderColor: "#8B1A1A", backgroundColor: "#FFF5F5" }}>
+                        <div className="flex items-center gap-2 mb-2 flex-wrap">
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold text-white" style={{ backgroundColor: "#8B1A1A" }}>
+                            Senior AI · 오케스트레이터
+                          </span>
+                          <span className="text-sm font-bold" style={{ color: "#8B1A1A" }}>{agent.agent_name}</span>
+                          <span className="text-[10px] text-gray-400">{agent.ai_technique}</span>
+                        </div>
+                        <p className="text-xs mb-3" style={{ color: "#8B1A1A" }}>{agent.description}</p>
+                        {/* 담당 Junior AI 목록 표시 */}
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {step2Result.agents.filter((a) => a.agent_type === "Junior AI").map((j, idx) => (
+                            <span key={j.agent_id} className="text-[9px] font-semibold px-2 py-0.5 rounded border" style={{ borderColor: "#8B1A1A", color: "#8B1A1A" }}>
+                              {"①②③④⑤⑥⑦⑧⑨⑩"[idx]} {j.agent_name} 지시
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                    {/* Junior AI 및 나머지 */}
+                    {step2Result.agents.filter((a) => a.agent_type !== "Senior AI").map((agent) => (
                       <div key={agent.agent_id} className="border border-gray-200 rounded-lg p-4">
                         <div className="flex items-center gap-2 mb-2">
                           <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-700">
