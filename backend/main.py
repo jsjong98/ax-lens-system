@@ -4129,29 +4129,48 @@ async def generate_workflow_step2(request: Request):
 
     body = await request.json() if True else {}
     additional_context = body.get("additional_context", "") if body else ""
+    step2_sheet_id = body.get("sheet_id", "")  # L4 단위 분석 시 해당 시트 ID
 
     process_name = _wf_step1_cache.get("process_name", "HR 프로세스")
 
-    # 상세 설계도 JSON 전체 스코프 — 선택 시트 무관
-    _, _, _ = _build_task_and_pain_summary("")  # 스코프 확인용 (실제 사용은 pain_detail 직접 구성)
+    # 상세 설계 스코프: sheet_id 있으면 해당 L4만, 없으면 JSON 전체(L3)
+    scoped_tasks_step2, _, _ = _build_task_and_pain_summary(step2_sheet_id or "")
+    # _build_task_and_pain_summary가 relevant_tasks를 반환하지 않으므로 직접 구성
     scoped_tasks_step2 = _wf_excel_tasks  # 기본: 전체
     if "parsed" in _workflow_cache:
-        # JSON 전체 시트의 task_id 범위로 필터
         _p2 = _workflow_cache["parsed"]
-        _tids2, _l4ids2, _l3ids2 = set(), set(), set()
-        for _s2 in _p2.sheets:
-            for _n2 in _s2.nodes.values():
-                if _n2.task_id:
-                    _tids2.add(_n2.task_id)
-                    _pts2 = _n2.task_id.split(".")
-                    if len(_pts2) >= 3: _l4ids2.add(".".join(_pts2[:3]))
-                    if len(_pts2) >= 2: _l3ids2.add(".".join(_pts2[:2]))
-        _filtered2 = [t for t in _wf_excel_tasks if t.id in _tids2]
-        if not _filtered2: _filtered2 = [t for t in _wf_excel_tasks if t.l4_id in _l4ids2]
-        if not _filtered2: _filtered2 = [t for t in _wf_excel_tasks if t.l3_id in _l3ids2]
-        if _filtered2: scoped_tasks_step2 = _filtered2
+        if step2_sheet_id:
+            # L4 scope: _build_task_and_pain_summary와 동일한 0순위 로직 사용
+            _target_sheets = [s for s in _p2.sheets if s.sheet_id == step2_sheet_id]
+            if _target_sheets:
+                _sheet_name = _target_sheets[0].name.strip()
+                # 전체 시트에서 L3 이름 수집
+                _l3_names = {n.label.strip() for s in _p2.sheets for n in s.nodes.values() if n.level == "L3" and n.label}
+                _filtered2 = [t for t in _wf_excel_tasks
+                               if t.l4 and t.l4.strip() == _sheet_name
+                               and (not _l3_names or (t.l3 and t.l3.strip() in _l3_names))]
+                if not _filtered2:
+                    _filtered2 = [t for t in _wf_excel_tasks if t.l4 and t.l4.strip() == _sheet_name]
+                if _filtered2:
+                    scoped_tasks_step2 = _filtered2
+                    print(f"[STEP2] L4 scope='{_sheet_name}' → {len(scoped_tasks_step2)}개 태스크", flush=True)
+        else:
+            # L3 scope: 전체 JSON 시트 범위
+            _tids2, _l4ids2, _l3ids2 = set(), set(), set()
+            for _s2 in _p2.sheets:
+                for _n2 in _s2.nodes.values():
+                    if _n2.level == "L5" and _n2.task_id:
+                        _tids2.add(_n2.task_id)
+                        _pts2 = _n2.task_id.split(".")
+                        if len(_pts2) >= 3: _l4ids2.add(".".join(_pts2[:3]))
+                        if len(_pts2) >= 2: _l3ids2.add(".".join(_pts2[:2]))
+            _filtered2 = [t for t in _wf_excel_tasks if t.id in _tids2]
+            if not _filtered2: _filtered2 = [t for t in _wf_excel_tasks if t.l4_id in _l4ids2]
+            if not _filtered2: _filtered2 = [t for t in _wf_excel_tasks if t.l3_id in _l3ids2]
+            if _filtered2: scoped_tasks_step2 = _filtered2
+            print(f"[STEP2] L3 scope → {len(scoped_tasks_step2)}개 태스크", flush=True)
 
-    # 상세 Pain Point 분석 (JSON 스코프 내 tasks만)
+    # 상세 Pain Point 분석 (스코프 내 tasks만)
     pain_detail_lines = []
     for t in scoped_tasks_step2:
         pains = []
@@ -4171,8 +4190,8 @@ async def generate_workflow_step2(request: Request):
 
     pain_detail = "\n".join(pain_detail_lines) if pain_detail_lines else "상세 Pain Point 정보 없음"
 
-    # As-Is + 엑셀 매핑 컨텍스트 — 모든 시트 합산 (sheet_id="" → 전체)
-    asis_info = _build_mapped_asis_context("")
+    # As-Is + 엑셀 매핑 컨텍스트 — L4 scope면 해당 시트만, L3면 전체
+    asis_info = _build_mapped_asis_context(step2_sheet_id or "")
 
     step2_system = f"""당신은 AI 기반 업무 혁신 설계 전문가입니다.
 Step 1에서 도출된 기본 설계를 기반으로, 두산에 최적화된 **AI 기반 To-Be Workflow 상세 설계**를 수행합니다.
