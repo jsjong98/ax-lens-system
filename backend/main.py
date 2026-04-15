@@ -146,9 +146,11 @@ from fastapi.responses import JSONResponse as _JSONResponse
 async def _global_exception_handler(request: Request, exc: Exception):
     origin = request.headers.get("origin", "")
     cors_origin = origin if origin in _all_origins else (_all_origins[0] if _all_origins else "*")
+    import logging
+    logging.getLogger("uvicorn.error").error(f"Unhandled exception: {exc}", exc_info=True)
     return _JSONResponse(
         status_code=500,
-        content={"detail": str(exc)},
+        content={"detail": "서버 내부 오류가 발생했습니다."},
         headers={"Access-Control-Allow-Origin": cors_origin,
                  "Access-Control-Allow-Credentials": "true"},
     )
@@ -398,8 +400,9 @@ async def get_data_status():
 
 
 @app.delete("/api/data/reset-all", tags=["Data"])
-async def reset_all_data():
+async def reset_all_data(request: Request):
     """모든 데이터를 초기화합니다 (Volume 포함)."""
+    _require_admin(request)
     import shutil
     # 인메모리 캐시 초기화
     _new_workflow_cache.clear()
@@ -735,9 +738,11 @@ async def update_result(
 
 @app.delete("/api/results", tags=["Results"])
 async def delete_all_results(
+    request: Request,
     provider: str = Query("openai", description="openai | anthropic | all"),
 ):
     """분류 결과를 초기화합니다. provider=all 이면 양쪽 모두 초기화."""
+    _require_admin(request)
     if provider == "all":
         clear_results("openai")
         clear_results("anthropic")
@@ -800,7 +805,8 @@ async def get_settings():
 
 
 @app.post("/api/settings", response_model=ClassifierSettings, tags=["Settings"])
-async def update_settings(settings: ClassifierSettings):
+async def update_settings(request: Request, settings: ClassifierSettings):
+    _require_admin(request)
     existing = load_settings()
     # 마스킹된 키(****) → 기존 키 유지, 빈 문자열 → 삭제, 그 외 → 새 키로 교체
     if "*" in settings.api_key:
@@ -3456,6 +3462,15 @@ async def _fetch_url_content(url: str) -> dict:
     """URL 페이지 내용을 크롤링하여 텍스트 추출."""
     import httpx
     from bs4 import BeautifulSoup
+    from urllib.parse import urlparse
+
+    # URL 스킴 검증 — SSRF 방지
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"허용되지 않는 URL 스킴: {parsed.scheme}")
+    _blocked_hosts = {"localhost", "127.0.0.1", "0.0.0.0", "::1", "169.254.169.254"}
+    if parsed.hostname and (parsed.hostname in _blocked_hosts or parsed.hostname.startswith("10.") or parsed.hostname.startswith("192.168.")):
+        raise ValueError("내부 네트워크 접근이 차단되었습니다.")
 
     headers = {
         "User-Agent": (
@@ -3466,7 +3481,7 @@ async def _fetch_url_content(url: str) -> dict:
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8",
     }
-    async with httpx.AsyncClient(timeout=15, follow_redirects=True, verify=False) as client:
+    async with httpx.AsyncClient(timeout=15, follow_redirects=True, verify=True) as client:
         resp = await client.get(url, headers=headers)
         resp.raise_for_status()
         content_type = resp.headers.get("content-type", "")

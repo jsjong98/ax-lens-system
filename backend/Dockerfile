@@ -25,6 +25,10 @@ COPY . .
 # uploads, results 디렉토리 생성
 RUN mkdir -p uploads results
 
+# 비루트 사용자로 실행
+RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+USER appuser
+
 # Railway가 PORT 환경변수를 주입함
 ENV PORT=8000
 
