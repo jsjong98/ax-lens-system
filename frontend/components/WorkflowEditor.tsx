@@ -108,14 +108,16 @@ function workflowToSwimlane(result: NewWorkflowResult): SwimlaneData {
     ownerAgent: inputOwner[d],
   }));
 
-  // Senior AI: 오케스트레이터 (첫 번째 에이전트 또는 요약)
+  // Senior AI: agent_type="Senior AI"인 첫 번째 에이전트를 오케스트레이터로 사용
+  const seniorAgent = result.agents.find((a) => a.agent_type === "Senior AI");
   const seniorAI = {
-    title: `${result.process_name} 오케스트레이터`,
-    description: result.blueprint_summary || "",
+    title: seniorAgent?.agent_name || `${result.process_name} 오케스트레이터`,
+    description: seniorAgent?.description || result.blueprint_summary || "",
   };
 
-  // Junior AI: 에이전트별 컬럼
-  const agents: AgentColumn[] = result.agents.map((a, i) => ({
+  // Junior AI: agent_type="Junior AI"인 에이전트만 컬럼으로 표시
+  const juniorAgents = result.agents.filter((a) => a.agent_type === "Junior AI");
+  const agents: AgentColumn[] = (juniorAgents.length > 0 ? juniorAgents : result.agents).map((a, i) => ({
     id: a.agent_id,
     number: i + 1,
     name: a.agent_name,
@@ -389,44 +391,52 @@ export default function WorkflowEditor({ result, onSave }: WorkflowEditorProps) 
           </div>
         </div>
 
-        {/* ── SENIOR AI 레인 ───────────────────────────────────────────── */}
+        {/* ── SENIOR AI 레인 (풀 스팬 오케스트레이터) ──────────────────── */}
         <div className="grid" style={{ gridTemplateColumns: "56px 1fr", borderBottom: "0.5px solid #D3D1C7" }}>
           <div className="flex flex-col items-center justify-center gap-1 p-2 border-r bg-white" style={{ borderColor: "#D3D1C7" }}>
             <span className="text-lg">🤖</span>
             <span className="text-[9px] font-bold text-[#8B1A1A]">Senior<br/>AI</span>
           </div>
           <div className="p-3" style={{ backgroundColor: "#FDF4F4" }}>
-            <div className="rounded-lg p-3 text-center cursor-pointer hover:ring-2 hover:ring-[#8B1A1A] transition-shadow"
-              style={{ border: "1.5px solid #8B1A1A", backgroundColor: "#FFF5F5" }}
+            {/* 오케스트레이터 헤더 — 전체 폭 스팬 */}
+            <div className="rounded-lg px-4 py-2 cursor-pointer hover:ring-2 hover:ring-[#8B1A1A] transition-shadow mb-2"
+              style={{ border: "2px solid #8B1A1A", backgroundColor: "#FFF5F5" }}
               onClick={() => setEditingSenior(true)}>
-              <div className="text-sm font-bold text-[#8B1A1A]">{data.seniorAI.title}</div>
-              <div className="text-[9px] text-[#888780] mt-1">{data.seniorAI.description.slice(0, 120)}...</div>
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="text-xs font-bold text-[#8B1A1A] whitespace-nowrap">🧠 {data.seniorAI.title}</span>
+                  <span className="text-[9px] text-[#888780] truncate">{data.seniorAI.description.slice(0, 100)}...</span>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <span className="text-[8px] font-semibold text-[#8B1A1A] bg-[#F5E0E0] rounded px-1.5 py-0.5">플로우 오케스트레이션</span>
+                  <span className="text-[8px] font-semibold text-[#8B1A1A] bg-[#F5E0E0] rounded px-1.5 py-0.5">상태 관리</span>
+                  <span className="text-[8px] font-semibold text-[#8B1A1A] bg-[#F5E0E0] rounded px-1.5 py-0.5">예외 라우팅</span>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
 
-        {/* ── Senior ↔ Junior 커넥터 ──────────────────────────────────── */}
-        <div className="grid" style={{ gridTemplateColumns: "56px 1fr" }}>
-          <div className="border-r bg-white" style={{ borderColor: "#D3D1C7" }} />
-          <div className="px-3 py-1" style={{ backgroundColor: "#FEFAF0" }}>
+            {/* 각 Agent 컬럼별 지시/회수 화살표 — Senior AI 레인 안에 포함 */}
             <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${Math.max(data.agents.length, 1)}, 1fr)` }}>
               {data.agents.map((agent, ai) => (
-                <div key={`conn-${agent.id}`} className="flex justify-between px-3">
-                  {/* Senior → Junior (빨간 하향) */}
-                  <div className="flex flex-col items-center gap-0.5">
-                    <span className="text-[6px] font-semibold text-[#8B1A1A] text-center leading-tight">
-                      {"①②③④⑤⑥⑦⑧⑨⑩"[ai]}{agent.name}<br/>지시
-                    </span>
-                    <div className="w-[1.5px] h-4 bg-[#8B1A1A]" />
-                    <div className="w-0 h-0 border-l-[4px] border-r-[4px] border-t-[5px] border-l-transparent border-r-transparent border-t-[#8B1A1A]" />
-                  </div>
-                  {/* Junior → Senior (파란 상향) */}
-                  <div className="flex flex-col items-center gap-0.5">
-                    <div className="w-0 h-0 border-l-[4px] border-r-[4px] border-b-[5px] border-l-transparent border-r-transparent" style={{ borderBottomColor: C_GRAY }} />
-                    <div className="w-[1.5px] h-4" style={{ backgroundColor: C_GRAY }} />
-                    <span className="text-[6px] font-semibold text-center leading-tight" style={{ color: C_GRAY }}>
-                      결과 반환
-                    </span>
+                <div key={`orch-${agent.id}`} className="flex flex-col items-center gap-0">
+                  {/* 오케스트레이션 라벨 */}
+                  <span className="text-[7px] font-semibold text-[#8B1A1A] text-center leading-tight mb-0.5">
+                    {"①②③④⑤⑥⑦⑧⑨⑩"[ai]} {agent.name}
+                  </span>
+                  {/* 양방향 화살표 */}
+                  <div className="flex items-center gap-3">
+                    {/* Senior → Junior */}
+                    <div className="flex flex-col items-center gap-0">
+                      <div className="w-[1.5px] h-3 bg-[#8B1A1A]" />
+                      <div className="w-0 h-0 border-l-[3px] border-r-[3px] border-t-[4px] border-l-transparent border-r-transparent border-t-[#8B1A1A]" />
+                      <span className="text-[6px] text-[#8B1A1A] font-medium">지시</span>
+                    </div>
+                    {/* Junior → Senior */}
+                    <div className="flex flex-col items-center gap-0">
+                      <span className="text-[6px] font-medium" style={{ color: C_GRAY }}>반환</span>
+                      <div className="w-0 h-0 border-l-[3px] border-r-[3px] border-b-[4px] border-l-transparent border-r-transparent" style={{ borderBottomColor: C_GRAY }} />
+                      <div className="w-[1.5px] h-3" style={{ backgroundColor: C_GRAY }} />
+                    </div>
                   </div>
                 </div>
               ))}
