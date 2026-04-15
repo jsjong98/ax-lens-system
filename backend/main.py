@@ -4191,6 +4191,12 @@ Step 1에서 도출된 기본 설계를 기반으로, 두산에 최적화된 **A
 4. 기존 As-Is에 없던 혁신적 Task 추가 가능
 5. Pain Point를 근본적으로 해결하는 방향
 
+## ⚠️ agent_type 규칙 (반드시 준수)
+- `agent_type`은 **"Senior AI"** 또는 **"Junior AI"** 둘 중 하나만 사용 (다른 텍스트 절대 금지)
+- **Senior AI**: 프로세스 전체 오케스트레이션, 상태 관리, 예외 라우팅, 복수 Agent 조율 역할 → 항상 첫 번째로 배치
+- **Junior AI**: 개별 반복 Task 자동화 (문서 처리, 스크리닝, 알림 발송, 데이터 추출 등)
+- Senior AI는 전체 agents 배열의 **첫 번째 항목**으로 위치할 것
+
 ## 출력 형식 (JSON만 출력, 마크다운 코드 블록 없음)
 {{
   "blueprint_summary": "상세 설계 요약 (5~7문장, Step 1 대비 개선점 포함)",
@@ -4201,12 +4207,21 @@ Step 1에서 도출된 기본 설계를 기반으로, 두산에 최적화된 **A
   "human_supervised_count": 정수,
   "agents": [
     {{
-      "agent_id": "agent_1",
-      "agent_name": "에이전트명",
-      "agent_type": "에이전트 유형",
+      "agent_id": "agent_0",
+      "agent_name": "오케스트레이터 AI 이름",
+      "agent_type": "Senior AI",
       "ai_technique": "AI 기법 (구체적)",
       "description": "역할 설명 (상세)",
       "automation_level": "Human-on-the-Loop",
+      "assigned_tasks": []
+    }},
+    {{
+      "agent_id": "agent_1",
+      "agent_name": "Junior AI 에이전트명",
+      "agent_type": "Junior AI",
+      "ai_technique": "AI 기법 (구체적)",
+      "description": "역할 설명 (상세)",
+      "automation_level": "Full-Auto",
       "assigned_tasks": [
         {{
           "task_id": "Task ID",
@@ -4217,7 +4232,7 @@ Step 1에서 도출된 기본 설계를 기반으로, 두산에 최적화된 **A
           "human_role": "사람 역할",
           "input_data": ["입력 데이터 상세"],
           "output_data": ["출력 결과물 상세"],
-          "automation_level": "Human-on-the-Loop"
+          "automation_level": "Full-Auto"
         }}
       ]
     }}
