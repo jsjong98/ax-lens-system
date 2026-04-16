@@ -12,16 +12,19 @@ import {
   deleteAdminUpload,
   deleteAdminWorkflowFile,
   resetAllWorkflow,
+  getAdminProjects,
+  deleteAdminProject,
   type AdminUser,
   type AdminSession,
   type AuditLogEntry,
   type UploadedFile,
   type AdminUploadsAll,
+  type ProjectInfo,
 } from "@/lib/api";
 
 const PWC = { primary: "#A62121", primaryLight: "#D95578" };
 
-type Tab = "overview" | "sessions" | "audit" | "login" | "files";
+type Tab = "overview" | "sessions" | "audit" | "login" | "files" | "projects";
 
 export default function AdminPage() {
   const [tab, setTab] = useState<Tab>("overview");
@@ -39,6 +42,7 @@ export default function AdminPage() {
   const [uploadDir, setUploadDir] = useState("");
   const [uploadsAll, setUploadsAll] = useState<AdminUploadsAll["categories"] | null>(null);
   const [fileSubTab, setFileSubTab] = useState<"task_excel" | "wf_excel" | "wf_json" | "wf_ppt" | "new_workflow">("task_excel");
+  const [projects, setProjects] = useState<ProjectInfo[]>([]);
 
   const loadDashboard = useCallback(async () => {
     setLoading(true);
@@ -86,6 +90,15 @@ export default function AdminPage() {
 
   useEffect(() => { if (tab === "files") loadFiles(); }, [tab, loadFiles]);
 
+  const loadProjects = useCallback(async () => {
+    try {
+      const data = await getAdminProjects();
+      setProjects(data.projects);
+    } catch {}
+  }, []);
+
+  useEffect(() => { if (tab === "projects") loadProjects(); }, [tab, loadProjects]);
+
   const handleForceLogout = async (email: string) => {
     if (!confirm(`${email}의 모든 세션을 강제 종료하시겠습니까?`)) return;
     try {
@@ -131,6 +144,7 @@ export default function AdminPage() {
           ["login", "접속 기록"],
           ["audit", "감사 로그"],
           ["files", "업로드 파일"],
+          ["projects", "이전 프로젝트"],
         ] as [Tab, string][]).map(([key, label]) => (
           <button
             key={key}
@@ -551,6 +565,81 @@ export default function AdminPage() {
             }}
             showDelete={fileSubTab === "task_excel" || ["wf_excel", "wf_json", "wf_ppt"].includes(fileSubTab)}
           />
+        </div>
+      )}
+
+      {/* ═══ 이전 프로젝트 ═══ */}
+      {tab === "projects" && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-bold text-gray-700">
+              이전 프로젝트 데이터 ({projects.length}개)
+            </span>
+            <button onClick={loadProjects} className="text-xs text-gray-400 hover:text-red-500 px-3 py-1.5 border border-gray-200 rounded-lg">
+              새로고침
+            </button>
+          </div>
+          <div className="text-[11px] text-gray-400 px-1">
+            Task 목록에서 &quot;이전 프로젝트 불러오기&quot;에 나타나는 항목입니다. 삭제하면 목록에서 제거됩니다.
+          </div>
+          {projects.length === 0 ? (
+            <div className="bg-white rounded-xl border border-gray-200 p-8 text-center text-sm text-gray-400">저장된 프로젝트 없음</div>
+          ) : (
+            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-200 bg-gray-50">
+                    <th className="text-left px-4 py-2 font-medium text-gray-600">프로젝트명</th>
+                    <th className="text-left px-4 py-2 font-medium text-gray-600">팀 프로젝트</th>
+                    <th className="text-left px-4 py-2 font-medium text-gray-600">마지막 접근</th>
+                    <th className="text-left px-4 py-2 font-medium text-gray-600">저장 데이터</th>
+                    <th className="text-center px-4 py-2 font-medium text-gray-600">삭제</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {projects.map((p) => (
+                    <tr key={p.dirname} className="border-b border-gray-100 hover:bg-gray-50">
+                      <td className="px-4 py-2 font-mono text-xs text-gray-800">{p.filename || p.dirname}</td>
+                      <td className="px-4 py-2 text-xs">
+                        {p.team_project ? (
+                          <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 text-[10px] font-bold">
+                            {p.team_project}
+                          </span>
+                        ) : (
+                          <span className="text-gray-400">-</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2 text-xs text-gray-400">
+                        {p.last_accessed ? p.last_accessed.replace("T", " ").slice(0, 19) : "-"}
+                      </td>
+                      <td className="px-4 py-2 text-xs text-gray-500">
+                        {Object.entries(p.saved_data || {})
+                          .filter(([, v]) => v)
+                          .map(([k]) => k.replace(/_/g, " "))
+                          .join(", ") || "-"}
+                      </td>
+                      <td className="px-4 py-2 text-center">
+                        <button
+                          onClick={async () => {
+                            if (!confirm(`"${p.filename || p.dirname}" 프로젝트를 삭제할까요?\n저장된 결과 데이터가 모두 삭제됩니다.`)) return;
+                            try {
+                              await deleteAdminProject(p.dirname);
+                              await loadProjects();
+                            } catch (e) {
+                              alert(`삭제 실패: ${(e as Error).message}`);
+                            }
+                          }}
+                          className="text-xs text-red-500 hover:text-red-700 underline"
+                        >
+                          삭제
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
     </div>

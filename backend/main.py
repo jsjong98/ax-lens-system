@@ -6363,13 +6363,15 @@ async def admin_delete_workflow_session(session_id: str, request: Request):
 
 @app.delete("/api/admin/upload/{filename}", tags=["Admin"])
 async def admin_delete_upload(filename: str, request: Request):
-    """Admin: Task 분류용 엑셀 파일 삭제."""
+    """Admin: Task 분류용 엑셀 파일 삭제 + 대응하는 프로젝트 데이터 디렉토리도 삭제."""
     _require_admin(request)
     safe_name = Path(filename).name
     file_path = _UPLOAD_DIR / safe_name
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(404, f"파일을 찾을 수 없습니다: {safe_name}")
     file_path.unlink()
+    # 대응하는 이전 프로젝트 데이터 폴더도 삭제 (이전 프로젝트 목록에서 제거)
+    delete_project(safe_name)
     return {"ok": True, "deleted": safe_name}
 
 
@@ -6383,6 +6385,25 @@ async def admin_delete_workflow_file(filename: str, request: Request):
         raise HTTPException(404, f"파일을 찾을 수 없습니다: {safe_name}")
     file_path.unlink()
     return {"ok": True, "deleted": safe_name}
+
+
+@app.get("/api/admin/projects", tags=["Admin"])
+async def admin_list_projects(request: Request):
+    """Admin: 이전 프로젝트 데이터 폴더 목록 조회."""
+    _require_admin(request)
+    return {"ok": True, "projects": list_projects()}
+
+
+@app.delete("/api/admin/projects/{dirname}", tags=["Admin"])
+async def admin_delete_project(dirname: str, request: Request):
+    """Admin: 이전 프로젝트 데이터 폴더 삭제."""
+    _require_admin(request)
+    if not dirname:
+        raise HTTPException(400, "디렉토리명이 필요합니다.")
+    ok = delete_project(dirname)
+    if not ok:
+        raise HTTPException(404, "프로젝트를 찾을 수 없습니다.")
+    return {"ok": True, "deleted": dirname}
 
 
 @app.delete("/api/admin/workflow-reset", tags=["Admin"])

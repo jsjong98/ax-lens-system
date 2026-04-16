@@ -321,6 +321,7 @@ export interface ProjectInfo {
   has_any_result: boolean;
   agent_count?: number;
   agent_names?: string[];
+  team_project?: string;
 }
 
 export async function getBenchmarkResult(): Promise<{
@@ -2063,6 +2064,14 @@ export async function deleteAdminWorkflowSession(sessionId: string): Promise<{ o
 
 export async function deleteAdminUpload(filename: string): Promise<{ ok: boolean; deleted: string }> {
   return apiFetch(`/admin/upload/${encodeURIComponent(filename)}`, { method: "DELETE" });
+}
+
+export async function getAdminProjects(): Promise<{ ok: boolean; projects: ProjectInfo[] }> {
+  return apiFetch("/admin/projects");
+}
+
+export async function deleteAdminProject(dirname: string): Promise<{ ok: boolean; deleted: string }> {
+  return apiFetch(`/admin/projects/${encodeURIComponent(dirname)}`, { method: "DELETE" });
 }
 
 export async function deleteAdminWorkflowFile(filename: string): Promise<{ ok: boolean; deleted: string }> {
