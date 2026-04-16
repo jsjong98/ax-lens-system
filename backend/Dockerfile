@@ -22,18 +22,12 @@ RUN playwright install chromium
 # 소스 복사
 COPY . .
 
-# uploads, results, persist 디렉토리 생성
-RUN mkdir -p uploads results /app/persist && chmod -R 777 /app/persist
-
-# 비루트 사용자로 실행
-RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
-USER appuser
+# uploads, results, persist 디렉토리 생성 (root로 실행하므로 권한 문제 없음)
+RUN mkdir -p uploads results /app/persist
 
 # Railway가 PORT 환경변수를 주입함
 ENV PORT=8000
 
 EXPOSE ${PORT}
 
-# 시작 시 persist 디렉토리 권한 보정 후 서버 실행
-CMD chmod -R 777 /app/persist 2>/dev/null || true && \
-    uvicorn main:app --host 0.0.0.0 --port ${PORT}
+CMD uvicorn main:app --host 0.0.0.0 --port ${PORT}
