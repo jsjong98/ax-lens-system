@@ -292,7 +292,10 @@ def _load_users() -> dict[str, dict]:
 
 
 def _save_users(users: dict[str, dict]) -> None:
-    _USERS_FILE.write_text(json.dumps(users, ensure_ascii=False, indent=2), "utf-8")
+    try:
+        _USERS_FILE.write_text(json.dumps(users, ensure_ascii=False, indent=2), "utf-8")
+    except Exception as e:
+        print(f"[auth] users.json 저장 실패 (권한 문제일 수 있음): {e}")
 
 
 def _get_user_sessions(email: str) -> list[tuple[str, dict]]:
