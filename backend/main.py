@@ -905,10 +905,12 @@ async def export_results(
     buf.seek(0)
     base = _current_excel_path.stem if _current_excel_path else "results"
     filename = f"{base}_a_results.xlsx"
+    from urllib.parse import quote as _quote
+    encoded_fn = _quote(filename, safe="")
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f"attachment; filename={filename}"},
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_fn}"},
     )
 
 
@@ -976,10 +978,12 @@ async def export_comparison():
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
+    from urllib.parse import quote as _quote
+    _cmp_fn = f"{(_current_excel_path.stem if _current_excel_path else 'compare')}_a_results_compare.xlsx"
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f"attachment; filename={(_current_excel_path.stem if _current_excel_path else 'compare')}_a_results_compare.xlsx"},
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{_quote(_cmp_fn, safe='')}"},
     )
 
 
