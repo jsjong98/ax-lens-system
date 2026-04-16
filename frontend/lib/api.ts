@@ -506,11 +506,50 @@ export async function saveSettings(settings: ClassifierSettings): Promise<Classi
 // ── 내보내기 ─────────────────────────────────────────────────────────────────
 
 export function downloadExport(provider: ProviderType = "openai"): void {
-  window.location.href = `/api/export?provider=${provider}`;
+  const token = getAuthToken();
+  const url = `${BACKEND_DIRECT}/api/export?provider=${provider}`;
+  // 토큰이 있으면 fetch로 다운로드 (Authorization 헤더 포함), 없으면 직접 이동
+  if (token) {
+    fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+      .then(async (res) => {
+        if (res.status === 401) { handle401(); return; }
+        if (!res.ok) throw new Error("다운로드 실패");
+        const blob = await res.blob();
+        const cd = res.headers.get("content-disposition") || "";
+        const fnMatch = cd.match(/filename\*?=(?:UTF-8'')?(.+)/i);
+        const filename = fnMatch ? decodeURIComponent(fnMatch[1].replace(/"/g, "")) : `분류결과_${provider}.xlsx`;
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = filename;
+        a.click();
+      })
+      .catch((e) => alert(`다운로드 실패: ${e.message}`));
+  } else {
+    window.location.href = url;
+  }
 }
 
 export function downloadCompareExport(): void {
-  window.location.href = "/api/export/compare";
+  const token = getAuthToken();
+  const url = `${BACKEND_DIRECT}/api/export/compare`;
+  if (token) {
+    fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+      .then(async (res) => {
+        if (res.status === 401) { handle401(); return; }
+        if (!res.ok) throw new Error("다운로드 실패");
+        const blob = await res.blob();
+        const cd = res.headers.get("content-disposition") || "";
+        const fnMatch = cd.match(/filename\*?=(?:UTF-8'')?(.+)/i);
+        const filename = fnMatch ? decodeURIComponent(fnMatch[1].replace(/"/g, "")) : "비교결과.xlsx";
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = filename;
+        a.click();
+      })
+      .catch((e) => alert(`다운로드 실패: ${e.message}`));
+  } else {
+    window.location.href = url;
+  }
 }
 
 // ── 엑셀 업로드 ──────────────────────────────────────────────────────────────
