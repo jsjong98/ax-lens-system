@@ -16,6 +16,7 @@ import {
   getWorkflowStepResults,
   generateGapAnalysis,
   deleteBenchmarkRow,
+  downloadBenchmarkTableXlsx,
   generateTobeFlow,
   getWorkflowResources,
   addUrlResource,
@@ -1739,18 +1740,8 @@ export default function WorkflowPage() {
                   <div className="flex items-center gap-2">
                     <button
                       onClick={async () => {
-                        const base = process.env.NEXT_PUBLIC_BACKEND_URL || "";
-                        const res = await fetch(`${base}/api/workflow/benchmark-table/export`);
-                        if (!res.ok) return;
-                        const blob = await res.blob();
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement("a");
-                        const cd = res.headers.get("content-disposition") || "";
-                        const match = cd.match(/filename\*?=(?:UTF-8'')?([^;]+)/i);
-                        a.href = url;
-                        a.download = match ? decodeURIComponent(match[1].replace(/"/g, "")) : "벤치마킹_결과.xlsx";
-                        a.click();
-                        URL.revokeObjectURL(url);
+                        try { await downloadBenchmarkTableXlsx(); }
+                        catch (e) { alert((e as Error).message); }
                       }}
                       className="flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-bold text-green-700 border border-green-300 bg-green-50 hover:bg-green-100 transition whitespace-nowrap"
                     >

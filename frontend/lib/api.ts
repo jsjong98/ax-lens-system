@@ -1213,6 +1213,23 @@ export async function deleteBenchmarkRow(source: string, sheetId?: string): Prom
   });
 }
 
+export async function downloadBenchmarkTableXlsx(): Promise<void> {
+  const token = getAuthToken();
+  const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+  const res = await fetch(`${BACKEND_DIRECT}/api/workflow/benchmark-table/export`, { headers });
+  if (!res.ok) { if (res.status === 401) handle401(); throw new Error("벤치마킹 엑셀 다운로드 실패"); }
+  const blob = await res.blob();
+  const cd = res.headers.get("content-disposition") || "";
+  const match = cd.match(/filename\*?=(?:UTF-8'')?([^;]+)/i);
+  const filename = match ? decodeURIComponent(match[1].replace(/"/g, "")) : "벤치마킹_결과.xlsx";
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 // ── To-Be Workflow Swim Lane ──────────────────────────────────────────────────
 
 export type TobeActor =
