@@ -134,6 +134,14 @@ function clearAuthToken(): void {
   if (typeof window !== "undefined") localStorage.removeItem("auth_token");
 }
 
+/** 401 응답 시 토큰 삭제 + 로그인 페이지로 이동 */
+function handle401(): void {
+  clearAuthToken();
+  if (typeof window !== "undefined" && !window.location.pathname.includes("/login")) {
+    window.location.href = "/login";
+  }
+}
+
 // ── 기본 fetch 헬퍼 ──────────────────────────────────────────────────────────
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
@@ -148,6 +156,13 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   });
 
   if (!res.ok) {
+    // 401: 세션 만료 또는 무효 → 토큰 삭제 후 로그인 페이지로 이동
+    if (res.status === 401) {
+      clearAuthToken();
+      if (typeof window !== "undefined" && !window.location.pathname.includes("/login")) {
+        window.location.href = "/login";
+      }
+    }
     let errorMsg = `HTTP ${res.status}`;
     try {
       const err = await res.json();
@@ -545,6 +560,7 @@ export async function uploadExcel(
       if (xhr.status >= 200 && xhr.status < 300) {
         resolve(JSON.parse(xhr.responseText));
       } else {
+        if (xhr.status === 401) handle401();
         try {
           reject(new Error(JSON.parse(xhr.responseText).detail || `HTTP ${xhr.status}`));
         } catch {
@@ -682,6 +698,7 @@ export async function uploadWorkflow(file: File): Promise<WorkflowSummary & { ok
   });
 
   if (!res.ok) {
+    if (res.status === 401) handle401();
     const err = await res.json().catch(() => ({}));
     throw new Error(err.detail || `HTTP ${res.status}`);
   }
@@ -736,6 +753,7 @@ export async function uploadPptWorkflow(file: File): Promise<{
     body: formData,
   });
   if (!res.ok) {
+    if (res.status === 401) handle401();
     const err = await res.json().catch(() => ({}));
     throw new Error(err.detail || `HTTP ${res.status}`);
   }
@@ -914,6 +932,7 @@ export async function uploadWorkflowExcel(file: File): Promise<WorkflowExcelUplo
     body: formData,
   });
   if (!res.ok) {
+    if (res.status === 401) handle401();
     const err = await res.json().catch(() => ({}));
     throw new Error(err.detail || `HTTP ${res.status}`);
   }
@@ -1056,6 +1075,7 @@ export function benchmarkWorkflowStep1Stream(
       );
 
       if (!res.ok) {
+        if (res.status === 401) handle401();
         const err = await res
           .json()
           .catch(() => ({ detail: `HTTP ${res.status}` }));
@@ -1516,7 +1536,7 @@ export async function downloadToBeWorkflowJson(): Promise<void> {
   const token = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null;
   const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
   const res = await fetch(`${BACKEND_DIRECT}/api/workflow/export-tobe-json`, { headers });
-  if (!res.ok) throw new Error("다운로드 실패");
+  if (!res.ok) { if (res.status === 401) handle401(); throw new Error("다운로드 실패"); }
   const blob = await res.blob();
   const cd = res.headers.get("content-disposition") || "";
   const fnMatch = cd.match(/filename\*?=(?:UTF-8'')?(.+)/i);
@@ -1534,7 +1554,7 @@ export async function downloadTobeFlowJson(): Promise<void> {
   const token = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null;
   const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
   const res = await fetch(`${BACKEND_DIRECT}/api/workflow/export-tobe-flow-json`, { headers });
-  if (!res.ok) throw new Error("To-Be Flow JSON 다운로드 실패");
+  if (!res.ok) { if (res.status === 401) handle401(); throw new Error("To-Be Flow JSON 다운로드 실패"); }
   const blob = await res.blob();
   const cd = res.headers.get("content-disposition") || "";
   const fnMatch = cd.match(/filename\*?=(?:UTF-8'')?(.+)/i);
@@ -1572,6 +1592,7 @@ export async function uploadNewWorkflowExcel(file: File): Promise<{
     body: formData,
   });
   if (!res.ok) {
+    if (res.status === 401) handle401();
     const err = await res.json().catch(() => ({ detail: "업로드 실패" }));
     throw new Error(err.detail || "업로드 실패");
   }
@@ -1716,6 +1737,7 @@ export async function downloadNewWorkflowAsHtml(): Promise<void> {
   const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
   const res = await fetch(`${BACKEND_DIRECT}/api/new-workflow/export-html`, { headers });
   if (!res.ok) {
+    if (res.status === 401) handle401();
     const err = await res.json().catch(() => ({ detail: "HTML 다운로드 실패" }));
     throw new Error(err.detail ?? "HTML 다운로드 실패");
   }
@@ -1736,6 +1758,7 @@ export async function downloadNewWorkflowAsHrJson(): Promise<void> {
   const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
   const res = await fetch(`${BACKEND_DIRECT}/api/new-workflow/export-hr-json`, { headers });
   if (!res.ok) {
+    if (res.status === 401) handle401();
     const err = await res.json().catch(() => ({ detail: "다운로드 실패" }));
     throw new Error(err.detail ?? "다운로드 실패");
   }
@@ -1906,6 +1929,7 @@ export async function downloadProjectPpt(): Promise<void> {
   const hdrs: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
   const res = await fetch(`${BACKEND_DIRECT}/api/project-management/export-ppt`, { headers: hdrs });
   if (!res.ok) {
+    if (res.status === 401) handle401();
     const err = await res.json().catch(() => ({ detail: "PPT 다운로드 실패" }));
     throw new Error(err.detail ?? "PPT 다운로드 실패");
   }
@@ -2023,7 +2047,7 @@ export async function downloadAdminFile(filename: string, sessionId?: string): P
     `${BACKEND_DIRECT}/api/admin/download/${encodeURIComponent(filename)}${qs}`,
     { headers },
   );
-  if (!res.ok) throw new Error("다운로드 실패");
+  if (!res.ok) { if (res.status === 401) handle401(); throw new Error("다운로드 실패"); }
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
