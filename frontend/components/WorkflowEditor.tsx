@@ -92,10 +92,14 @@ function Badge({ value }: { value: string }) {
 
 /* ── Workflow → Swimlane 변환 ─────────────────────────────────────────────── */
 function workflowToSwimlane(result: NewWorkflowResult): SwimlaneData {
-  // Input: agent별 input_data 수집 + owner 매핑
+  // Junior AI 먼저 필터링 — inputOwner 인덱스를 Junior AI 기준으로 통일
+  const juniorAgents = result.agents.filter((a) => a.agent_type === "Junior AI");
+  const effectiveAgents = juniorAgents.length > 0 ? juniorAgents : result.agents;
+
+  // Input: Junior AI 인덱스 기준으로 owner 매핑 (Senior AI 제외)
   const inputOwner: Record<string, number> = {};
-  for (let ai = 0; ai < result.agents.length; ai++) {
-    for (const task of result.agents[ai].assigned_tasks) {
+  for (let ai = 0; ai < effectiveAgents.length; ai++) {
+    for (const task of effectiveAgents[ai].assigned_tasks) {
       task.input_data?.forEach((d) => {
         if (!(d in inputOwner)) inputOwner[d] = ai;
       });
@@ -115,9 +119,8 @@ function workflowToSwimlane(result: NewWorkflowResult): SwimlaneData {
     description: seniorAgent?.description || result.blueprint_summary || "",
   };
 
-  // Junior AI: agent_type="Junior AI"인 에이전트만 컬럼으로 표시
-  const juniorAgents = result.agents.filter((a) => a.agent_type === "Junior AI");
-  const agents: AgentColumn[] = (juniorAgents.length > 0 ? juniorAgents : result.agents).map((a, i) => ({
+  // Junior AI 컬럼 — effectiveAgents 기준 (inputOwner와 동일 인덱스)
+  const agents: AgentColumn[] = effectiveAgents.map((a, i) => ({
     id: a.agent_id,
     number: i + 1,
     name: a.agent_name,
@@ -455,10 +458,11 @@ export default function WorkflowEditor({ result, onSave }: WorkflowEditorProps) 
               {data.agents.map((agent, ai) => (
                 <div key={agent.id} className="flex flex-col">
 
-                  {/* 에이전트 박스 */}
-                  <div className="rounded-lg p-3 flex-1" style={{ border: "1.5px dashed #AA8E2A", backgroundColor: "#fff" }}>
+                  {/* 에이전트 박스 — Input과 동일 색상으로 연결 */}
+                  <div className="rounded-lg p-3 flex-1" style={{ border: `2px solid ${agentColor(ai)}`, backgroundColor: "#fff" }}>
                     <div className="flex items-center gap-2 mb-3">
-                      <div className="w-5 h-5 rounded-full bg-[#AA8E2A] flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0">
+                      <div className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0"
+                        style={{ backgroundColor: agentColor(ai) }}>
                         {agent.number}
                       </div>
                       <input className="text-[11px] font-bold text-[#2C2C2A] bg-transparent border-b border-transparent hover:border-gray-300 focus:border-[#AA8E2A] outline-none flex-1"
