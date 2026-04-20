@@ -4294,8 +4294,15 @@ Step 1에서 도출된 기본 설계를 기반으로, 두산에 최적화된 **A
 ## ⚠️ agent_type 규칙 (반드시 준수)
 - `agent_type`은 **"Senior AI"** 또는 **"Junior AI"** 둘 중 하나만 사용 (다른 텍스트 절대 금지)
 - **Senior AI**: 프로세스 전체 오케스트레이션, 상태 관리, 예외 라우팅, 복수 Agent 조율 역할 → 항상 첫 번째로 배치
-- **Junior AI**: 개별 반복 Task 자동화 (문서 처리, 스크리닝, 알림 발송, 데이터 추출 등)
+- **Junior AI**: 연관된 여러 Task를 묶어 순차 파이프라인으로 처리하는 실무 Agent
 - Senior AI는 전체 agents 배열의 **첫 번째 항목**으로 위치할 것
+
+## ⚠️ Task 그루핑 규칙 (핵심)
+- Junior AI 1개 Agent에 **반드시 2개 이상**의 Task를 묶어야 합니다 (1개 Task = 1 Agent는 금지)
+- 그루핑 기준: 같은 L4 안에서 순서상 연속된 Task, 동일한 AI 기법으로 처리 가능한 Task
+- 예시) "지원서 수집 → 항목 추출 → 적합도 분류" 3개를 하나의 "서류 스크리닝 AI"로 묶음
+- 예외: 성격이 완전히 다른 Task (예: OCR vs 일정 최적화)는 별도 Agent로 분리
+- Junior AI Agent 수는 **최대 5개** (과도한 세분화 금지)
 
 ## 출력 형식 (JSON만 출력, 마크다운 코드 블록 없음)
 {{
@@ -4317,21 +4324,43 @@ Step 1에서 도출된 기본 설계를 기반으로, 두산에 최적화된 **A
     }},
     {{
       "agent_id": "agent_1",
-      "agent_name": "Junior AI 에이전트명",
+      "agent_name": "서류 스크리닝 AI",
       "agent_type": "Junior AI",
-      "ai_technique": "AI 기법 (구체적)",
-      "description": "역할 설명 (상세)",
+      "ai_technique": "OCR + LLM + 분류모델",
+      "description": "지원서 수집부터 적합도 분류까지 순차 파이프라인 처리",
       "automation_level": "Full-Auto",
       "assigned_tasks": [
         {{
-          "task_id": "Task ID",
-          "task_name": "Task명",
-          "l4": "L4 명",
-          "l3": "L3 명",
-          "ai_role": "AI 구체적 역할",
-          "human_role": "사람 역할",
-          "input_data": ["입력 데이터 상세"],
-          "output_data": ["출력 결과물 상세"],
+          "task_id": "Task ID 1",
+          "task_name": "지원서 항목 추출",
+          "l4": "서류 전형",
+          "l3": "채용관리",
+          "ai_role": "OCR로 지원서 텍스트 추출 후 구조화",
+          "human_role": "",
+          "input_data": ["지원서 PDF"],
+          "output_data": ["구조화된 지원자 데이터"],
+          "automation_level": "Full-Auto"
+        }},
+        {{
+          "task_id": "Task ID 2",
+          "task_name": "적합도 자동 분류",
+          "l4": "서류 전형",
+          "l3": "채용관리",
+          "ai_role": "JD 기반 지원자 적합도 점수 산정 및 등급 분류",
+          "human_role": "최종 합불 검토",
+          "input_data": ["구조화된 지원자 데이터", "JD 요건"],
+          "output_data": ["적합도 등급, 사유"],
+          "automation_level": "Human-in-Loop"
+        }},
+        {{
+          "task_id": "Task ID 3",
+          "task_name": "스크리닝 결과 알림",
+          "l4": "서류 전형",
+          "l3": "채용관리",
+          "ai_role": "합불 결과 지원자 자동 발송 및 내부 보고서 생성",
+          "human_role": "",
+          "input_data": ["적합도 등급"],
+          "output_data": ["합불 통보 메일, 스크리닝 보고서"],
           "automation_level": "Full-Auto"
         }}
       ]
