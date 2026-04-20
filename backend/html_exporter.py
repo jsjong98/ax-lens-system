@@ -137,10 +137,13 @@ def _has_human(task: dict) -> bool:
 def export_workflow_html(workflow: dict) -> str:
     """Workflow 결과를 PwC 표준 AI Service Flow HTML로 변환합니다."""
     process_name = workflow.get("process_name", "AI Workflow")
-    agents = workflow.get("agents", [])
+    all_agents = workflow.get("agents", [])
+    # Junior AI만 컬럼/색상 매핑 대상 (Senior AI는 별도 행으로 표시)
+    junior_agents = [a for a in all_agents if a.get("agent_type") == "Junior AI"]
+    agents = junior_agents if junior_agents else all_agents
     summary = workflow.get("blueprint_summary", "")
 
-    # Input 수집 + Input→Agent 매핑 (첫 사용 Agent 기준 색상 결정)
+    # Input 수집 + Input→Agent 매핑 (첫 사용 Junior AI 기준 색상 결정)
     all_inputs: list[str] = []
     seen_inputs: set[str] = set()
     input_to_agent_idx: dict[str, int] = {}
@@ -152,15 +155,15 @@ def export_workflow_html(workflow: dict) -> str:
                     all_inputs.append(inp)
                     input_to_agent_idx[inp] = ai
 
-    # Human Task 수집
+    # Human Task 수집 (Junior AI 인덱스 기준)
     human_tasks: list[dict] = []
-    for agent in agents:
+    for ai, agent in enumerate(agents):
         for task in agent.get("assigned_tasks", []):
             if _has_human(task):
                 human_tasks.append({
-                    "name": task.get("human_role", "") or f"{task.get('task_name', '')} 검토",
+                    "name": task.get("task_name", "") or f"{task.get('task_name', '')} 검토",
                     "desc": task.get("human_role", "최종 확인"),
-                    "agent_idx": agents.index(agent),
+                    "agent_idx": ai,
                 })
 
     agent_count = len(agents)
@@ -219,7 +222,7 @@ def export_workflow_html(workflow: dict) -> str:
             </div>
           </div>"""
 
-    # 에이전트 박스 행 — 금색 테두리 + Task간 화살표에 데이터 라벨
+    # 에이전트 박스 행 — per-agent 색상 테두리 + Task간 화살표에 데이터 라벨
     agents_html = ""
     for i, agent in enumerate(agents):
         color = _agent_color(i)
@@ -241,18 +244,19 @@ def export_workflow_html(workflow: dict) -> str:
             task_name = task.get("task_name", "")
             ai_role = task.get("ai_role", "")
 
-            # Task간 화살표 + output 데이터 라벨
+            # Task간 화살표 + output 데이터 라벨 (per-agent 색상)
             if j > 0:
                 prev_outputs = tasks_list[j-1].get("output_data", [])
                 lbl = prev_outputs[0][:15] if prev_outputs else ""
                 tasks_html += f"""
                 <div class="task-arrow">
-                  <div class="ln"></div><div class="hd"></div>
-                  {f'<div class="task-arrow-lbl">{_html.escape(lbl)}</div>' if lbl else ''}
+                  <div class="ln" style="background:{color};"></div><div class="hd" style="border-top-color:{color};"></div>
+                  {f'<div class="task-arrow-lbl" style="color:{color};">{_html.escape(lbl)}</div>' if lbl else ''}
                 </div>"""
 
+            box_border = f"0.7px dashed {color}"
             tasks_html += f"""
-                <div class="b{hf_cls}">
+                <div class="b{hf_cls}" style="border:{box_border};">
                   <div class="bt">{_html.escape(task_name)}</div>
                   <div class="bs">{_html.escape(ai_role)}</div>
                   <div class="bbr">{badges}</div>
@@ -278,9 +282,9 @@ def export_workflow_html(workflow: dict) -> str:
 
         agents_html += f"""
           <div class="agent-col">
-            <div class="agent-box" style="border: 1.5px solid #AA8E2A;">
+            <div class="agent-box" style="border: 2px solid {color}; background:#fff;">
               <div class="ah">
-                <div class="an">{i+1}</div>
+                <div class="an" style="background:{color};">{i+1}</div>
                 <div>
                   <div class="aname">{_html.escape(agent.get('agent_name', ''))}</div>
                   {l4_sub}
