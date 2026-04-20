@@ -141,7 +141,7 @@ function workflowToSwimlane(result: NewWorkflowResult): SwimlaneData {
       .forEach((t) => {
         humanTasks.push({
           id: `human-${t.task_id}`,
-          title: t.human_role || `${t.task_name} 검토`,
+          title: t.task_name || "검토",
           description: t.human_role || "최종 확인",
           column: i,
         });
