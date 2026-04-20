@@ -2927,12 +2927,26 @@ async def benchmark_workflow_step1(request: Request):
                 for d in l4_details[:6]
             )
 
+            # 두산 HR 고유 용어 설명 (LLM이 맥락을 이해하도록)
+            _DOOSAN_HR_TERMS = """
+## 두산 HR 프로그램 용어 설명 (벤치마킹 맥락 이해용)
+- PDS (Performance Development Survey): 선임→수석 승진 대상자 역량 평가 프로그램. 다면진단·전문성 인터뷰 등으로 구성
+- LDS (Leadership Development Survey): 수석→팀장 승진 대상자 리더십 역량 평가 프로그램
+- EDS (Executive Development Survey): 임원 승진 대상자 평가 프로그램
+- SDS (Specialist Development Survey): Specialist 트랙 승진 대상자 전문성 평가 프로그램
+→ 모두 두산그룹 내부의 승진·역량개발 평가 체계이며, 글로벌 벤치마킹 시 "Performance Review", "Leadership Assessment", "Succession Planning", "Talent Assessment" 등으로 대응하여 검색합니다.
+"""
+            _doosan_term_ctx = _DOOSAN_HR_TERMS if any(
+                term in " ".join(l2_names + l3_names) for term in ["PDS", "LDS", "EDS", "SDS"]
+            ) else ""
+
             bm_analysis_system = f"""당신은 글로벌 AI 업무 혁신 벤치마킹 분석 전문가입니다.
 영어·한국어 검색 결과를 엄격하게 분석하여 실제 근거가 있는 기업의 AI 적용 사례만 추출합니다.
 
 ## 프로세스: {process_name}
 ## L2 대분류: {', '.join(l2_names)}
 ## L3 영역: {', '.join(l3_names)}
+{_doosan_term_ctx}
 ## L4 세부 활동 및 영어 대응어 (최우선 매핑 기준):
 {l4_en_map if l4_en_map else chr(10).join(f"  - [{d['task_id']}] {d['name']}" for d in l4_details[:6])}
 
@@ -4258,9 +4272,24 @@ async def generate_workflow_step2(request: Request):
     # As-Is + 엑셀 매핑 컨텍스트 — L4 scope면 해당 시트만, L3면 전체
     asis_info = _build_mapped_asis_context(step2_sheet_id or "")
 
+    # 두산 HR 고유 용어 설명 (Step 2 LLM용)
+    _s2_l2_names = list({t.l2 for t in _wf_excel_tasks if t.l2})
+    _s2_l3_names = list({t.l3 for t in _wf_excel_tasks if t.l3})
+    _s2_doosan_ctx = ""
+    if any(term in " ".join(_s2_l2_names + _s2_l3_names + [process_name])
+           for term in ["PDS", "LDS", "EDS", "SDS"]):
+        _s2_doosan_ctx = """
+## 두산 HR 프로그램 용어
+- PDS (Performance Development Survey): 선임→수석 승진 역량 평가 (다면진단·전문성 인터뷰 등)
+- LDS (Leadership Development Survey): 수석→팀장 승진 리더십 역량 평가
+- EDS (Executive Development Survey): 임원 승진 대상자 평가
+- SDS (Specialist Development Survey): Specialist 트랙 승진 전문성 평가
+→ 모두 두산그룹 내부 승진·역량개발 평가 체계입니다. AI 설계 시 평가 자동화, 다면 피드백 분석, Assessor 매칭 등을 적극 고려하세요.
+"""
+
     step2_system = f"""당신은 AI 기반 업무 혁신 설계 전문가입니다.
 Step 1에서 도출된 기본 설계를 기반으로, 두산에 최적화된 **AI 기반 To-Be Workflow 상세 설계**를 수행합니다.
-
+{_s2_doosan_ctx}
 ## 핵심 철학
 - **Bottom-Up 접근**: As-Is 프로세스의 Pain Point를 Deep-dive 분석
 - **Senior AI 기반 End-to-End 오케스트레이션 구조로 전환**

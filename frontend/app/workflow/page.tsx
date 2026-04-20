@@ -783,9 +783,14 @@ export default function WorkflowPage() {
   // 분석 스코프 시트 (벤치마킹 완료 시트 → Gap/기본설계 고정 스코프)
   const analysisSheet = summary?.sheets.find((s) => s.sheet_id === bmSheetId);
   // 현재 시트의 벤치마킹 결과 (테이블 표시용) — bmSheetId 기준
+  // L3 전체 scope면 "__default__" 키 fallback, 없으면 전체 시트 합산
   const benchmarkTable = bmSheetId
     ? (benchmarkTableBySheet[bmSheetId] ?? benchmarkTableBySheet[activeSheet ?? ""] ?? [])
-    : (activeSheet ? (benchmarkTableBySheet[activeSheet] ?? []) : []);
+    : (activeSheet
+        ? (benchmarkTableBySheet[activeSheet]
+            ?? benchmarkTableBySheet["__default__"]
+            ?? Object.values(benchmarkTableBySheet).flat())
+        : (benchmarkTableBySheet["__default__"] ?? Object.values(benchmarkTableBySheet).flat()));
   // 전체 시트 벤치마킹 건수 합산 (기본 설계 활성화 조건)
   const totalBenchmarkCount = Object.values(benchmarkTableBySheet).reduce((s, r) => s + r.length, 0);
 
@@ -1749,7 +1754,7 @@ export default function WorkflowPage() {
                     </button>
                   </div>
                 </div>
-                <div className="max-h-[340px] overflow-y-auto overflow-x-auto rounded-lg border border-blue-200">
+                <div className="overflow-x-auto rounded-lg border border-blue-200">
                   <table className="w-full text-xs" style={{ minWidth: "1100px" }}>
                     <thead className="sticky top-0 bg-blue-50 border-b border-blue-200">
                       <tr>
