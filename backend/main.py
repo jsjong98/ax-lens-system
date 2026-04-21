@@ -4109,20 +4109,114 @@ async def generate_tobe_flow(request: Request):
     return {"ok": True, **result}
 
 
+def _tobe_cache_to_hr_json(cache: dict) -> dict:
+    """
+    새 generate-tobe-flow 파이프라인 결과(tobe_sheets)를 hr-workflow-ai v2.0 호환 JSON으로 직렬화.
+    레거시 tobe_sheets_to_hr_json과 달리 position/level/data/role/actors 등 원본 보존.
+    """
+    from datetime import datetime, timezone
+
+    process_name = cache.get("process_name", "To-Be Workflow")
+    raw_sheets = cache.get("tobe_sheets", [])
+    sheets_out: list[dict] = []
+
+    for rs in raw_sheets:
+        sheet_id = str(rs.get("l4_id") or f"sheet-{len(sheets_out) + 1}")
+        sheet_name = str(rs.get("l4_name") or sheet_id)
+        lanes = rs.get("lanes") or rs.get("actors_used") or []
+
+        nodes_out: list[dict] = []
+        for n in rs.get("nodes", []):
+            level = (n.get("level") or "L5").upper()
+            node_type = (
+                "decision" if level == "DECISION"
+                else "memo" if level == "MEMO"
+                else level.lower()  # "l2" | "l3" | "l4" | "l5"
+            )
+            pos = n.get("position") or {}
+            x = float(pos.get("x", 0) or 0)
+            y = float(pos.get("y", 0) or 0)
+
+            # LevelNode가 사용하는 data 필드 구성 (원본 n.data + 추가 매핑)
+            base_data = dict(n.get("data") or {})
+            # label/level/id는 LevelNode 루트에서 참조하는 필드
+            base_data.setdefault("label", n.get("label", ""))
+            base_data["level"] = level
+            if n.get("task_id"):
+                base_data.setdefault("id", n["task_id"])
+            if n.get("description"):
+                base_data.setdefault("description", n["description"])
+            # AI 노드는 role을 actor로 강제 (Senior/Junior AI 레인 배치)
+            if n.get("origin") == "ai" and n.get("actor"):
+                base_data["role"] = n["actor"]
+                if n.get("ai_support"):
+                    base_data.setdefault("memo", n["ai_support"])
+            # role이 여전히 문자열이 아니면 actors_all + custom_role로 재구성
+            if not isinstance(base_data.get("role"), str):
+                parts = list(n.get("actors_all") or [])
+                cr = n.get("custom_role") or ""
+                if cr and "그 외" in parts:
+                    parts = [f"그 외:{cr}" if p == "그 외" else p for p in parts]
+                base_data["role"] = ", ".join(parts) if parts else (n.get("actor") or "")
+
+            nodes_out.append({
+                "id": n["id"],
+                "type": node_type,
+                "position": {"x": x, "y": y},
+                "data": base_data,
+            })
+
+        edges_out: list[dict] = []
+        for e in rs.get("edges", []) or []:
+            is_ai = e.get("origin") == "ai"
+            edge_obj = {
+                "id": e["id"],
+                "source": e["source"],
+                "target": e["target"],
+                "type": "ortho",
+                "animated": is_ai,
+                "style": {
+                    "stroke": "#00827F" if is_ai else "#64748B",
+                    "strokeWidth": 2 if is_ai else 1.5,
+                },
+                "markerEnd": {
+                    "type": "ArrowClosed",
+                    "width": 18,
+                    "height": 18,
+                    "color": "#00827F" if is_ai else "#64748B",
+                },
+            }
+            if e.get("label"):
+                edge_obj["label"] = e["label"]
+            edges_out.append(edge_obj)
+
+        sheets_out.append({
+            "id": sheet_id,
+            "name": sheet_name,
+            "type": "swimlane",
+            "lanes": lanes,
+            "nodes": nodes_out,
+            "edges": edges_out,
+        })
+
+    return {
+        "version": "2.0",
+        "exportedAt": datetime.now(timezone.utc).isoformat(),
+        "processName": process_name,
+        "sheets": sheets_out,
+    }
+
+
 @app.get("/api/workflow/export-tobe-flow-json", tags=["Workflow"])
 async def export_tobe_flow_json():
     """
-    generate-tobe-flow 결과를 hr-workflow-ai v2.0 호환 JSON으로 변환하여 다운로드.
-    - actors_used 기준 swim lane 구성 (표준 순서 정렬)
-    - next[] 위상정렬 → x 좌표, 레인별 동적 높이
-    - L4 시트마다 독립 sheet (multi-sheet)
+    generate-tobe-flow 결과(새 파이프라인)를 hr-workflow-ai v2.0 호환 JSON으로 그대로 직렬화.
+    As-Is 노드의 position/level/data (actors/systems/painPoints/inputs/outputs/logic) 전부 보존.
     """
     if not _wf_tobe_flow_cache:
         raise HTTPException(400, "To-Be Flow를 먼저 생성해주세요 (generate-tobe-flow).")
 
-    from new_workflow_generator import tobe_sheets_to_hr_json
-
-    hr_json = tobe_sheets_to_hr_json(_wf_tobe_flow_cache)
+    hr_json = _tobe_cache_to_hr_json(_wf_tobe_flow_cache)
 
     process_name = _wf_tobe_flow_cache.get("process_name", "tobe_workflow")
     filename = f"{process_name}_ToBeFlow.json"
