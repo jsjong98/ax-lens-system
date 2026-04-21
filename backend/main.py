@@ -5073,6 +5073,21 @@ L4 활동: {', '.join(bm_data['l4_names'][:4])}
     chat_system = f"""당신은 AI 기반 업무 혁신 벤치마킹 전문가입니다.
 현재 '{process_name}' 프로세스의 벤치마킹 리서치를 진행 중입니다.
 
+## 🚨 이 채팅의 역할 (매우 중요)
+이 채팅은 **벤치마킹 사례 수집·Q&A 전용** 입니다.
+- ✅ 허용: 추가 사례 조사 결과 설명, 사용자 질문에 대한 답변, 벤치마킹 테이블에 새 기업 사례를 찾아 추가
+- ❌ **절대 금지**: Step 1 기본 설계(redesigned_process, agents 같은 구조) JSON 반환
+- ❌ 금지: L3/L4/L5 재설계, automation_level/ai_technique 등 설계 의사결정을 직접 내리지 말 것
+
+사용자가 설계 반영을 원하면 → "추가된 벤치마킹 사례를 반영하려면 **[기본 설계 재생성]** 버튼을 눌러주세요"로 안내하세요.
+
+채팅은 벤치마킹 enrichment 까지만, 그 다음 Gap 분석·기본 설계 생성은 사용자가 명시적으로 버튼을 눌러 단계별로 진행합니다.
+
+## 출력 형식
+- **순수 텍스트 답변만** (JSON/마크다운 코드블록 X)
+- 벤치마킹 사례를 언급할 때 → source·use_case·URL 형태로 짧게 정리
+- 사용자가 질문한 범위를 벗어나 설계 전체를 다시 쓰지 말 것
+
 ## 두산 HR 전문 약어 정의 (반드시 준수)
 - **BP** = Business Partner (HR BP, 인사 담당 파트너) — 절대로 'British Petroleum'이 아님
 - **ER** = Employee Relations (노사관계/직원관계)
@@ -5095,6 +5110,7 @@ L4 활동: {', '.join(bm_data['l4_names'][:4])}
 - 기존 벤치마킹 테이블 + 이번 검색 결과를 종합하여 구체적으로 설명
 - 검색 결과에 URL이 있으면 반드시 출처 명시
 - 검색 결과에 없는 내용은 "이번 검색에서 확인되지 않았습니다"라고 명시
+- 벤치마킹 사례가 추가됐으면 "벤치마킹 테이블에 N건 추가됐습니다. Gap 분석·기본 설계에 반영하려면 해당 단계 버튼을 눌러주세요" 라고 사용자에게 안내
 
 ## 엑셀 기반 L5 Task 목록 (실제 업무 범위 참고)
 {task_summary[:1500]}
@@ -5154,29 +5170,16 @@ L4 활동: {', '.join(bm_data['l4_names'][:4])}
 
     _wf_chat_history.append({"role": "assistant", "content": response_text})
 
-    # JSON이 포함되어 있으면 캐시 업데이트
-    updated = False
-    try:
-        from new_workflow_generator import _extract_json, _parse_freeform_result, result_to_dict
-        data = _extract_json(response_text)
-        parsed = _parse_freeform_result(data)
-        result_dict = result_to_dict(parsed)
-        result_dict["benchmark_insights"] = data.get("benchmark_insights", _wf_step1_cache.get("benchmark_insights", []))
-        result_dict["l2_restructure"] = data.get("l2_restructure", _wf_step1_cache.get("l2_restructure", ""))
-        result_dict["benchmark_table"] = [r for rows in _wf_benchmark_table.values() for r in rows]
-        _wf_step1_cache.clear()
-        _wf_step1_cache.update(result_dict)
-        updated = True
-    except Exception:
-        pass
-
+    # 🔒 채팅은 벤치마킹 enrichment + Q&A 전용 — Step 1 기본 설계(_wf_step1_cache) 자동 덮어쓰기 금지
+    # 사용자가 '기본 설계 재생성' 버튼을 눌러야만 Step 1 이 업데이트됨 (채팅에서 직접 반영 X)
+    # 벤치마킹 테이블에 새 사례가 추가된 경우만 UI 에 알림으로 표시
     return {
         "ok": True,
         "message": response_text,
-        "updated": updated,
-        "result": _wf_step1_cache if updated else None,
+        "updated": False,               # 채팅은 Step 1 덮어쓰지 않음
+        "result": None,                 # 기본 설계 변경 없음
         "benchmark_updated": len(new_bm_entries) > 0,
-        "benchmark_table": {k: v for k, v in _wf_benchmark_table.items()},  # 전체 시트별
+        "benchmark_table": {k: v for k, v in _wf_benchmark_table.items()},
     }
 
 
