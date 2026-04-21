@@ -1237,21 +1237,46 @@ export type TobeActor =
   | "Senior AI" | "Junior AI" | "현업 구성원" | "그 외";
 
 export type TobeNodeType = "start" | "task" | "decision" | "end";
+export type TobeNodeLevel = "L2" | "L3" | "L4" | "L5" | "DECISION" | "MEMO";
 
 export interface TobeNode {
   id: string;
   label: string;
   actor: TobeActor;
+  actors_all?: TobeActor[];
+  custom_role?: string;          // "그 외:DDI"의 DDI 부분
   type: TobeNodeType;
+  level: TobeNodeLevel;
   ai_support?: string | null;
-  next: string[];
+  position?: { x: number; y: number };
+  origin?: "asis" | "ai";
+  task_id?: string;
+  description?: string;
+  data?: Record<string, unknown>; // 원본 As-Is data 객체 (LevelNode 렌더링용)
+  next?: string[];
+  // Junior AI 관련 추가 정보
+  automation_level?: string;
+  human_role?: string;
+  input_data?: string[];
+  output_data?: string[];
+  agent_name?: string;
+}
+
+export interface TobeEdge {
+  id: string;
+  source: string;
+  target: string;
+  label?: string;
+  origin?: "asis" | "ai";
 }
 
 export interface TobeSheet {
   l4_id: string;
   l4_name: string;
   actors_used: TobeActor[];
+  lanes?: TobeActor[];
   nodes: TobeNode[];
+  edges?: TobeEdge[];
 }
 
 export interface TobeFlowResult {

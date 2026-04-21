@@ -177,10 +177,13 @@ def _parse_node(raw: dict) -> WorkflowNode | None:
         level = "L4"
 
     # 메타데이터 (actors, systems, painPoints 등)
+    # LevelNode 렌더링에 필요한 모든 키 + 계층 정보
     meta_keys = (
         "actors", "systems", "painPoints", "inputs", "outputs", "logic",
         "mgrBody", "staffCount", "mainPerson", "avgTime", "freqCount",
         "memo", "role", "inputData", "outputData", "system",
+        # 계층 정보 (LevelNode가 표시에 사용)
+        "l2Id", "l2Name", "l3Id", "l3Name", "l4Id", "l4Name",
     )
     metadata = {k: data[k] for k in meta_keys if k in data}
 

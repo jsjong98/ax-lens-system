@@ -45,7 +45,7 @@ import {
   type SessionFileInfo,
   type PMUserSessions,
 } from "@/lib/api";
-import { ToBeSwimlane } from "./ToBeSwimlane";
+import { ToBeSwimlaneRF } from "@/components/tobe/ToBeSwimlaneRF";
 import WorkflowEditor from "@/components/WorkflowEditor";
 import MappingCheckPanel from "@/components/MappingCheckPanel";
 
@@ -2595,7 +2595,7 @@ export default function WorkflowPage() {
                               </span>
                             ))}
                           </div>
-                          <ToBeSwimlane sheet={sheet} />
+                          <ToBeSwimlaneRF sheet={sheet} />
                         </div>
                       );
                     })()}

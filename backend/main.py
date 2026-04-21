@@ -3654,215 +3654,425 @@ async def delete_workflow_resource(idx: int):
 
 # ── To-Be Workflow Swim Lane 생성 ─────────────────────────────
 
-def _build_sheet_design_context(sheet_id: str, sheet_name: str) -> dict:
+# swim lane 표준 액터 (상→하 순서)
+_TOBE_ACTOR_ORDER = [
+    "임원", "현업 팀장", "HR 임원", "HR 담당자",
+    "Senior AI", "Junior AI", "현업 구성원", "그 외",
+]
+
+_ACTOR_ALIAS = {
+    "HR담당자": "HR 담당자", "HR 담당자": "HR 담당자",
+    "HR임원": "HR 임원", "HR 임원": "HR 임원",
+    "HR": "HR 담당자",   # 기본은 담당자로 매핑 (임원/담당자 명시 없을 때)
+    "팀장": "현업 팀장", "현업 팀장": "현업 팀장", "현업팀장": "현업 팀장",
+    "임원": "임원", "현업 임원": "임원", "임원 (=현업 임원)": "임원",
+    "직원": "현업 구성원", "사원": "현업 구성원",
+    "구성원": "현업 구성원", "현업 구성원": "현업 구성원",
+    "현업구성원": "현업 구성원",
+}
+
+
+def _parse_role_string(raw) -> tuple[list[str], str]:
     """
-    단일 L4 시트의 To-Be 설계 컨텍스트를 구성.
-    - Step 2 agents/tasks: To-Be 내용의 주 소스 (automation_level, ai_role, human_role)
-    - As-Is 흐름: 태스크 순서 참조 (위치 기반 정렬)
+    As-Is role 문자열을 분해 — 콤마/슬래시 구분 다중 액터 처리.
+
+    예: "임원 (=현업 임원), HR, 현업 팀장, 현업 구성원, 그 외:지주HR"
+        → (["임원","HR 담당자","현업 팀장","현업 구성원","그 외"], "지주HR")
+
+    Returns:
+        (정규화된 표준 액터 리스트, "그 외:" 뒤의 customRole 또는 빈 문자열)
     """
-    # Step 2에서 이 시트(L4)에 해당하는 태스크 추출
-    sheet_tasks: list[dict] = []
+    if not raw:
+        return [], ""
+    if isinstance(raw, list):
+        raw = ", ".join(str(x) for x in raw if x)
+    s = str(raw).strip()
+    if not s:
+        return [], ""
+
+    actors: list[str] = []
+    custom = ""
+    parts = [p.strip() for p in s.replace("·", ",").replace("/", ",").split(",") if p.strip()]
+    for part in parts:
+        if part.startswith("그 외:") or part.startswith("기타:"):
+            custom = part.split(":", 1)[1].strip()
+            actors.append("그 외")
+            continue
+        if part in ("그 외", "기타"):
+            actors.append("그 외")
+            continue
+        # alias / 표준명 매칭
+        if part in _TOBE_ACTOR_ORDER:
+            actors.append(part)
+        elif part in _ACTOR_ALIAS:
+            actors.append(_ACTOR_ALIAS[part])
+        else:
+            # "HR (자회사)", "팀장 (현업)" 같은 부가 텍스트 떼고 재시도
+            base = part.split("(", 1)[0].strip()
+            if base in _TOBE_ACTOR_ORDER:
+                actors.append(base)
+            elif base in _ACTOR_ALIAS:
+                actors.append(_ACTOR_ALIAS[base])
+            else:
+                # 끝까지 매칭 안 되면 "그 외"로 + 원본 텍스트를 customRole에 보존
+                actors.append("그 외")
+                if not custom:
+                    custom = part
+
+    # 중복 제거 (순서 보존)
+    seen: set[str] = set()
+    unique = []
+    for a in actors:
+        if a not in seen:
+            seen.add(a)
+            unique.append(a)
+    return unique, custom
+
+
+def _normalize_actor(raw) -> str:
+    """단일 액터 정규화 (다중이면 첫 번째 표준 액터). 후방 호환."""
+    actors, _ = _parse_role_string(raw)
+    return actors[0] if actors else "그 외"
+
+
+def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
+    """
+    단일 As-Is 시트 → To-Be Swim Lane dict.
+    - As-Is 노드/엣지/role 그대로 보존 (level·position 포함)
+    - Step 2 Senior/Junior AI agent를 새 레인에 주입
+    - 엣지는 As-Is 그대로 + AI 노드 지원 엣지 (점선) 추가
+    """
+    # 1) As-Is 노드 변환 (L2/L3/MEMO 제외)
+    asis_nodes_out: list[dict] = []
+    role_counts: dict[str, int] = {}
+
+    # position 범위 (AI 노드 x축 배치에 사용)
+    xs = [n.position_x for n in asis_sheet.nodes.values() if n.level not in ("L2", "L3", "MEMO")]
+    ys = [n.position_y for n in asis_sheet.nodes.values() if n.level not in ("L2", "L3", "MEMO")]
+    min_x = min(xs) if xs else 0.0
+    max_x = max(xs) if xs else 1200.0
+    max_y = max(ys) if ys else 600.0
+
+    for n in sorted(asis_sheet.nodes.values(), key=lambda nd: (nd.position_y, nd.position_x)):
+        if n.level in ("L2", "L3", "MEMO"):
+            continue
+        actor_raw = n.metadata.get("role", "") or n.metadata.get("actors", "")
+        actors_list, custom_role = _parse_role_string(actor_raw)
+        primary_actor = actors_list[0] if actors_list else "그 외"
+        # 모든 actor를 카운트 (lane 등장 여부 판단용)
+        for a in actors_list or [primary_actor]:
+            role_counts[a] = role_counts.get(a, 0) + 1
+
+        node_type = "decision" if n.level == "DECISION" else "task"
+
+        # 원본 data 객체를 그대로 보존 (LevelNode가 systems/painPoints/inputs/outputs/logic 등을 사용)
+        # workflow_parser가 metadata로 추출한 필드를 풀로 노출
+        full_data = dict(n.metadata)
+        # role은 원본 문자열 그대로 — LevelNode의 extractCustomRole이 직접 파싱
+        if actor_raw and "role" not in full_data:
+            full_data["role"] = actor_raw
+
+        asis_nodes_out.append({
+            "id": n.id,
+            "label": (n.label or "")[:60],
+            "level": n.level,
+            "actor": primary_actor,
+            "actors_all": actors_list,
+            "custom_role": custom_role,    # "그 외:DDI"의 DDI
+            "type": node_type,
+            "ai_support": None,
+            "position": {"x": float(n.position_x), "y": float(n.position_y)},
+            "origin": "asis",
+            "task_id": n.task_id,
+            "description": n.description,
+            "data": full_data,             # LevelNode 렌더링용 원본 data
+            "next": [],
+        })
+
+    # As-Is 엣지 → next 배열
+    id_set = {n["id"] for n in asis_nodes_out}
+    next_map: dict[str, list[str]] = {n["id"]: [] for n in asis_nodes_out}
+    asis_edges_out: list[dict] = []
+    for e in asis_sheet.edges:
+        if e.source in id_set and e.target in id_set:
+            next_map[e.source].append(e.target)
+            asis_edges_out.append({
+                "id": e.id,
+                "source": e.source,
+                "target": e.target,
+                "label": e.label or "",
+                "origin": "asis",
+            })
+    for n in asis_nodes_out:
+        n["next"] = next_map.get(n["id"], [])
+
+    # 2) Step 2 AI agent 주입
+    sheet_name = (asis_sheet.name or asis_sheet.sheet_id).strip()
+    sheet_id = asis_sheet.sheet_id
+
+    def _task_matches_sheet(t: dict) -> bool:
+        """Step 2 task가 이 시트와 관련 있는지 휴리스틱 매칭."""
+        tl4 = (t.get("l4", "") or "").strip()
+        if not tl4 or not sheet_name:
+            return True  # 단서가 없으면 포함
+        return tl4 in sheet_name or sheet_name in tl4
+
+    senior_agents: list[dict] = []
+    junior_agents: list[dict] = []
     for agent in _wf_step2_cache.get("agents", []):
-        a_type = agent.get("agent_type", "")
-        a_name = agent.get("agent_name", "")
-        for t in agent.get("assigned_tasks", []):
-            task_l4 = t.get("l4", "")
-            task_id = t.get("task_id", "")
-            # 시트명 유사 매칭 또는 task_id prefix 매칭
-            name_match = (
-                sheet_name and task_l4 and (
-                    sheet_name.strip() in task_l4.strip() or
-                    task_l4.strip() in sheet_name.strip()
-                )
-            )
-            id_match = sheet_id and task_id and task_id.startswith(sheet_id)
-            if name_match or id_match:
-                sheet_tasks.append({
-                    "task_id": task_id,
-                    "task_name": t.get("task_name", ""),
-                    "agent_name": a_name,
-                    "agent_type": a_type,        # "Senior AI" | "Junior AI" | ...
-                    "automation_level": t.get("automation_level", "Human"),
-                    "ai_role": t.get("ai_role", ""),
+        atype = agent.get("agent_type", "")
+        matched = [t for t in agent.get("assigned_tasks", []) if _task_matches_sheet(t)]
+        if not matched and not senior_agents and not junior_agents:
+            matched = agent.get("assigned_tasks", [])[:]  # fallback: 첫 agent에 전체 포함
+        if not matched:
+            continue
+        bucket = senior_agents if atype == "Senior AI" else junior_agents if atype == "Junior AI" else None
+        if bucket is not None:
+            bucket.append({
+                "agent_id": agent.get("agent_id", ""),
+                "agent_name": agent.get("agent_name", ""),
+                "ai_technique": agent.get("ai_technique", ""),
+                "tasks": matched,
+            })
+
+    ai_nodes_out: list[dict] = []
+    ai_edges_out: list[dict] = []
+
+    # Senior AI 레인 y: As-Is 최대 y 아래 + 여백
+    senior_y = max_y + 220.0
+    junior_y = senior_y + 300.0
+
+    if senior_agents:
+        # Senior AI는 보통 1개 (오케스트레이터) — 왼쪽 중앙에 배치
+        for si, ag in enumerate(senior_agents):
+            senior_id = f"senior_{ag['agent_id'] or si}"
+            ai_nodes_out.append({
+                "id": senior_id,
+                "label": (ag["agent_name"] or "Senior AI")[:40],
+                "level": "L4",
+                "actor": "Senior AI",
+                "type": "task",
+                "ai_support": ag.get("ai_technique", ""),
+                "position": {"x": min_x, "y": senior_y + si * 200.0},
+                "origin": "ai",
+                "next": [],
+            })
+
+    if junior_agents:
+        total_jtasks = sum(len(ag["tasks"]) for ag in junior_agents)
+        x_step = (max_x - min_x) / max(total_jtasks, 1) if total_jtasks else 300.0
+        task_i = 0
+        for ji, ag in enumerate(junior_agents):
+            agent_prefix = f"junior_{ag['agent_id'] or ji}"
+            prev_id: str | None = None
+            for ti, t in enumerate(ag["tasks"]):
+                tid = t.get("task_id", f"t{ti}")
+                jid = f"{agent_prefix}_{tid}"
+                x = min_x + x_step * (task_i + 0.5)
+                task_i += 1
+                ai_nodes_out.append({
+                    "id": jid,
+                    "label": (t.get("task_name", "") or tid)[:40],
+                    "level": "L5",
+                    "actor": "Junior AI",
+                    "type": "task",
+                    "ai_support": t.get("ai_role", ""),
+                    "position": {"x": x, "y": junior_y + (ji % 2) * 120.0},
+                    "origin": "ai",
+                    "automation_level": t.get("automation_level", ""),
                     "human_role": t.get("human_role", ""),
-                    "l3": t.get("l3", ""),
+                    "input_data": t.get("input_data", []),
+                    "output_data": t.get("output_data", []),
+                    "agent_name": ag["agent_name"],
+                    "next": [],
+                })
+                # Junior AI 내부 sequential 엣지
+                if prev_id:
+                    ai_edges_out.append({
+                        "id": f"aie_seq_{prev_id}_{jid}",
+                        "source": prev_id,
+                        "target": jid,
+                        "label": "",
+                        "origin": "ai",
+                    })
+                prev_id = jid
+
+            # Senior AI → 첫 Junior task (오케스트레이션)
+            if senior_agents and ag["tasks"]:
+                first_jid = f"{agent_prefix}_{ag['tasks'][0].get('task_id', 't0')}"
+                senior_first = ai_nodes_out[0]["id"] if ai_nodes_out else ""
+                if senior_first:
+                    ai_edges_out.append({
+                        "id": f"aie_orc_{senior_first}_{first_jid}",
+                        "source": senior_first,
+                        "target": first_jid,
+                        "label": "기동",
+                        "origin": "ai",
+                    })
+
+    # 3) AI ↔ As-Is 연결 (input_data / output_data 매칭)
+    # Junior AI task의 input_data가 As-Is 노드 label과 매칭되면 As-Is → AI 엣지
+    # output_data가 매칭되면 AI → As-Is 엣지
+    def _find_asis_by_label(text: str) -> str | None:
+        if not text:
+            return None
+        t = str(text).strip()
+        for n in asis_nodes_out:
+            lbl = n["label"]
+            if not lbl:
+                continue
+            if t in lbl or lbl in t:
+                return n["id"]
+        return None
+
+    for jnode in [n for n in ai_nodes_out if n["actor"] == "Junior AI"]:
+        for inp in jnode.get("input_data", []) or []:
+            src = _find_asis_by_label(inp)
+            if src:
+                ai_edges_out.append({
+                    "id": f"aie_in_{src}_{jnode['id']}",
+                    "source": src,
+                    "target": jnode["id"],
+                    "label": str(inp)[:15],
+                    "origin": "ai",
+                })
+        for outp in jnode.get("output_data", []) or []:
+            tgt = _find_asis_by_label(outp)
+            if tgt:
+                ai_edges_out.append({
+                    "id": f"aie_out_{jnode['id']}_{tgt}",
+                    "source": jnode["id"],
+                    "target": tgt,
+                    "label": str(outp)[:15],
+                    "origin": "ai",
                 })
 
-    # As-Is 노드 흐름 순서 (위치 기반 정렬 → 태스크 순서 참조용)
-    asis_flow: list[dict] = []
-    if "parsed" in _workflow_cache:
-        for s in _workflow_cache["parsed"].sheets:
-            if s.sheet_id != sheet_id:
-                continue
-            outgoing: dict[str, list[str]] = {}
-            for edge in s.edges:
-                outgoing.setdefault(edge.source, []).append(edge.target)
-            for node in sorted(s.nodes.values(), key=lambda n: (n.position_y, n.position_x)):
-                if node.level in ("L2", "L3", "MEMO"):
-                    continue
-                role = node.metadata.get("role", "") or node.metadata.get("actors", "")
-                if isinstance(role, list):
-                    role = " / ".join(role)
-                next_labels = [
-                    s.nodes[nid].label for nid in outgoing.get(node.id, [])
-                    if nid in s.nodes
-                ]
-                asis_flow.append({
-                    "label": node.label,
-                    "level": node.level,
-                    "actor": role,
-                    "type": "decision" if node.level == "DECISION" else "task",
-                    "next_labels": next_labels,
-                })
-            break
+    # 4) lanes — 표준 순서대로, 실제 등장한 것만 (As-Is에서 내용 있는 레인 + AI 레인)
+    actors_used = [a for a in _TOBE_ACTOR_ORDER if (role_counts.get(a, 0) > 0
+                   or (a == "Senior AI" and senior_agents)
+                   or (a == "Junior AI" and junior_agents))]
+
+    all_nodes = asis_nodes_out + ai_nodes_out
+    all_edges = asis_edges_out + ai_edges_out
 
     return {
-        "sheet_id": sheet_id,
-        "sheet_name": sheet_name,
-        "step2_tasks": sheet_tasks,      # To-Be 내용 주 소스
-        "asis_flow_order": asis_flow,    # 흐름 순서 참조
+        "l4_id": sheet_id,
+        "l4_name": sheet_name,
+        "actors_used": actors_used,
+        "lanes": actors_used,
+        "nodes": all_nodes,
+        "edges": all_edges,
     }
+
+
+def _merge_sheets_into_one(sheets: list, merged_id: str, merged_name: str):
+    """여러 As-Is 시트를 하나의 가상 시트로 머지 (L3 전체 scope 대응)."""
+    from workflow_parser import WorkflowSheet
+    merged = WorkflowSheet(sheet_id=merged_id, name=merged_name)
+    # 시트별 x 오프셋으로 충돌 방지
+    x_offset = 0.0
+    for s in sheets:
+        if not s.nodes:
+            continue
+        # 노드 id 충돌 방지 — sheet_id prefix 부여
+        for n in s.nodes.values():
+            nid = f"{s.sheet_id}::{n.id}"
+            cloned = type(n)(
+                id=nid,
+                level=n.level,
+                task_id=n.task_id,
+                label=n.label,
+                description=n.description,
+                position_x=n.position_x + x_offset,
+                position_y=n.position_y,
+                metadata=dict(n.metadata),
+            )
+            merged.nodes[nid] = cloned
+        for e in s.edges:
+            merged.edges.append(type(e)(
+                id=f"{s.sheet_id}::{e.id}",
+                source=f"{s.sheet_id}::{e.source}",
+                target=f"{s.sheet_id}::{e.target}",
+                label=e.label,
+                animated=getattr(e, "animated", False),
+                bidirectional=getattr(e, "bidirectional", False),
+            ))
+        xs = [n.position_x for n in s.nodes.values()]
+        if xs:
+            x_offset += (max(xs) - min(xs)) + 400.0
+    return merged
 
 
 @app.post("/api/workflow/generate-tobe-flow", tags=["Workflow"])
 async def generate_tobe_flow(request: Request):
     """
-    To-Be Workflow를 Swim Lane 형식으로 생성.
-    상세 설계(Step 2) + Gap 분석 결과 기반, L4(시트) 단위.
+    To-Be Workflow Swim Lane 생성 (결정론적 파이프라인).
 
-    Swim Lane 액터: 임원 / 현업 팀장 / HR 임원 / HR 담당자 /
-                   Senior AI / Junior AI / 현업 구성원 / 그 외
+    입력: sheet_id (optional) — L4 단위면 해당 시트, 비어있으면 L3 전체 머지
+    동작:
+      1. As-Is 노드/엣지/position/actor role 그대로 보존
+      2. 실제 내용 있는 lane만 유지 (빈 lane 제거)
+      3. Step 2 Senior AI / Junior AI agent를 새 lane(Senior AI / Junior AI)에 노드로 주입
+      4. Junior AI 내부 sequential 엣지 + input_data/output_data 매칭으로 As-Is ↔ AI 엣지 연결
+
+    출력 스키마 (hr-workflow-ai 호환):
+      {
+        process_name, tobe_sheets: [{
+          l4_id, l4_name, lanes, actors_used,
+          nodes: [{id, label, level, actor, type, position:{x,y}, ai_support, origin, ...}],
+          edges: [{id, source, target, label, origin}]
+        }]
+      }
     """
     if not _wf_step2_cache:
         raise HTTPException(400, "상세 설계(Step 2)를 먼저 수행해주세요.")
 
-    # sheet_id 파라미터: L4 단위 벤치마킹 시 해당 시트만, 없으면 전체(L3)
     body = {}
     try:
         body = await request.json()
     except Exception:
         pass
-    target_sheet_id = body.get("sheet_id", "")
+    target_sheet_id = (body.get("sheet_id") or "").strip()
 
-    # L4 시트 목록 + As-Is 노드 구조 수집
-    selected_sheets: list = []
-    l4_sheets: list[dict] = []
+    if "parsed" not in _workflow_cache:
+        raise HTTPException(400, "As-Is JSON을 먼저 업로드해주세요.")
 
-    if "parsed" in _workflow_cache:
-        all_sheets = _workflow_cache["parsed"].sheets
-        selected_sheets = (
-            [s for s in all_sheets if s.sheet_id == target_sheet_id]
-            if target_sheet_id else all_sheets
-        )
-        if target_sheet_id and not selected_sheets:
-            print(f"[TOBE⚠] sheet_id='{target_sheet_id}' 매칭 없음 — 전체 시트 사용", flush=True)
-            selected_sheets = all_sheets
-        for s in selected_sheets:
-            l4_sheets.append({"l4_id": s.sheet_id, "l4_name": (s.name or s.sheet_id).strip()})
-        print(f"[TOBE] To-Be 대상 시트: {[x['l4_name'] for x in l4_sheets]}", flush=True)
-
-    if not l4_sheets:
-        for l3 in _wf_step1_cache.get("redesigned_process", []):
-            for l4 in l3.get("l4_list", []):
-                l4_sheets.append({"l4_id": l4.get("l4_id", ""), "l4_name": l4.get("l4_name", "")})
+    parsed = _workflow_cache["parsed"]
+    all_sheets = parsed.sheets
 
     process_name = _wf_step2_cache.get("process_name",
                     _wf_step1_cache.get("process_name", "HR 프로세스"))
 
-    # ── 시트별 설계 컨텍스트 구성 (Step 2 primary + As-Is 순서 참조) ──────────
-    sheet_contexts: list[dict] = []
-    for info in l4_sheets:
-        ctx = _build_sheet_design_context(info["l4_id"], info["l4_name"])
-        sheet_contexts.append(ctx)
+    tobe_sheets: list[dict] = []
 
-    gap_ctx = ""
-    if _wf_gap_analysis:
-        gap_items = _wf_gap_analysis.get("gap_items", [])
-        gap_ctx = "## Gap 분석 결과\n"
-        for g in gap_items[:10]:
-            gap_ctx += (f"- [{g.get('gap_type','')}] {g.get('l4_activity','')}: "
-                        f"{g.get('gap_description','')}\n")
+    if target_sheet_id:
+        # L4 scope: 단일 시트만
+        picked = [s for s in all_sheets if s.sheet_id == target_sheet_id]
+        if not picked:
+            print(f"[TOBE⚠] sheet_id='{target_sheet_id}' 매칭 없음 — 전체 머지", flush=True)
+            merged = _merge_sheets_into_one(all_sheets, "merged", process_name)
+            tobe_sheets.append(_build_tobe_sheet_from_asis(merged, process_name))
+        else:
+            for s in picked:
+                tobe_sheets.append(_build_tobe_sheet_from_asis(s, process_name))
+    else:
+        # L3 scope: 전체를 하나의 통합 시트로 머지 → 한 장짜리 Swim Lane
+        if len(all_sheets) == 1:
+            tobe_sheets.append(_build_tobe_sheet_from_asis(all_sheets[0], process_name))
+        elif all_sheets:
+            merged = _merge_sheets_into_one(all_sheets, "merged", process_name)
+            tobe_sheets.append(_build_tobe_sheet_from_asis(merged, process_name))
 
-    sheet_contexts_json = json.dumps(sheet_contexts, ensure_ascii=False)[:8000]
+    if not tobe_sheets:
+        raise HTTPException(500, "To-Be Workflow 생성에 실패했습니다 — 대상 시트가 없습니다.")
 
-    system_prompt = f"""당신은 AI 기반 업무 혁신 설계 전문가입니다.
-Pain Point와 Step 2 상세 설계를 기반으로, L4 시트 단위 To-Be Workflow를 Swim Lane JSON으로 설계합니다.
+    result = {"process_name": process_name, "tobe_sheets": tobe_sheets}
 
-## 설계 원칙
-To-Be는 As-Is를 그대로 변환하는 것이 아닙니다.
-Step 2 상세 설계(automation_level, ai_role, human_role)에서 확정된 새로운 업무 흐름을 중심으로 설계하되,
-As-Is 흐름 순서(asis_flow_order)는 태스크 배치 순서와 누락 방지를 위한 참조로만 활용합니다.
-
-## 시트별 설계 컨텍스트 (JSON)
-각 시트는 아래 구조를 가집니다:
-- step2_tasks: Step 2에서 확정된 태스크 목록 (To-Be 내용의 주 소스)
-  - agent_type: "Senior AI" | "Junior AI" | 기타
-  - automation_level: "Full-Auto" | "Human-in-Loop" | "Human-on-the-Loop" | "Human"
-  - ai_role: AI가 수행하는 역할 설명
-  - human_role: 사람이 수행하는 역할 (비어있으면 Full-Auto)
-- asis_flow_order: As-Is 태스크 순서 (참조용, actor는 원래 수행주체)
-
-{sheet_contexts_json}
-
-{gap_ctx}
-
-## Swim Lane 액터 결정 규칙
-step2_tasks의 각 태스크를 아래 규칙으로 actor에 매핑:
-1. automation_level = "Full-Auto" → actor = agent_type ("Junior AI" 또는 "Senior AI")
-2. automation_level = "Human-in-Loop" → actor = asis_flow_order의 원래 수행주체, ai_support = ai_role 요약
-3. automation_level = "Human-on-the-Loop" → actor = asis_flow_order의 원래 수행주체, ai_support = "AI 모니터링 및 예외처리 보조"
-4. automation_level = "Human" → actor = asis_flow_order의 원래 수행주체, ai_support = null
-5. step2_tasks에 없고 asis_flow_order에만 있는 태스크 → 폐기/통합 처리 (생략하거나 인접 노드에 통합)
-6. step2_tasks에 새로 추가된 AI 태스크 → "Junior AI" 또는 "Senior AI"로 신규 노드 추가
-
-## 액터 목록 (이 중에서만 사용)
-임원 / 현업 팀장 / HR 임원 / HR 담당자 / Senior AI / Junior AI / 현업 구성원 / 그 외
-
-## As-Is actor 표기 → 표준 액터 매핑
-"HR담당자" → "HR 담당자", "HR임원" → "HR 임원",
-"그 외:큐벡스" → "그 외", "그 외:외부" → "그 외",
-"팀장" → "현업 팀장", "직원/사원" → "현업 구성원"
-
-## 출력 규칙
-- node id: {{시트id}}_n{{순번}} (예: sheet_채용_n1)
-- node label: 최대 14자, 동사+목적어
-- type: "start" | "task" | "decision" | "end"
-- next: 다음 노드 id 배열 (마지막 노드는 [])
-- actors_used: 실제 등장한 액터만
-- 각 시트 최소 노드 5개 이상, start/end 포함
-- step2_tasks가 비어있는 시트는 asis_flow_order 기반으로 설계
-
-## 프로세스: {process_name}
-
-## 출력 형식 (JSON만, 마크다운 블록 없음)
-{{
-  "process_name": "{process_name}",
-  "tobe_sheets": [
-    {{
-      "l4_id": "시트ID",
-      "l4_name": "L4 활동명",
-      "actors_used": ["현업 팀장", "HR 담당자", "Junior AI", "Senior AI"],
-      "nodes": [
-        {{"id": "s1_n1", "label": "채용 요청", "actor": "현업 팀장", "type": "start", "ai_support": null, "next": ["s1_n2"]}},
-        {{"id": "s1_n2", "label": "AI 서류 스크리닝", "actor": "Junior AI", "type": "task", "ai_support": null, "next": ["s1_n3"]}},
-        {{"id": "s1_n3", "label": "결과 검토·확정", "actor": "HR 담당자", "type": "task", "ai_support": "Junior AI 스크리닝 결과 대시보드 참조", "next": ["s1_n4"]}},
-        {{"id": "s1_n4", "label": "전형 완료", "actor": "HR 담당자", "type": "end", "ai_support": null, "next": []}}
-      ]
-    }}
-  ]
-}}"""
-
-    result = await _call_llm_step1(system_prompt, [
-        {"role": "user",
-         "content": "각 시트의 step2_tasks를 중심으로 To-Be Workflow를 설계해주세요. asis_flow_order는 순서 참조용으로만 활용하세요."}
-    ])
-
-    if not result:
-        raise HTTPException(500, "To-Be Workflow 생성에 실패했습니다.")
-
-    # 결과 캐시 저장 (export 엔드포인트에서 사용)
     global _wf_tobe_flow_cache
-    _wf_tobe_flow_cache = {"process_name": process_name, **result}
+    _wf_tobe_flow_cache = dict(result)
+
+    print(f"[TOBE] 생성 완료 — 시트 {len(tobe_sheets)}개, "
+          f"총 노드 {sum(len(s['nodes']) for s in tobe_sheets)}개", flush=True)
 
     return {"ok": True, **result}
 
