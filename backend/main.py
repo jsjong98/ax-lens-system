@@ -1751,6 +1751,10 @@ async def upload_workflow_excel(request: Request, file: UploadFile = File(...)):
     global _tasks_cache
     _tasks_cache = tasks
 
+    # AI+Human Task 파트 분리 (fire-and-forget — Step 2 진입 시 lazy 보장)
+    import asyncio as _asyncio
+    _asyncio.create_task(_split_hybrid_tasks_with_llm())
+
     # 가이드 시트 및 데이터 없는 시트는 선택 목록에서 제외
     data_sheets = [
         s for s in sheets
@@ -1829,6 +1833,10 @@ async def select_workflow_excel_sheet(request: Request):
                 "output_types": "",
             }
 
+    # AI+Human Task 파트 분리 (fire-and-forget — Step 2 진입 시 lazy 보장)
+    import asyncio as _asyncio
+    _asyncio.create_task(_split_hybrid_tasks_with_llm())
+
     return {
         "ok": True,
         "sheet_name": sheet_name,
@@ -1866,6 +1874,120 @@ _wf_benchmark_results: list = []   # 벤치마킹 검색 결과 (raw)
 _wf_benchmark_table: dict = {}     # 시트별 벤치마킹 결과 테이블 {sheet_id: [rows]}
 _wf_search_log: list = []          # 벤치마킹 검색 로그 (thinking process)
 _wf_gap_analysis: dict = {}        # Gap 분석 결과 캐시
+
+
+# ── AI+Human 분리 (hybrid split) ──────────────────────────────────────────────
+
+async def _split_hybrid_tasks_with_llm() -> int:
+    """
+    AI+Human으로 분류된 Task에 대해 AI 파트·Human 파트를 LLM으로 자동 분리.
+    hybrid_note가 비어있는 Task만 처리하고 결과를 _wf_classification에 저장.
+
+    Returns:
+        분리된 Task 수
+    """
+    global _wf_classification
+    if not _wf_classification or not _wf_excel_tasks:
+        return 0
+
+    # 대상: label == "AI + Human" 이면서 hybrid_note 비어있는 것
+    task_map = {t.id: t for t in _wf_excel_tasks}
+    hybrid_targets: list[dict] = []
+    for tid, cls in _wf_classification.items():
+        if cls.get("label") != "AI + Human":
+            continue
+        if cls.get("hybrid_note"):
+            continue
+        task = task_map.get(tid)
+        if not task:
+            continue
+        hybrid_targets.append({
+            "task_id": tid,
+            "task_name": task.name,
+            "description": (task.description or "")[:300],
+            "reason": (cls.get("reason") or "")[:200],
+            "ai_prereq": (cls.get("ai_prerequisites") or "")[:200],
+        })
+
+    if not hybrid_targets:
+        return 0
+
+    print(f"[HYBRID] {len(hybrid_targets)}개 AI+Human 태스크 AI/Human 파트 분리 시작", flush=True)
+
+    BATCH_SIZE = 15
+    split_count = 0
+
+    for i in range(0, len(hybrid_targets), BATCH_SIZE):
+        batch = hybrid_targets[i:i + BATCH_SIZE]
+        task_lines = []
+        for idx, t in enumerate(batch, 1):
+            task_lines.append(
+                f"{idx}. [{t['task_id']}] {t['task_name']}\n"
+                f"   설명: {t['description']}\n"
+                f"   AI+Human 판정 근거: {t['reason']}\n"
+                f"   AI 필요여건: {t['ai_prereq']}"
+            )
+        task_block = "\n\n".join(task_lines)
+
+        system_prompt = f"""당신은 HR 업무를 AI 파트와 Human 파트로 정확히 분리하는 전문가입니다.
+
+아래 Task들은 이미 'AI + Human' 하이브리드로 분류되어 있습니다. 각 Task에 대해 업무를 둘로 쪼개주세요:
+- **AI 파트**: AI가 자동화 가능한 부분 (데이터 수집·분석·추론, 초안 작성, 분류, 예측, 요약 등)
+- **Human 파트**: 반드시 사람이 수행해야 하는 부분 (최종 승인, 판단, 조율, 인간적 결정)
+
+## 분리 원칙
+- AI 파트는 데이터 처리·추론·생성 중심
+- Human 파트는 승인·결정·조율·인간 판단 중심
+- 두 파트가 명확히 순차적으로 이어지도록 분리 (예: AI가 초안 → Human이 검토 및 확정)
+- 각 파트는 1~2문장, 동사 기반으로 구체적으로 기재
+
+## 분석 대상 Task ({len(batch)}개)
+{task_block}
+
+## 출력 형식 (JSON만, 마크다운 코드 블록 없음)
+{{
+  "tasks": [
+    {{
+      "task_id": "태스크 ID (입력 그대로)",
+      "ai_part": "AI가 수행하는 구체적 업무",
+      "human_part": "사람이 반드시 수행하는 구체적 업무"
+    }}
+  ]
+}}"""
+
+        try:
+            result = await _call_llm_step1(
+                system_prompt,
+                [{"role": "user", "content": "각 Task를 AI 파트와 Human 파트로 분리해주세요. JSON만 출력하세요."}],
+            )
+            if not result:
+                continue
+            items = result.get("tasks") or result.get("results") or []
+            for item in items:
+                tid = str(item.get("task_id") or "").strip()
+                ai_part = str(item.get("ai_part") or "").strip()
+                human_part = str(item.get("human_part") or "").strip()
+                if tid and tid in _wf_classification and ai_part and human_part:
+                    _wf_classification[tid]["hybrid_note"] = (
+                        f"AI 파트: {ai_part} / Human 파트: {human_part}"
+                    )
+                    _wf_classification[tid]["ai_part"] = ai_part
+                    _wf_classification[tid]["human_part"] = human_part
+                    split_count += 1
+        except Exception as e:
+            print(f"[HYBRID] 배치 {i // BATCH_SIZE + 1} 실패: {e}", flush=True)
+            continue
+
+    print(f"[HYBRID] 분리 완료 — {split_count}/{len(hybrid_targets)}개 성공", flush=True)
+
+    # 세션 저장
+    if _current_session_id:
+        try:
+            _save_session_data(_current_session_id)
+        except Exception:
+            pass
+
+    return split_count
 
 # ── 벤치마킹 source / URL 검증 필터 ─────────────────────────────────────────
 
@@ -2301,7 +2423,20 @@ def _build_task_and_pain_summary(sheet_id: str = "") -> tuple[str, str, str]:
     for t in relevant_tasks:
         cls = _wf_classification.get(t.id, {})
         label = cls.get("label", "미분류")
-        task_lines.append(f"- [{t.id}] {t.name} (L3: {t.l3}, L4: {t.l4}) — 분류: {label}")
+        line = f"- [{t.id}] {t.name} (L3: {t.l3}, L4: {t.l4}) — 분류: {label}"
+        # AI+Human이면 AI 파트 / Human 파트 분리 정보 주입 (LLM이 Step 2에서 참고)
+        if label == "AI + Human":
+            hn = cls.get("hybrid_note", "")
+            if hn:
+                line += f"\n    {hn}"
+            reason = cls.get("reason", "")
+            if reason:
+                line += f"\n    판정근거: {reason[:150]}"
+        elif label == "Human":
+            reason = cls.get("reason", "")
+            if reason:
+                line += f" — {reason[:100]}"
+        task_lines.append(line)
 
     pain_lines = []
     for t in relevant_tasks:
@@ -4560,6 +4695,16 @@ async def generate_workflow_step2(request: Request):
 
     process_name = _wf_step1_cache.get("process_name", "HR 프로세스")
 
+    # AI+Human Task lazy 분리 보증 — 업로드 시 fire-and-forget이 실패했거나
+    # 아직 안 끝났으면 여기서 동기 실행 (Step 2 프롬프트에 파트 정보 필수)
+    pending_hybrid = [
+        tid for tid, cls in _wf_classification.items()
+        if cls.get("label") == "AI + Human" and not cls.get("hybrid_note")
+    ]
+    if pending_hybrid:
+        print(f"[STEP2] 미분리 AI+Human Task {len(pending_hybrid)}개 → 동기 분리 실행", flush=True)
+        await _split_hybrid_tasks_with_llm()
+
     # 상세 설계 스코프: sheet_id 있으면 해당 L4만, 없으면 JSON 전체(L3)
     scoped_tasks_step2, _, _ = _build_task_and_pain_summary(step2_sheet_id or "")
     # _build_task_and_pain_summary가 relevant_tasks를 반환하지 않으므로 직접 구성
@@ -4609,13 +4754,33 @@ async def generate_workflow_step2(request: Request):
         if t.pain_communication: pains.append(f"의사소통: {t.pain_communication}")
         if pains:
             cls = _wf_classification.get(t.id, {})
+            lbl = cls.get('label', '미분류')
+            header_suffix = ""
+            if lbl == "AI + Human":
+                hn = cls.get("hybrid_note", "")
+                if hn:
+                    header_suffix = f"\n  ⚙️ {hn}"
+            elif lbl == "Human":
+                rsn = cls.get("reason", "")
+                if rsn:
+                    header_suffix = f"\n  🙋 Human 전용 근거: {rsn[:150]}"
             pain_detail_lines.append(
-                f"### [{t.id}] {t.name} (분류: {cls.get('label', '미분류')})\n"
+                f"### [{t.id}] {t.name} (분류: {lbl}){header_suffix}\n"
                 f"  Pain Point: {'; '.join(pains)}\n"
                 f"  비고: {t.remark or '없음'}"
             )
 
     pain_detail = "\n".join(pain_detail_lines) if pain_detail_lines else "상세 Pain Point 정보 없음"
+
+    # 전체 분류 집계 — Step 2 프롬프트에서 LLM이 분포를 파악하도록
+    cls_stats = {"AI": 0, "AI + Human": 0, "Human": 0}
+    scoped_ids = {t.id for t in scoped_tasks_step2}
+    for tid, cls in _wf_classification.items():
+        if tid not in scoped_ids:
+            continue
+        lbl = cls.get("label", "")
+        if lbl in cls_stats:
+            cls_stats[lbl] += 1
 
     # As-Is + 엑셀 매핑 컨텍스트 — L4 scope면 해당 시트만, L3면 전체
     asis_info = _build_mapped_asis_context(step2_sheet_id or "")
@@ -4647,6 +4812,25 @@ Step 1에서 도출된 기본 설계를 기반으로, 두산에 최적화된 **A
 - **재설계 가능**: HR 담당자, HR 임원, 지주, 자회사, BG, 계열사 등 두산 내부 조직이 수행하는 Task
 - **재설계 불가 (현행 유지)**: 큐벡스, 업체 등 외부 업체/시스템이 수행하는 Task — AI Agent 설계 대상에서 제외하고 "현행 유지" 처리
 - As-Is 컨텍스트에서 수행주체 라인에 `[외부 업체/시스템 — 재설계 제외]` 표시된 Task는 Agent에 할당하지 말 것
+
+## 🚨 엑셀 분류(AI / AI+Human / Human) — Knock-out 제약 (절대 변경 금지)
+엑셀 업로드 시 이미 판정·검토된 분류 라벨은 Step 2 설계의 **하드 제약**입니다. 임의로 바꿀 수 없습니다.
+
+스코프 내 태스크 분포: AI {cls_stats["AI"]}개 / AI+Human {cls_stats["AI + Human"]}개 / Human {cls_stats["Human"]}개
+
+- **Human으로 분류된 Task** → AI Agent의 `assigned_tasks`에 절대 포함하지 말 것.
+  이 Task들은 "현행 유지"로 간주하고 AI 설계 대상에서 제외. (결과 카운트에도 반영하지 말 것)
+
+- **AI + Human으로 분류된 Task** → 반드시 **AI 파트와 Human 파트를 분리**해서 반영:
+  - task_summary / pain_detail에 이미 분리 정보(`AI 파트: ... / Human 파트: ...`)가 주입되어 있음. 이를 그대로 사용.
+  - `assigned_tasks`에는 **AI 파트만** task_name·ai_role·input/output으로 기재
+  - `human_role` 필드에는 **Human 파트를 반드시 구체적으로 명시** (빈 문자열 금지)
+  - `automation_level`은 `"Human-in-Loop"` 또는 `"Human-on-the-Loop"` 중 하나 (절대 Full-Auto 금지)
+
+- **AI로 분류된 Task** → Junior AI의 `assigned_tasks`에 자유 배치.
+  `automation_level`은 `"Full-Auto"` 또는 `"Human-on-the-Loop"` 중 선택 (Human-in-Loop도 가능하지만 지양).
+
+위 제약을 어기면 설계가 무효 처리됩니다.
 
 ## 프로세스: {process_name}
 
