@@ -2530,19 +2530,34 @@ export default function WorkflowPage() {
                   </div>
                   <div className="flex items-center gap-2">
                     {tobeFlow && (
-                      <button
-                        onClick={async () => {
-                          try {
-                            const { downloadTobeFlowJson } = await import("@/lib/api");
-                            await downloadTobeFlowJson();
-                          } catch (e) {
-                            setError((e as Error).message);
-                          }
-                        }}
-                        className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold border-2 border-green-600 text-green-700 bg-green-50 hover:bg-green-100 transition whitespace-nowrap"
-                      >
-                        ⬇ hr-workflow-ai JSON
-                      </button>
+                      <>
+                        <button
+                          onClick={async () => {
+                            try {
+                              const { downloadTobeDesignExcel } = await import("@/lib/api");
+                              await downloadTobeDesignExcel();
+                            } catch (e) {
+                              setError((e as Error).message);
+                            }
+                          }}
+                          className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold border-2 border-amber-600 text-amber-700 bg-amber-50 hover:bg-amber-100 transition whitespace-nowrap"
+                        >
+                          ⬇ 템플릿 Excel
+                        </button>
+                        <button
+                          onClick={async () => {
+                            try {
+                              const { downloadTobeFlowJson } = await import("@/lib/api");
+                              await downloadTobeFlowJson();
+                            } catch (e) {
+                              setError((e as Error).message);
+                            }
+                          }}
+                          className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold border-2 border-green-600 text-green-700 bg-green-50 hover:bg-green-100 transition whitespace-nowrap"
+                        >
+                          ⬇ hr-workflow-ai JSON
+                        </button>
+                      </>
                     )}
                     <button
                       onClick={handleGenerateTobeFlow}

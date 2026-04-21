@@ -93,19 +93,11 @@ function ToBeSwimlaneInner({ sheet }: Props) {
     return Array.isArray(l) ? l.filter(Boolean) : [];
   }, [sheet]);
 
-  // 각 lane의 높이 (가변): 해당 lane의 노드 수에 따라 동적
-  const initialLaneHeights = useMemo(() => {
-    const counts: Record<string, number> = {};
-    for (const n of sheet.nodes ?? []) {
-      const a = (n as TobeNode).actor || "그 외";
-      counts[a] = (counts[a] ?? 0) + 1;
-    }
-    return lanes.map((lane) => {
-      const c = counts[lane] ?? 0;
-      // L5 노드는 ~150px, 여유 포함 stack당 200px + padding 80
-      return Math.max(280, c * 200 + 80);
-    });
-  }, [lanes, sheet.nodes]);
+  // 각 lane의 높이는 고정 (L5 노드 1줄 + 여유). x축은 컨테이너 horizontal scroll로 확장.
+  const initialLaneHeights = useMemo(
+    () => lanes.map(() => 260),
+    [lanes],
+  );
 
   const [laneHeights, setLaneHeights] = useState<number[]>(initialLaneHeights);
 
@@ -142,18 +134,22 @@ function ToBeSwimlaneInner({ sheet }: Props) {
       const yStart = laneYStart[laneIdx] ?? 0;
       const items = byLane[lane] ?? [];
 
+      // 같은 lane 내 실제 배치된 x 추적 (충돌 시 오른쪽으로 밀어냄)
+      const placedXs: number[] = [];
+
       for (let i = 0; i < items.length; i++) {
         const n = items[i];
         const stackY = laneStackY[lane] ?? 0;
         laneStackY[lane] = stackY + 1;
 
         const nodeType = NODE_TYPE_BY_LEVEL[n.level] || "l5";
-        const x = n.position?.x ?? (i * 380 + 120);
-        // y: lane 시작 + stack offset (같은 x에 여러 노드면 세로로 스택)
-        const overlapStack = items.filter(
-          (m, mi) => mi < i && Math.abs((m.position?.x ?? 0) - x) < 30
-        ).length;
-        const y = yStart + 60 + overlapStack * 220;
+        // x 충돌 해소 — 직전 배치 노드보다 최소 440px(L5 폭 380 + gap 60) 확보
+        let x = n.position?.x ?? (i * 440 + 120);
+        const lastX = placedXs.length > 0 ? placedXs[placedXs.length - 1] : -Infinity;
+        if (x < lastX + 440) x = lastX + 440;
+        placedXs.push(x);
+        // y: lane 상단 여백 (고정 높이 260)
+        const y = yStart + 40;
 
         // data: 백엔드가 보낸 풀 data 객체 + LevelNode가 기대하는 필드 매핑
         // 방어: role이 string이 아닐 수 있음 (dict/object/undefined) → 반드시 문자열로 강제
@@ -172,9 +168,12 @@ function ToBeSwimlaneInner({ sheet }: Props) {
           label: n.label,
           level: n.level,
           id: n.task_id || (n.data as Record<string, unknown> | undefined)?.id,
-          description: n.description ?? (n.data as { description?: string } | undefined)?.description,
+          description: n.description
+            ?? n.ai_support
+            ?? (n.data as { description?: string } | undefined)?.description,
           role: roleStr,
-          memo: n.ai_support || memoStr,
+          // memo 필드는 원본 As-Is에 memo가 있을 때만 유지 (AI 설명은 노란 스티커로 띄우지 않음)
+          memo: memoStr || undefined,
         };
 
         out.push({

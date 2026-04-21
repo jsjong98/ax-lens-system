@@ -4088,7 +4088,9 @@ def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
 
     if junior_agents:
         total_jtasks = sum(len(ag["tasks"]) for ag in junior_agents)
-        x_step = (max_x - min_x) / max(total_jtasks, 1) if total_jtasks else 300.0
+        # 최소 x_step: L5 노드 폭 380 + gap 60 = 440 (겹침 방지)
+        MIN_X_STEP = 440.0
+        x_step = max(MIN_X_STEP, (max_x - min_x) / max(total_jtasks, 1)) if total_jtasks else MIN_X_STEP
         task_i = 0
         for ji, ag in enumerate(junior_agents):
             agent_prefix = f"junior_{ag['agent_id'] or ji}"
@@ -4105,7 +4107,8 @@ def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
                     "actor": "Junior AI",
                     "type": "task",
                     "ai_support": t.get("ai_role", ""),
-                    "position": {"x": x, "y": junior_y + (ji % 2) * 120.0},
+                    # 교대 y 제거: 같은 lane 내 겹침은 프론트가 stack으로 처리
+                    "position": {"x": x, "y": junior_y},
                     "origin": "ai",
                     "automation_level": t.get("automation_level", ""),
                     "human_role": t.get("human_role", ""),
@@ -4434,6 +4437,68 @@ async def export_tobe_flow_json():
     return StreamingResponse(
         iter([json.dumps(hr_json, ensure_ascii=False, indent=2)]),
         media_type="application/json",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_fn}",
+            "Access-Control-Expose-Headers": "Content-Disposition",
+        },
+    )
+
+
+@app.get("/api/workflow/export-tobe-excel", tags=["Workflow"])
+async def export_tobe_excel_endpoint():
+    """
+    To-Be 설계 결과를 As-Is 템플릿과 동일한 포맷의 Excel로 반출.
+    - 업로드한 As-Is 엑셀을 베이스로 복사 → 데이터 행 초기화 → To-Be task로 재작성
+    - 각 행: Junior AI task (AI 파트) / AI+Human의 Human 파트 검토 행 / 보존된 Human L5
+    """
+    if not _wf_step2_cache:
+        raise HTTPException(400, "Step 2 상세 설계를 먼저 수행해주세요.")
+    if not _wf_excel_path or not Path(_wf_excel_path).exists():
+        raise HTTPException(400, "As-Is 템플릿 엑셀을 먼저 업로드해주세요.")
+
+    from tobe_excel_exporter import export_tobe_excel
+    import tempfile
+
+    process_name = _wf_step2_cache.get("process_name", "ToBe_설계")
+    # 세션 임시 파일
+    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
+        output_path = tmp.name
+
+    try:
+        export_tobe_excel(
+            template_path=_wf_excel_path,
+            output_path=output_path,
+            step2_cache=_wf_step2_cache,
+            classification=_wf_classification,
+            excel_tasks=_wf_excel_tasks,
+            wf_tobe_flow_cache=_wf_tobe_flow_cache,
+        )
+    except Exception as e:
+        try:
+            Path(output_path).unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise HTTPException(500, f"Excel 반출 실패: {e}")
+
+    filename = f"{process_name}_ToBe설계.xlsx"
+    from urllib.parse import quote
+    encoded_fn = quote(filename)
+
+    def _iter_file():
+        with open(output_path, "rb") as f:
+            while True:
+                chunk = f.read(8192)
+                if not chunk:
+                    break
+                yield chunk
+        try:
+            Path(output_path).unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    return StreamingResponse(
+        _iter_file(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={
             "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_fn}",
             "Access-Control-Expose-Headers": "Content-Disposition",
