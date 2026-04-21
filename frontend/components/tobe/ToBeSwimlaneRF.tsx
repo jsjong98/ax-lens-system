@@ -9,7 +9,7 @@
  *   3. LevelNode (L2~L5) + DecisionNode + OrthoEdge 컴포넌트로 렌더
  */
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState, Component, type ErrorInfo, type ReactNode } from "react";
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -27,6 +27,40 @@ import { L2Node, L3Node, L4Node, L5Node, DecisionNode, MemoNode } from "./LevelN
 import OrthoEdge from "./OrthoEdge";
 import SwimLaneOverlay from "./SwimLaneOverlay";
 import type { TobeSheet, TobeNode } from "@/lib/api";
+
+// ── Error Boundary — 렌더 오류를 화면에 표시 (generic "client-side exception" 대신) ──
+class ToBeErrorBoundary extends Component<
+  { children: ReactNode },
+  { error: Error | null }
+> {
+  state = { error: null as Error | null };
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    // 콘솔에 상세 로그
+    // eslint-disable-next-line no-console
+    console.error("[ToBeSwimlaneRF] render error:", error, info);
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="p-4 rounded-lg border border-red-300 bg-red-50 text-xs text-red-800 overflow-auto" style={{ maxHeight: 400 }}>
+          <div className="font-bold mb-2">⚠️ Swim Lane 렌더링 오류</div>
+          <div className="font-mono whitespace-pre-wrap break-all">
+            {this.state.error.message}
+          </div>
+          {this.state.error.stack && (
+            <pre className="mt-2 text-[10px] opacity-70 whitespace-pre-wrap">
+              {this.state.error.stack.split("\n").slice(0, 8).join("\n")}
+            </pre>
+          )}
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 const nodeTypes: NodeTypes = {
   l2: L2Node,
@@ -224,8 +258,10 @@ function ToBeSwimlaneInner({ sheet }: Props) {
 
 export function ToBeSwimlaneRF({ sheet }: Props) {
   return (
-    <ReactFlowProvider>
-      <ToBeSwimlaneInner sheet={sheet} />
-    </ReactFlowProvider>
+    <ToBeErrorBoundary>
+      <ReactFlowProvider>
+        <ToBeSwimlaneInner sheet={sheet} />
+      </ReactFlowProvider>
+    </ToBeErrorBoundary>
   );
 }
