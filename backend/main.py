@@ -4187,12 +4187,38 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
                     return s[:60], s
         return "", ""
 
+    # ── Decision 노드 lane 상속 — 선행 노드의 actor 를 상속해서 같은 레인에 배치 ──
+    def _infer_decision_actor(dec_node_id: str) -> tuple[str, list[str], str]:
+        """Decision 노드의 선행 노드 actor 를 상속. (actor, actors_list, custom_role) 반환."""
+        # 1) 이 decision 으로 들어오는 엣지의 source 노드 탐색
+        for e in asis_sheet.edges:
+            if e.target != dec_node_id:
+                continue
+            src = asis_sheet.nodes.get(e.source)
+            if src is None:
+                continue
+            src_role = src.metadata.get("role", "") or src.metadata.get("actors", "")
+            src_actors, src_custom = _parse_role_string(src_role)
+            if src_actors:
+                return src_actors[0], src_actors, src_custom
+        # 2) fallback: 이 decision 에서 나가는 엣지의 target
+        for e in asis_sheet.edges:
+            if e.source != dec_node_id:
+                continue
+            tgt = asis_sheet.nodes.get(e.target)
+            if tgt is None:
+                continue
+            tgt_role = tgt.metadata.get("role", "") or tgt.metadata.get("actors", "")
+            tgt_actors, tgt_custom = _parse_role_string(tgt_role)
+            if tgt_actors:
+                return tgt_actors[0], tgt_actors, tgt_custom
+        return "HR 담당자", ["HR 담당자"], ""   # 최종 fallback
+
     for n in sorted(asis_sheet.nodes.values(), key=lambda nd: (nd.position_y, nd.position_x)):
         if n.id not in kept_ids:
             continue
 
         # ── 🔑 분류 기반 필터링 (AI/AI+Human/Human) ──────────
-        # L5 노드만 분류 체크 (L4/DECISION/MEMO 은 그대로 유지)
         cls_label = ""
         if n.level == "L5" and n.task_id:
             cls_entry = _wf_classification.get(n.task_id, {}) if _wf_classification else {}
@@ -4202,9 +4228,13 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
         if cls_label == "AI":
             continue
 
-        actor_raw = n.metadata.get("role", "") or n.metadata.get("actors", "")
-        actors_list, custom_role = _parse_role_string(actor_raw)
-        primary_actor = actors_list[0] if actors_list else "그 외"
+        # ── Decision 은 role 이 없음 → 선행·후행 actor 상속 (그 외 lane 으로 밀려나는 것 방지) ──
+        if n.level == "DECISION":
+            primary_actor, actors_list, custom_role = _infer_decision_actor(n.id)
+        else:
+            actor_raw = n.metadata.get("role", "") or n.metadata.get("actors", "")
+            actors_list, custom_role = _parse_role_string(actor_raw)
+            primary_actor = actors_list[0] if actors_list else "그 외"
         # 모든 actor를 카운트 (lane 등장 여부 판단용)
         for a in actors_list or [primary_actor]:
             role_counts[a] = role_counts.get(a, 0) + 1
