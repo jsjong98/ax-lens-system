@@ -3672,6 +3672,27 @@ _ACTOR_ALIAS = {
 }
 
 
+_ACTORS_DICT_MAP = {
+    "exec": "임원",
+    "teamlead": "현업 팀장",
+    "hr": "HR 담당자",
+    "member": "현업 구성원",
+    "other": "그 외",
+}
+
+
+def _actors_dict_to_role(actors: dict) -> str:
+    """actors dict({exec:'●', hr:'●', ...}) → 콤마 구분 role 문자열로 변환."""
+    parts: list[str] = []
+    for key, val in actors.items():
+        if not val:
+            continue
+        mapped = _ACTORS_DICT_MAP.get(key)
+        if mapped and mapped not in parts:
+            parts.append(mapped)
+    return ", ".join(parts)
+
+
 def _parse_role_string(raw) -> tuple[list[str], str]:
     """
     As-Is role 문자열을 분해 — 콤마/슬래시 구분 다중 액터 처리.
@@ -3684,6 +3705,11 @@ def _parse_role_string(raw) -> tuple[list[str], str]:
     """
     if not raw:
         return [], ""
+    # dict인 경우 (actors 객체) → role 문자열로 먼저 변환
+    if isinstance(raw, dict):
+        raw = _actors_dict_to_role(raw)
+        if not raw:
+            return [], ""
     if isinstance(raw, list):
         raw = ", ".join(str(x) for x in raw if x)
     s = str(raw).strip()
@@ -3768,9 +3794,15 @@ def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
         # 원본 data 객체를 그대로 보존 (LevelNode가 systems/painPoints/inputs/outputs/logic 등을 사용)
         # workflow_parser가 metadata로 추출한 필드를 풀로 노출
         full_data = dict(n.metadata)
-        # role은 원본 문자열 그대로 — LevelNode의 extractCustomRole이 직접 파싱
-        if actor_raw and "role" not in full_data:
-            full_data["role"] = actor_raw
+        # role은 반드시 "문자열"로 보존 — LevelNode의 extractCustomRole이 split(",") 사용
+        # 원본 role이 dict/list/None이면 _parse_role_string 결과를 이용해 문자열로 재구성
+        existing_role = full_data.get("role")
+        if not isinstance(existing_role, str):
+            # actors_list 기반으로 role 문자열 재구성
+            parts = list(actors_list)
+            if custom_role and "그 외" in parts:
+                parts = [f"그 외:{custom_role}" if p == "그 외" else p for p in parts]
+            full_data["role"] = ", ".join(parts)
 
         asis_nodes_out.append({
             "id": n.id,

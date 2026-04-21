@@ -156,19 +156,25 @@ function ToBeSwimlaneInner({ sheet }: Props) {
         const y = yStart + 60 + overlapStack * 220;
 
         // data: 백엔드가 보낸 풀 data 객체 + LevelNode가 기대하는 필드 매핑
+        // 방어: role이 string이 아닐 수 있음 (dict/object/undefined) → 반드시 문자열로 강제
+        const rawRole = (n.data as { role?: unknown } | undefined)?.role;
+        const roleStr =
+          typeof rawRole === "string"
+            ? rawRole
+            : n.actors_all && n.actors_all.length > 0
+              ? n.actors_all.join(", ") + (n.custom_role ? `, 그 외:${n.custom_role}` : "")
+              : "";
+        const rawMemo = (n.data as { memo?: unknown } | undefined)?.memo;
+        const memoStr = typeof rawMemo === "string" ? rawMemo : "";
+
         const data = {
           ...(n.data ?? {}),
           label: n.label,
           level: n.level,
           id: n.task_id || (n.data as Record<string, unknown> | undefined)?.id,
           description: n.description ?? (n.data as { description?: string } | undefined)?.description,
-          // role 원본 그대로 — LevelNode의 extractCustomRole이 "그 외:DDI" 파싱
-          role: (n.data as { role?: string } | undefined)?.role
-            ?? (n.actors_all && n.actors_all.length > 0
-              ? n.actors_all.join(", ") + (n.custom_role ? `, 그 외:${n.custom_role}` : "")
-              : ""),
-          // AI 노드 표시
-          memo: n.ai_support || (n.data as { memo?: string } | undefined)?.memo,
+          role: roleStr,
+          memo: n.ai_support || memoStr,
         };
 
         out.push({
