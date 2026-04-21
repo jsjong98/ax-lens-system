@@ -23,8 +23,6 @@ import {
   type EdgeTypes,
   MarkerType,
 } from "@xyflow/react";
-import "@xyflow/react/dist/style.css";
-
 import { L2Node, L3Node, L4Node, L5Node, DecisionNode, MemoNode } from "./LevelNode";
 import OrthoEdge from "./OrthoEdge";
 import SwimLaneOverlay from "./SwimLaneOverlay";
@@ -43,19 +41,6 @@ const edgeTypes: EdgeTypes = {
   ortho: OrthoEdge,
 };
 
-/** 액터별 Y 베이스라인 보정 — As-Is에는 임의 좌표가 있으니 lane 안에 들어오게 정규화 */
-const ACTOR_LANE_INDEX: Record<string, number> = {
-  "임원": 0,
-  "현업 임원": 0,
-  "현업 팀장": 1,
-  "HR 임원": 2,
-  "HR 담당자": 3,
-  "Senior AI": 4,
-  "Junior AI": 5,
-  "현업 구성원": 6,
-  "그 외": 7,
-};
-
 const NODE_TYPE_BY_LEVEL: Record<string, string> = {
   L2: "l2", L3: "l3", L4: "l4", L5: "l5",
   DECISION: "decision", MEMO: "memo",
@@ -69,7 +54,10 @@ function ToBeSwimlaneInner({ sheet }: Props) {
   const canvasRef = useRef<HTMLDivElement>(null);
 
   // lane 순서 — sheet.lanes (백엔드가 표준 순서로 정렬해서 보냄)
-  const lanes = useMemo(() => sheet.lanes ?? sheet.actors_used ?? [], [sheet]);
+  const lanes = useMemo(() => {
+    const l = sheet?.lanes ?? sheet?.actors_used ?? [];
+    return Array.isArray(l) ? l.filter(Boolean) : [];
+  }, [sheet]);
 
   // 각 lane의 높이 (가변): 해당 lane의 노드 수에 따라 동적
   const initialLaneHeights = useMemo(() => {

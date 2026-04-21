@@ -45,7 +45,11 @@ import {
   type SessionFileInfo,
   type PMUserSessions,
 } from "@/lib/api";
-import { ToBeSwimlaneRF } from "@/components/tobe/ToBeSwimlaneRF";
+import dynamic from "next/dynamic";
+const ToBeSwimlaneRF = dynamic(
+  () => import("@/components/tobe/ToBeSwimlaneRF").then((m) => m.ToBeSwimlaneRF),
+  { ssr: false, loading: () => <div className="h-[200px] flex items-center justify-center text-xs text-gray-400">Swim Lane 로딩 중...</div> },
+);
 import WorkflowEditor from "@/components/WorkflowEditor";
 import MappingCheckPanel from "@/components/MappingCheckPanel";
 
