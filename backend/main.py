@@ -4353,25 +4353,37 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
         else:
             actor_lane = "HR 담당자"
 
-        # action 문구: LLM 제공이 우선, 없으면 human_role, 최후에 "{task명} 검토"
-        review_label = llm_action or human_role or f"{jnode['label']} 검토"
+        # 짧은 타이틀 = "{AI task 이름 (AI 파트/(AI 파트) 접미사 제거)} 검토"
+        # → 한눈에 무슨 검토인지 드러나도록
+        raw_task_label = str(jnode.get("label") or "")
+        clean_task_name = (
+            raw_task_label
+            .replace(" (AI 파트)", "")
+            .replace("(AI 파트)", "")
+            .replace(" - AI 파트", "")
+            .strip()
+        )
+        review_title = f"{clean_task_name} 검토" if clean_task_name else "AI 결과 검토"
+
+        # 상세 설명: LLM이 제시한 구체 action > human_role > 기본 문구
+        review_description = llm_action or human_role or f"{clean_task_name} 결과 검토 및 확정"
 
         hr_id = f"human_{jid}"
         human_nodes_out.append({
             "id": hr_id,
-            "label": review_label[:60],
+            "label": review_title[:60],   # 짧은 타이틀
             "level": "L5",
             "actor": actor_lane,
             "type": "task",
             "ai_support": None,
             "position": {"x": jnode["position"]["x"], "y": hr_lane_y},
             "origin": "ai",
-            "description": review_label,
+            "description": review_description,   # 상세 action 문구
             "data": {
                 "role": actor_lane,
-                "label": review_label,
+                "label": review_title,
                 "level": "L5",
-                "description": review_label,
+                "description": review_description,
             },
             "next": [],
         })
