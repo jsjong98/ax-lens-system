@@ -9,7 +9,7 @@
  *   3. LevelNode (L2~L5) + DecisionNode + OrthoEdge 컴포넌트로 렌더
  */
 
-import { useCallback, useMemo, useRef, useState, Component, type ErrorInfo, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, Component, type ErrorInfo, type ReactNode } from "react";
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -257,6 +257,18 @@ function ToBeSwimlaneInner({ sheet }: Props) {
 }
 
 export function ToBeSwimlaneRF({ sheet }: Props) {
+  // SSR/hydration mismatch 방지: 브라우저 mount 이후에만 React Flow 렌더
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
+  if (!mounted) {
+    return (
+      <div className="h-[200px] rounded-lg border border-gray-200 bg-gray-50 flex items-center justify-center text-xs text-gray-400">
+        Swim Lane 로딩 중...
+      </div>
+    );
+  }
+
   return (
     <ToBeErrorBoundary>
       <ReactFlowProvider>
