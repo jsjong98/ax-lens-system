@@ -3973,19 +3973,34 @@ async def _llm_route_tobe_flow(
 ## Junior AI 에이전트와 태스크
 {junior_block}
 
-## 설계 원칙
-1. **As-Is → Junior AI**: 각 Junior AI 태스크가 어느 As-Is L5 작업에서 트리거되는지, 그 As-Is 노드 ID를 선행자로 지목
-2. **Junior AI → As-Is**: Junior AI의 output이 어느 As-Is 후속 작업으로 이어지는지 지목
-3. **Senior AI 오케스트레이션**: Senior AI가 각 Junior AI 에이전트의 첫 태스크를 '기동/지시'하는 엣지
-4. **Human 검토 액션**: automation_level이 'Human-in-Loop' 또는 'Human-on-the-Loop' 또는 human_role이 비어있지 않은 Junior 태스크에 대해,
-   **어떤 사람이(performer)**, **어떤 행동을 구체적으로 해야 하는지(action)** 명시 (단순 "검토"가 아니라 "AI가 탐지한 이상 케이스 확인 후 승인" 같이 구체)
-   performer는 ["임원", "현업 팀장", "HR 임원", "HR 담당자", "현업 구성원"] 중 하나
+## 설계 원칙 — **Pipe-through 패턴이 기본**
+
+Junior AI 태스크가 As-Is L5 를 자동화/대체하는 경우가 대부분이므로, 엣지는 다음 패턴으로 흘러야 합니다:
+```
+[As-Is 선행 L5] → [Junior AI] → [As-Is 후행 L5]
+```
+즉 Junior AI 가 As-Is 파이프라인의 한 지점을 "통과"하는 형태입니다.
+
+### 규칙 (엄수)
+1. **As-Is → Junior AI 트리거 엣지**: Junior AI 태스크의 **직전 As-Is L5** (선행 노드) 에서 연결.
+   **같은 task_id 를 공유하는 As-Is 노드 자체는 선행자로 삼지 말 것** (그건 Junior AI 가 대체하는 노드라 loop 됨)
+2. **Junior AI → As-Is 결과 엣지**: Junior AI 태스크의 **직후 As-Is L5** (후행 노드) 로 연결.
+   **같은 task_id 를 공유하는 As-Is 노드로 돌아가지 말 것** (loop 금지)
+3. **Senior AI 오케스트레이션**: Senior AI 가 각 Junior AI 에이전트의 첫 태스크를 '기동' 하는 엣지 (에이전트 그룹당 1개)
+4. **Human 검토 액션**: automation_level 이 'Human-in-Loop' / 'Human-on-the-Loop' 이거나 human_role 이 비어있지 않은 Junior 태스크에 대해,
+   **어떤 사람이(performer)**, **무슨 행동을 구체적으로 해야 하는지(action)** 명시
+   performer ∈ ["임원", "현업 팀장", "HR 임원", "HR 담당자", "현업 구성원"]
+
+### ❌ 금지 사항 (엄격)
+- **task_id 가 같은 As-Is ↔ Junior AI 간 직접 엣지 금지** (양방향 모두). 예시:
+  - `junior_agent_1_1.1.4.1` 은 `l5-1.1.4.1-xx` 를 대체하므로 두 노드 간 직접 연결 금지
+  - 대신 `l5-1.1.4.0-xx (이전 단계) → junior_agent_1_1.1.4.1 → l5-1.1.4.2-xx (다음 단계)` 로 파이프 통과
+- 과잉 엣지 금지 — 각 Junior 태스크당 트리거+결과 각 **최대 1~2개**
+- As-Is에 적절한 선/후행 매칭이 없으면 생략 (억지로 연결 금지)
 
 ## 제약
 - As-Is 노드 ID는 반드시 위 목록에서 그대로 사용 (변경·새 ID 생성 금지)
 - Junior 태스크 ID도 위에 적힌 jid 그대로 사용
-- As-Is에 매칭될 노드가 없으면 해당 엣지는 생략 (억지 매칭 금지)
-- 한 Junior 태스크에 여러 As-Is 선행자가 있어도 무방
 
 ## 출력 형식 (JSON만, 마크다운 코드 블록 없음)
 {{
@@ -4223,6 +4238,9 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
                 "next": [],
             })
 
+    # task_id → As-Is L5 노드 맵 (x 정렬·중복 엣지 필터링에 사용)
+    asis_by_task_id: dict[str, dict] = {n["task_id"]: n for n in asis_nodes_out if n.get("task_id")}
+
     if junior_agents:
         total_jtasks = sum(len(ag["tasks"]) for ag in junior_agents)
         # 최소 x_step: L5 노드 폭 380 + gap 60 = 440 (겹침 방지)
@@ -4235,7 +4253,12 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
             for ti, t in enumerate(ag["tasks"]):
                 tid = t.get("task_id", f"t{ti}")
                 jid = f"{agent_prefix}_{tid}"
-                x = min_x + x_step * (task_i + 0.5)
+                # Junior AI는 가능하면 매칭되는 As-Is L5 와 같은 x 로 세로 정렬 (replacement 관계 시각화)
+                matched_asis = asis_by_task_id.get(tid)
+                if matched_asis and matched_asis.get("position"):
+                    x = float(matched_asis["position"].get("x", 0))
+                else:
+                    x = min_x + x_step * (task_i + 0.5)
                 task_i += 1
                 ai_nodes_out.append({
                     "id": jid,
@@ -4361,10 +4384,35 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
         })
 
     # 3-2) LLM이 제공한 AI ↔ As-Is 엣지 병합
+    # jid → 대체하는 As-Is task_id (self-loop 필터링용)
+    jid_to_replaced_asis: dict[str, str] = {}
+    for jn in ai_nodes_out:
+        if jn["actor"] != "Junior AI":
+            continue
+        # junior_agent_X_TASKID 구조에서 TASKID 추출 후 매칭 As-Is id 찾기
+        jid = jn["id"]
+        # task_id 가 포함된 junior id 패턴: junior_<agent_id>_<task_id>
+        # 매칭된 As-Is 찾기 — asis_by_task_id에서 junior id 끝에 붙은 task_id로
+        for tid, asis_node in asis_by_task_id.items():
+            if jid.endswith(f"_{tid}") or jid.endswith(f"_{tid}_AI"):
+                jid_to_replaced_asis[jid] = asis_node["id"]
+                break
+
+    def _is_self_loop(frm: str, to: str) -> bool:
+        """task_id 가 같은 As-Is ↔ Junior AI 직접 엣지인지 판정."""
+        if frm in jid_to_replaced_asis and jid_to_replaced_asis[frm] == to:
+            return True
+        if to in jid_to_replaced_asis and jid_to_replaced_asis[to] == frm:
+            return True
+        return False
+
     def _add_llm_edge(prefix: str, frm: str, to: str, label: str, valid_from: set, valid_to: set) -> None:
         frm = str(frm or "").strip()
         to = str(to or "").strip()
         if not frm or not to or frm not in valid_from or to not in valid_to:
+            return
+        # 같은 task_id 쌍 self-loop 차단
+        if _is_self_loop(frm, to):
             return
         ai_edges_out.append({
             "id": f"{prefix}_{frm}_{to}",
