@@ -4154,9 +4154,54 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
     max_x = max(xs) if xs else 1200.0
     max_y = max(ys) if ys else 600.0
 
+    # ── 분류 기반 As-Is 처리 헬퍼 ─────────────────────────────────
+    def _extract_human_part(task_id: str) -> tuple[str, str]:
+        """분류 정보에서 Human 파트 문구 추출.
+        Returns: (human_label_short, human_description_full)
+        """
+        cls = _wf_classification.get(task_id, {}) if task_id else {}
+        hybrid_note = str(cls.get("hybrid_note") or "")
+        ai_part = str(cls.get("ai_part") or "")
+        human_part_explicit = str(cls.get("human_part") or "")
+        reason = str(cls.get("reason") or "")
+
+        # 1) 명시적 human_part 필드 (hybrid splitter가 채움)
+        if human_part_explicit:
+            return human_part_explicit[:60], human_part_explicit
+
+        # 2) hybrid_note 에서 "Human 파트: ..." 추출
+        if hybrid_note and "Human 파트:" in hybrid_note:
+            human_part = hybrid_note.split("Human 파트:", 1)[1]
+            # AI 파트 부분 이전까지 끊기 (형식이 "AI 파트: X / Human 파트: Y" 또는 그 반대)
+            human_part = human_part.split(" / AI 파트:", 1)[0].strip()
+            return human_part[:60], human_part
+
+        # 3) reason 에서 "Human" 관련 문장 추출 (휴리스틱)
+        if reason:
+            import re as _re
+            # "Human이 수행", "사람이 확정", "최종 확정", "승인·검토" 등이 들어간 문장 찾기
+            sentences = _re.split(r"[.。·]", reason)
+            for s in sentences:
+                s = s.strip()
+                if any(kw in s for kw in ["Human이", "사람이", "최종 확정", "최종 승인", "예외·", "검토·", "판단 및", "승인"]):
+                    return s[:60], s
+        return "", ""
+
     for n in sorted(asis_sheet.nodes.values(), key=lambda nd: (nd.position_y, nd.position_x)):
         if n.id not in kept_ids:
             continue
+
+        # ── 🔑 분류 기반 필터링 (AI/AI+Human/Human) ──────────
+        # L5 노드만 분류 체크 (L4/DECISION/MEMO 은 그대로 유지)
+        cls_label = ""
+        if n.level == "L5" and n.task_id:
+            cls_entry = _wf_classification.get(n.task_id, {}) if _wf_classification else {}
+            cls_label = str(cls_entry.get("label") or "")
+
+        # AI 로 분류된 L5 는 As-Is 에서 완전 제거 (Junior AI 가 대체)
+        if cls_label == "AI":
+            continue
+
         actor_raw = n.metadata.get("role", "") or n.metadata.get("actors", "")
         actors_list, custom_role = _parse_role_string(actor_raw)
         primary_actor = actors_list[0] if actors_list else "그 외"
@@ -4167,32 +4212,50 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
         node_type = "decision" if n.level == "DECISION" else "task"
 
         # 원본 data 객체를 그대로 보존 (LevelNode가 systems/painPoints/inputs/outputs/logic 등을 사용)
-        # workflow_parser가 metadata로 추출한 필드를 풀로 노출
         full_data = dict(n.metadata)
-        # role은 반드시 "문자열"로 보존 — LevelNode의 extractCustomRole이 split(",") 사용
-        # 원본 role이 dict/list/None이면 _parse_role_string 결과를 이용해 문자열로 재구성
         existing_role = full_data.get("role")
         if not isinstance(existing_role, str):
-            # actors_list 기반으로 role 문자열 재구성
             parts = list(actors_list)
             if custom_role and "그 외" in parts:
                 parts = [f"그 외:{custom_role}" if p == "그 외" else p for p in parts]
             full_data["role"] = ", ".join(parts)
 
+        # ── AI + Human: label 을 Human 파트로 교체 ───────────
+        original_label = n.label or ""
+        display_label = original_label
+        display_description = n.description or ""
+        if cls_label == "AI + Human":
+            hp_label, hp_desc = _extract_human_part(n.task_id)
+            if hp_label:
+                display_label = hp_label
+                display_description = hp_desc
+                full_data["label"] = hp_label
+                full_data["description"] = hp_desc
+            else:
+                # Human 파트를 추출 못하면 fallback: 기존 label + "검토/확정"
+                display_label = f"{original_label} 검토·확정"
+                full_data["label"] = display_label
+            # 분류 정보를 data에 기록 (프론트 hover 등에서 활용 가능)
+            full_data["_classification"] = "AI + Human"
+            full_data["_original_label"] = original_label
+        elif cls_label == "Human":
+            full_data["_classification"] = "Human"
+
         asis_nodes_out.append({
             "id": n.id,
-            "label": (n.label or "")[:60],
+            "label": display_label[:60],
             "level": n.level,
             "actor": primary_actor,
             "actors_all": actors_list,
-            "custom_role": custom_role,    # "그 외:DDI"의 DDI
+            "custom_role": custom_role,
             "type": node_type,
             "ai_support": None,
             "position": {"x": float(n.position_x), "y": float(n.position_y)},
             "origin": "asis",
             "task_id": n.task_id,
-            "description": n.description,
-            "data": full_data,             # LevelNode 렌더링용 원본 data
+            "description": display_description,
+            "classification": cls_label,
+            "data": full_data,
             "next": [],
         })
 
@@ -5437,6 +5500,32 @@ Step 1에서 도출된 기본 설계를 기반으로, 두산에 최적화된 **A
     parsed = _parse_freeform_result(result_data)
     result_dict = result_to_dict(parsed)
     result_dict["design_philosophy"] = result_data.get("design_philosophy", "")
+
+    # Pain Point 가시성: Step 2 설계에 실제 반영된 Pain Point + 분류 맥락을 결과에 저장
+    pain_context_items = []
+    for _t in scoped_tasks_step2:
+        _pains = []
+        if _t.pain_time:          _pains.append({"type": "시간/속도",    "text": _t.pain_time})
+        if _t.pain_accuracy:      _pains.append({"type": "정확성",      "text": _t.pain_accuracy})
+        if _t.pain_repetition:    _pains.append({"type": "반복/수작업",  "text": _t.pain_repetition})
+        if _t.pain_data:          _pains.append({"type": "정보/데이터", "text": _t.pain_data})
+        if _t.pain_system:        _pains.append({"type": "시스템/도구", "text": _t.pain_system})
+        if _t.pain_communication: _pains.append({"type": "의사소통",    "text": _t.pain_communication})
+        _cls = _wf_classification.get(_t.id, {})
+        if _pains or _cls.get("label"):
+            pain_context_items.append({
+                "task_id": _t.id,
+                "task_name": _t.name,
+                "l4": _t.l4,
+                "l3": _t.l3,
+                "classification": _cls.get("label", ""),
+                "classification_reason": _cls.get("reason", ""),
+                "hybrid_note": _cls.get("hybrid_note", ""),
+                "ai_prerequisites": _cls.get("ai_prerequisites", ""),
+                "pain_points": _pains,
+            })
+    result_dict["pain_context"] = pain_context_items
+    result_dict["classification_stats"] = cls_stats
 
     global _wf_step2_cache
     _wf_step2_cache = result_dict

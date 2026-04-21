@@ -945,11 +945,25 @@ export interface RedesignedL3 {
   l4_list: RedesignedL4[];
 }
 
+export interface PainContextItem {
+  task_id: string;
+  task_name: string;
+  l4: string;
+  l3: string;
+  classification: "" | "AI" | "AI + Human" | "Human";
+  classification_reason: string;
+  hybrid_note: string;
+  ai_prerequisites: string;
+  pain_points: Array<{ type: string; text: string }>;
+}
+
 export interface WorkflowStepResult extends NewWorkflowResult {
   benchmark_insights?: Array<{ source: string; insight: string; application: string }> | string[];
   l2_restructure?: string;
   design_philosophy?: string;
   redesigned_process?: RedesignedL3[];
+  pain_context?: PainContextItem[];
+  classification_stats?: { AI: number; "AI + Human": number; Human: number };
 }
 
 export interface WorkflowChatResponse {

@@ -203,11 +203,158 @@ function EditModal({ title, children, onClose }: EditModalProps) {
 }
 
 /* ══════════════════════════════════════════════════════════════════════════ */
+/* ── Pain Context Panel — Step 2 설계에 반영된 Pain Point + 분류 가시화 ── */
+/* ══════════════════════════════════════════════════════════════════════════ */
+
+interface PainContextItem {
+  task_id: string;
+  task_name: string;
+  l4: string;
+  l3: string;
+  classification: string;
+  classification_reason: string;
+  hybrid_note: string;
+  ai_prerequisites: string;
+  pain_points: Array<{ type: string; text: string }>;
+}
+
+function PainContextPanel({
+  painContext,
+  stats,
+}: {
+  painContext: PainContextItem[];
+  stats?: { AI: number; "AI + Human": number; Human: number };
+}) {
+  const [open, setOpen] = useState(false);
+  const [filter, setFilter] = useState<"" | "AI" | "AI + Human" | "Human">("");
+
+  const totalPains = painContext.reduce((s, i) => s + i.pain_points.length, 0);
+  const filtered = filter ? painContext.filter((i) => i.classification === filter) : painContext;
+
+  const badge = (label: string, count: number, key: "" | "AI" | "AI + Human" | "Human", color: string) => (
+    <button
+      onClick={() => setFilter(filter === key ? "" : key)}
+      className="text-[11px] font-semibold px-2.5 py-1 rounded-full border-[1.5px] transition"
+      style={{
+        borderColor: color,
+        color: filter === key ? "#fff" : color,
+        backgroundColor: filter === key ? color : "#fff",
+      }}
+    >
+      {label} {count}
+    </button>
+  );
+
+  return (
+    <div className="rounded-lg border border-amber-200 bg-amber-50/50">
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center justify-between px-4 py-2.5 text-left hover:bg-amber-50 rounded-t-lg"
+      >
+        <div className="flex items-center gap-3">
+          <span className="text-[13px] font-bold text-amber-900">🔍 Step 2 설계에 반영된 Pain Point · 분류</span>
+          <span className="text-[11px] text-amber-700">
+            {painContext.length}개 태스크 · Pain {totalPains}개
+          </span>
+        </div>
+        <span className="text-amber-700 text-xs">{open ? "▲ 접기" : "▼ 펼치기"}</span>
+      </button>
+      {open && (
+        <div className="px-4 pb-3 pt-1 space-y-3">
+          {stats && (
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-[11px] text-gray-500">분류 필터:</span>
+              {badge("AI", stats.AI, "AI", "#16A34A")}
+              {badge("AI + Human", stats["AI + Human"], "AI + Human", "#F59E0B")}
+              {badge("Human", stats.Human, "Human", "#B91C1C")}
+              {filter && (
+                <button onClick={() => setFilter("")} className="text-[10px] text-gray-400 underline">전체 보기</button>
+              )}
+            </div>
+          )}
+          <div className="max-h-[320px] overflow-y-auto space-y-2">
+            {filtered.length === 0 && (
+              <div className="text-[11px] text-gray-400 text-center py-4">해당 분류에 표시할 항목이 없습니다.</div>
+            )}
+            {filtered.map((item) => {
+              const clsColor =
+                item.classification === "AI" ? "#16A34A"
+                : item.classification === "AI + Human" ? "#F59E0B"
+                : item.classification === "Human" ? "#B91C1C"
+                : "#6B7280";
+              return (
+                <div key={item.task_id} className="rounded-md border border-amber-200 bg-white p-2.5">
+                  <div className="flex items-start justify-between gap-2 mb-1">
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[12px] font-bold text-gray-800">
+                        [{item.task_id}] {item.task_name}
+                      </div>
+                      <div className="text-[10px] text-gray-500 mt-0.5">
+                        {item.l3} / {item.l4}
+                      </div>
+                    </div>
+                    {item.classification && (
+                      <span
+                        className="text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap"
+                        style={{ backgroundColor: clsColor + "15", color: clsColor, border: `1px solid ${clsColor}` }}
+                      >
+                        {item.classification}
+                      </span>
+                    )}
+                  </div>
+                  {item.classification_reason && (
+                    <div className="text-[10.5px] text-gray-600 mt-1 leading-snug">
+                      <span className="font-semibold text-gray-700">📋 판단 근거:</span> {item.classification_reason}
+                    </div>
+                  )}
+                  {item.hybrid_note && (
+                    <div className="text-[10.5px] text-amber-800 mt-1 leading-snug">
+                      <span className="font-semibold">⚙️ AI/Human 분리:</span> {item.hybrid_note}
+                    </div>
+                  )}
+                  {item.ai_prerequisites && (
+                    <div className="text-[10.5px] text-blue-700 mt-1 leading-snug">
+                      <span className="font-semibold">🔧 AI 수행 필요여건:</span> {item.ai_prerequisites}
+                    </div>
+                  )}
+                  {item.pain_points.length > 0 && (
+                    <div className="mt-1.5 space-y-0.5">
+                      {item.pain_points.map((p, pi) => (
+                        <div key={pi} className="text-[10.5px] text-red-700 leading-snug">
+                          <span className="font-semibold">💢 {p.type}:</span> {p.text}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════════════════ */
 /* ── 메인 에디터 ──────────────────────────────────────────────────────────── */
 /* ══════════════════════════════════════════════════════════════════════════ */
 
 interface WorkflowEditorProps {
-  result: NewWorkflowResult;
+  result: NewWorkflowResult & {
+    pain_context?: Array<{
+      task_id: string;
+      task_name: string;
+      l4: string;
+      l3: string;
+      classification: string;
+      classification_reason: string;
+      hybrid_note: string;
+      ai_prerequisites: string;
+      pain_points: Array<{ type: string; text: string }>;
+    }>;
+    classification_stats?: { AI: number; "AI + Human": number; Human: number };
+  };
   onSave: (updated: SwimlaneData) => void;
 }
 
@@ -352,6 +499,14 @@ export default function WorkflowEditor({ result, onSave }: WorkflowEditorProps) 
 
   return (
     <div className="space-y-3">
+      {/* 🔍 Pain Point + 분류 가시성 패널 (접이식) */}
+      {(result.pain_context?.length || result.classification_stats) && (
+        <PainContextPanel
+          painContext={result.pain_context || []}
+          stats={result.classification_stats}
+        />
+      )}
+
       {/* 상단 컨트롤 */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
