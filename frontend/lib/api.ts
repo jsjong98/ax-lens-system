@@ -1387,6 +1387,16 @@ export async function listWorkflowSessions(): Promise<WorkflowSessionsResult> {
   return apiFetch("/workflow/sessions");
 }
 
+/** 새 빈 세션 즉시 생성 (프로젝트 목록에 바로 등록) */
+export async function createWorkflowSession(name: string): Promise<{
+  ok: boolean; session_id: string; name: string;
+}> {
+  return apiFetch("/workflow/sessions/create", {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
+}
+
 export async function getSessionsOverview(): Promise<{ ok: boolean; users: PMUserSessions[] }> {
   return apiFetch("/workflow/sessions/overview");
 }

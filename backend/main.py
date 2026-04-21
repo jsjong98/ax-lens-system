@@ -7330,6 +7330,62 @@ async def rename_workflow_session(session_id: str, request: Request):
     return {"ok": True, "session_id": session_id, "name": new_name}
 
 
+@app.post("/api/workflow/sessions/create", tags=["Workflow"])
+async def create_empty_session(request: Request):
+    """이름만으로 빈 세션을 즉시 생성 (프로젝트 목록에 바로 등록).
+    body: {name: "프로젝트 이름"}
+    """
+    body = await request.json() if True else {}
+    name = str(body.get("name") or "").strip()
+    if not name:
+        raise HTTPException(400, "프로젝트 이름이 필요합니다.")
+
+    # 세션 ID: 타임스탬프 기반 (기존 컨벤션과 동일)
+    import time as _t
+    sid = f"session_{int(_t.time() * 1000)}"
+
+    # 세션 디렉토리 생성
+    _get_session_dir(sid)
+
+    # manifest 등록
+    _load_sessions_manifest()
+    now = _now_kst()
+    user_id = _get_user_id(request)
+    team_id = _get_team_id(request)
+    _sessions_manifest[sid] = {
+        "id": sid,
+        "name": name,
+        "created_at": now,
+        "updated_at": now,
+        "user_id": user_id,
+        "team_id": team_id,
+    }
+    _sessions_manifest["_current"] = sid
+    _save_sessions_manifest()
+
+    # 현재 세션으로 설정 + 메모리 캐시 초기화 (새 프로젝트라 기존 데이터 없음)
+    global _current_session_id
+    global _wf_excel_tasks, _wf_excel_path, _wf_classification
+    global _wf_benchmark_table, _wf_step1_cache, _wf_step2_cache, _wf_gap_analysis
+    global _wf_chat_history, _wf_user_resources, _wf_tobe_flow_cache
+    global _workflow_cache, _new_workflow_cache
+    _current_session_id = sid
+    _wf_excel_tasks = []
+    _wf_excel_path = ""
+    _wf_classification = {}
+    _wf_benchmark_table = {}
+    _wf_step1_cache = {}
+    _wf_step2_cache = {}
+    _wf_gap_analysis = {}
+    _wf_chat_history = []
+    _wf_user_resources = []
+    _wf_tobe_flow_cache = {}
+    _workflow_cache = {}
+    _new_workflow_cache.clear()
+
+    return {"ok": True, "session_id": sid, "name": name}
+
+
 @app.post("/api/workflow/sessions/current/save", tags=["Workflow"])
 async def save_current_session():
     """현재 세션 상태를 명시적으로 저장합니다."""

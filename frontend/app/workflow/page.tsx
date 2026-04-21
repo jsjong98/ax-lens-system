@@ -298,7 +298,7 @@ export default function WorkflowPage() {
     setShowNewProjectModal(true);
   }, []);
 
-  // 이름 확정 → 현재 세션 자동 저장 + state 초기화 + pending 이름 저장
+  // 이름 확정 → 현재 세션 자동 저장 + 백엔드에 빈 세션 즉시 생성 + state 초기화
   const handleConfirmNewProject = useCallback(async () => {
     const name = newProjectName.trim();
     if (!name) return;
@@ -313,7 +313,6 @@ export default function WorkflowPage() {
     }
 
     setShowNewProjectModal(false);
-    setPendingProjectName(name);   // 엑셀 업로드 시 이 이름으로 자동 rename
 
     // state 초기화
     setExcelResult(null);
@@ -324,7 +323,6 @@ export default function WorkflowPage() {
     setStep1Result(null);
     setStep2Result(null);
     setBenchmarkTableBySheet({});
-
     setGapAnalysis(null);
     setTobeFlow(null);
     setTobeActiveSheet(0);
@@ -336,8 +334,21 @@ export default function WorkflowPage() {
     setSearchLog([]);
     setError(null);
     setCurrentStep(0);
-    setCurrentSessionId("");  // 새 세션 기다림
-  }, [newProjectName, currentSessionId]);
+
+    // 🔑 백엔드에 빈 세션 즉시 생성 → 프로젝트 목록에 바로 등록
+    try {
+      const { createWorkflowSession } = await import("@/lib/api");
+      const created = await createWorkflowSession(name);
+      setCurrentSessionId(created.session_id);
+      setPendingProjectName(null);  // 이미 이름이 지정된 상태라 rename 불필요
+      await loadSessions();         // 프로젝트 목록 즉시 갱신
+    } catch (e) {
+      console.warn("빈 세션 생성 실패 → 엑셀 업로드 시 fallback 생성:", e);
+      // fallback: 엑셀 업로드 시 rename 시도
+      setCurrentSessionId("");
+      setPendingProjectName(name);
+    }
+  }, [newProjectName, currentSessionId, loadSessions]);
 
   // 현재 세션 저장
   const handleSaveSession = useCallback(async () => {
