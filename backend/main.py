@@ -3896,13 +3896,138 @@ def _normalize_actor(raw) -> str:
     return actors[0] if actors else "그 외"
 
 
-def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
+async def _llm_route_tobe_flow(
+    process_name: str,
+    sheet_name: str,
+    asis_nodes: list[dict],
+    asis_edges: list[dict],
+    senior_agents: list[dict],
+    junior_agents: list[dict],
+) -> dict:
+    """
+    As-Is process map + AI Service Flow를 LLM에게 입력 → 지능형 배선 설계.
+
+    Returns dict:
+      {
+        "ai_to_asis_edges": [{"from": junior_task_id, "to": asis_node_id, "label": str}],
+        "asis_to_ai_edges": [{"from": asis_node_id, "to": junior_task_id, "label": str}],
+        "senior_triggers":  [{"from": senior_id, "to": junior_first_id, "label": str}],
+        "human_actions":    [{"junior_task_id": str, "action": str, "performer": str}]
+      }
+
+    LLM 호출 실패 시 빈 dict 반환 (deterministic 기본 엣지만 유지).
+    """
+    if not junior_agents:
+        return {}
+
+    # 입력 요약 구성
+    asis_summary_lines = []
+    for n in asis_nodes:
+        if n["level"] not in ("L4", "L5"):
+            continue
+        role_hint = n.get("actor") or "미지정"
+        desc = (n.get("description") or "")[:80]
+        line = f"- [{n['id']}] {n['label']} ({n['level']}, 수행: {role_hint})"
+        if desc:
+            line += f" — {desc}"
+        asis_summary_lines.append(line)
+    asis_block = "\n".join(asis_summary_lines) if asis_summary_lines else "(As-Is 노드 없음)"
+
+    senior_lines = []
+    for ag in senior_agents:
+        senior_id = f"senior_{ag['agent_id'] or 0}"
+        senior_lines.append(f"- [{senior_id}] {ag['agent_name']} — {ag.get('description', '')[:100]}")
+    senior_block = "\n".join(senior_lines) if senior_lines else "(Senior AI 없음)"
+
+    junior_lines = []
+    for ji, ag in enumerate(junior_agents):
+        prefix = f"junior_{ag['agent_id'] or ji}"
+        junior_lines.append(f"### Agent: {ag['agent_name']} (ID: {prefix})")
+        for t in ag["tasks"]:
+            tid = t.get("task_id", "")
+            jid = f"{prefix}_{tid}"
+            alvl = t.get("automation_level", "")
+            ai_role = (t.get("ai_role") or "")[:80]
+            human_role = (t.get("human_role") or "")[:80]
+            inputs = ", ".join((t.get("input_data") or [])[:3])
+            outputs = ", ".join((t.get("output_data") or [])[:3])
+            junior_lines.append(
+                f"  - [{jid}] {t.get('task_name', '')} ({alvl})\n"
+                f"    AI 역할: {ai_role}\n"
+                f"    Human 역할: {human_role or '없음'}\n"
+                f"    Input: {inputs or '-'} / Output: {outputs or '-'}"
+            )
+    junior_block = "\n".join(junior_lines)
+
+    system_prompt = f"""당신은 AI/Human 협업 워크플로우를 설계하는 전문가입니다.
+아래 As-Is 프로세스와 AI Service Flow를 분석하여, **Swim Lane 다이어그램의 엣지(연결선)와 Human 검토 액션을 지능형으로 배선**하세요.
+
+## 프로세스: {process_name} / 시트: {sheet_name}
+
+## As-Is 프로세스 맵 (L4/L5 노드)
+{asis_block}
+
+## Senior AI 오케스트레이터
+{senior_block}
+
+## Junior AI 에이전트와 태스크
+{junior_block}
+
+## 설계 원칙
+1. **As-Is → Junior AI**: 각 Junior AI 태스크가 어느 As-Is L5 작업에서 트리거되는지, 그 As-Is 노드 ID를 선행자로 지목
+2. **Junior AI → As-Is**: Junior AI의 output이 어느 As-Is 후속 작업으로 이어지는지 지목
+3. **Senior AI 오케스트레이션**: Senior AI가 각 Junior AI 에이전트의 첫 태스크를 '기동/지시'하는 엣지
+4. **Human 검토 액션**: automation_level이 'Human-in-Loop' 또는 'Human-on-the-Loop' 또는 human_role이 비어있지 않은 Junior 태스크에 대해,
+   **어떤 사람이(performer)**, **어떤 행동을 구체적으로 해야 하는지(action)** 명시 (단순 "검토"가 아니라 "AI가 탐지한 이상 케이스 확인 후 승인" 같이 구체)
+   performer는 ["임원", "현업 팀장", "HR 임원", "HR 담당자", "현업 구성원"] 중 하나
+
+## 제약
+- As-Is 노드 ID는 반드시 위 목록에서 그대로 사용 (변경·새 ID 생성 금지)
+- Junior 태스크 ID도 위에 적힌 jid 그대로 사용
+- As-Is에 매칭될 노드가 없으면 해당 엣지는 생략 (억지 매칭 금지)
+- 한 Junior 태스크에 여러 As-Is 선행자가 있어도 무방
+
+## 출력 형식 (JSON만, 마크다운 코드 블록 없음)
+{{
+  "ai_to_asis_edges": [
+    {{"from": "junior_xxx_yyy", "to": "asis_l5_id", "label": "결과 전달"}}
+  ],
+  "asis_to_ai_edges": [
+    {{"from": "asis_l5_id", "to": "junior_xxx_yyy", "label": "트리거"}}
+  ],
+  "senior_triggers": [
+    {{"from": "senior_x", "to": "junior_xxx_first_task", "label": "기동"}}
+  ],
+  "human_actions": [
+    {{"junior_task_id": "junior_xxx_yyy", "action": "AI 결과 검토 및 예외 케이스 판단·승인", "performer": "HR 담당자"}}
+  ]
+}}"""
+
+    try:
+        result = await _call_llm_step1(system_prompt, [
+            {"role": "user", "content": "AI와 As-Is를 매끄럽게 잇는 엣지와 Human 액션을 설계해주세요. JSON만 출력하세요."}
+        ])
+        if not isinstance(result, dict):
+            return {}
+        return {
+            "ai_to_asis_edges": result.get("ai_to_asis_edges") or [],
+            "asis_to_ai_edges": result.get("asis_to_ai_edges") or [],
+            "senior_triggers": result.get("senior_triggers") or [],
+            "human_actions": result.get("human_actions") or [],
+        }
+    except Exception as e:
+        print(f"[TOBE-LLM] 배선 LLM 호출 실패: {e}", flush=True)
+        return {}
+
+
+async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
     """
     단일 As-Is 시트 → To-Be Swim Lane dict.
     - As-Is 노드/엣지/role 그대로 보존 (level·position 포함)
     - Step 2 Senior/Junior AI agent를 새 레인에 주입
     - 엣지는 As-Is 그대로 + AI 노드 지원 엣지 (점선) 추가
     - Step 2 스코프(L4)에 해당하는 As-Is 노드만 포함 (스코프 꼬임 방지)
+    - LLM에게 AI Service Flow + As-Is를 입력 → 지능형 배선·Human action 설계 (핵심)
     """
     sheet_name = (asis_sheet.name or asis_sheet.sheet_id).strip()
     sheet_id = asis_sheet.sheet_id
@@ -3919,18 +4044,29 @@ def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
     for agent in _wf_step2_cache.get("agents", []):
         atype = agent.get("agent_type", "")
         matched = [t for t in agent.get("assigned_tasks", []) if _task_matches_sheet(t)]
-        if not matched and not senior_agents and not junior_agents:
+        # Senior AI는 오케스트레이터라 assigned_tasks가 비어있어도 항상 포함
+        # (Junior AI는 태스크 없으면 제외)
+        if atype == "Senior AI":
+            senior_agents.append({
+                "agent_id": agent.get("agent_id", ""),
+                "agent_name": agent.get("agent_name", "") or "Senior AI Orchestrator",
+                "ai_technique": agent.get("ai_technique", ""),
+                "description": agent.get("description", ""),
+                "tasks": matched,  # 비어있을 수 있음
+            })
+            continue
+        if atype != "Junior AI":
+            continue
+        if not matched and not junior_agents:
             matched = agent.get("assigned_tasks", [])[:]
         if not matched:
             continue
-        bucket = senior_agents if atype == "Senior AI" else junior_agents if atype == "Junior AI" else None
-        if bucket is not None:
-            bucket.append({
-                "agent_id": agent.get("agent_id", ""),
-                "agent_name": agent.get("agent_name", ""),
-                "ai_technique": agent.get("ai_technique", ""),
-                "tasks": matched,
-            })
+        junior_agents.append({
+            "agent_id": agent.get("agent_id", ""),
+            "agent_name": agent.get("agent_name", ""),
+            "ai_technique": agent.get("ai_technique", ""),
+            "tasks": matched,
+        })
 
     # 타겟 L4 스코프 추출 (task_id 접두사 + l4 이름)
     target_l4_ids: set[str] = set()
@@ -4141,56 +4277,130 @@ def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
                         "origin": "ai",
                     })
 
-    # 3) Human 행동 노드 생성 — Junior AI task 중 사람 개입 필요한 것은 HR 담당자 레인에
-    #    새 노드를 만들어서 명시적으로 표현하고 Junior AI와 연결.
-    #    (As-Is 기존 노드/엣지는 건드리지 않음 — 원래 사람이 했던 업무는 그대로 보존)
+    # 3) LLM 지능형 배선 — AI Service Flow + As-Is Process Map 분석
+    llm_routing = await _llm_route_tobe_flow(
+        process_name=process_name,
+        sheet_name=sheet_name,
+        asis_nodes=asis_nodes_out,
+        asis_edges=asis_edges_out,
+        senior_agents=senior_agents,
+        junior_agents=junior_agents,
+    )
+
+    # LLM 결과 id 검증용 세트
+    asis_id_set = {n["id"] for n in asis_nodes_out}
+    ai_id_set = {n["id"] for n in ai_nodes_out}
+
+    # LLM 반환 human_actions (junior_task_id → {action, performer})
+    llm_actions: dict[str, dict] = {}
+    for ha in llm_routing.get("human_actions", []):
+        jid = str(ha.get("junior_task_id") or "").strip()
+        if jid:
+            llm_actions[jid] = {
+                "action": str(ha.get("action") or "").strip(),
+                "performer": str(ha.get("performer") or "HR 담당자").strip() or "HR 담당자",
+            }
+
+    # 3-1) Human 행동 노드 생성 — Junior AI 중 사람 개입 필요한 것
     human_nodes_out: list[dict] = []
     junior_nodes = [n for n in ai_nodes_out if n["actor"] == "Junior AI"]
-    hr_lane_y = junior_y + 260.0   # Junior AI 아래쪽에 HR 검토 노드 배치
+    hr_lane_y = junior_y + 260.0
 
     for jnode in junior_nodes:
+        jid = jnode["id"]
         alvl = str(jnode.get("automation_level", ""))
         human_role = str(jnode.get("human_role", "") or "").strip()
+        llm_info = llm_actions.get(jid, {})
+        llm_action = llm_info.get("action", "")
+        llm_performer = llm_info.get("performer", "HR 담당자")
+
         needs_human = (
-            bool(human_role)
+            bool(llm_action)
+            or bool(human_role)
             or "Loop" in alvl
             or "Supervised" in alvl
         )
         if not needs_human:
             continue
 
-        hr_id = f"hr_review_{jnode['id']}"
-        review_label = human_role if human_role else f"{jnode['label']} 검토"
+        # performer는 LLM이 판단한 실제 담당자 (HR 담당자 하드코딩 X)
+        if llm_performer in _TOBE_ACTOR_ORDER:
+            actor_lane = llm_performer
+        else:
+            actor_lane = "HR 담당자"
+
+        # action 문구: LLM 제공이 우선, 없으면 human_role, 최후에 "{task명} 검토"
+        review_label = llm_action or human_role or f"{jnode['label']} 검토"
+
+        hr_id = f"human_{jid}"
         human_nodes_out.append({
             "id": hr_id,
             "label": review_label[:60],
             "level": "L5",
-            "actor": "HR 담당자",
+            "actor": actor_lane,
             "type": "task",
             "ai_support": None,
             "position": {"x": jnode["position"]["x"], "y": hr_lane_y},
             "origin": "ai",
-            "description": human_role,
+            "description": review_label,
             "data": {
-                "role": "HR 담당자",
+                "role": actor_lane,
                 "label": review_label,
                 "level": "L5",
-                "description": human_role or f"{jnode['label']} 결과 검토 및 확정",
+                "description": review_label,
             },
             "next": [],
         })
         ai_edges_out.append({
-            "id": f"aie_hr_{jnode['id']}_{hr_id}",
-            "source": jnode["id"],
+            "id": f"aie_hr_{jid}_{hr_id}",
+            "source": jid,
             "target": hr_id,
             "label": "검토",
             "origin": "ai",
         })
 
-    # 4) lanes — 표준 순서대로, 실제 등장한 것만 (As-Is에서 내용 있는 레인 + AI 레인)
-    # HR 담당자 검토 노드가 새로 생기면 HR 담당자 lane도 포함되도록 role_counts에 가산
-    if human_nodes_out:
-        role_counts["HR 담당자"] = role_counts.get("HR 담당자", 0) + len(human_nodes_out)
+    # 3-2) LLM이 제공한 AI ↔ As-Is 엣지 병합
+    def _add_llm_edge(prefix: str, frm: str, to: str, label: str, valid_from: set, valid_to: set) -> None:
+        frm = str(frm or "").strip()
+        to = str(to or "").strip()
+        if not frm or not to or frm not in valid_from or to not in valid_to:
+            return
+        ai_edges_out.append({
+            "id": f"{prefix}_{frm}_{to}",
+            "source": frm,
+            "target": to,
+            "label": str(label or "")[:20],
+            "origin": "ai",
+        })
+
+    # As-Is → AI (트리거)
+    for e in llm_routing.get("asis_to_ai_edges", []):
+        _add_llm_edge("llm_a2i", e.get("from"), e.get("to"), e.get("label", ""),
+                      asis_id_set, ai_id_set)
+    # AI → As-Is (결과 전달)
+    for e in llm_routing.get("ai_to_asis_edges", []):
+        _add_llm_edge("llm_i2a", e.get("from"), e.get("to"), e.get("label", ""),
+                      ai_id_set, asis_id_set)
+    # Senior AI → Junior AI (오케스트레이션 — LLM 우선, 기본 배선과 중복되면 중복 제거 대비 dedup)
+    senior_ids = {n["id"] for n in ai_nodes_out if n["actor"] == "Senior AI"}
+    junior_ids = {n["id"] for n in ai_nodes_out if n["actor"] == "Junior AI"}
+    existing_pairs = {(e["source"], e["target"]) for e in ai_edges_out}
+    for e in llm_routing.get("senior_triggers", []):
+        frm = str(e.get("from") or "").strip()
+        to = str(e.get("to") or "").strip()
+        if frm in senior_ids and to in junior_ids and (frm, to) not in existing_pairs:
+            ai_edges_out.append({
+                "id": f"llm_orc_{frm}_{to}",
+                "source": frm,
+                "target": to,
+                "label": str(e.get("label") or "기동")[:20],
+                "origin": "ai",
+            })
+            existing_pairs.add((frm, to))
+
+    # 4) lanes — 표준 순서대로, 실제 등장한 것만 (As-Is에서 내용 있는 레인 + AI 레인 + 새 Human 레인)
+    for hn in human_nodes_out:
+        role_counts[hn["actor"]] = role_counts.get(hn["actor"], 0) + 1
     actors_used = [a for a in _TOBE_ACTOR_ORDER if (role_counts.get(a, 0) > 0
                    or (a == "Senior AI" and senior_agents)
                    or (a == "Junior AI" and junior_agents))]
@@ -4294,17 +4504,17 @@ async def generate_tobe_flow(request: Request):
         if not picked:
             print(f"[TOBE⚠] sheet_id='{target_sheet_id}' 매칭 없음 — 전체 머지", flush=True)
             merged = _merge_sheets_into_one(all_sheets, "merged", process_name)
-            tobe_sheets.append(_build_tobe_sheet_from_asis(merged, process_name))
+            tobe_sheets.append(await _build_tobe_sheet_from_asis(merged, process_name))
         else:
             for s in picked:
-                tobe_sheets.append(_build_tobe_sheet_from_asis(s, process_name))
+                tobe_sheets.append(await _build_tobe_sheet_from_asis(s, process_name))
     else:
         # L3 scope: 전체를 하나의 통합 시트로 머지 → 한 장짜리 Swim Lane
         if len(all_sheets) == 1:
-            tobe_sheets.append(_build_tobe_sheet_from_asis(all_sheets[0], process_name))
+            tobe_sheets.append(await _build_tobe_sheet_from_asis(all_sheets[0], process_name))
         elif all_sheets:
             merged = _merge_sheets_into_one(all_sheets, "merged", process_name)
-            tobe_sheets.append(_build_tobe_sheet_from_asis(merged, process_name))
+            tobe_sheets.append(await _build_tobe_sheet_from_asis(merged, process_name))
 
     if not tobe_sheets:
         raise HTTPException(500, "To-Be Workflow 생성에 실패했습니다 — 대상 시트가 없습니다.")
@@ -4360,8 +4570,9 @@ def _tobe_cache_to_hr_json(cache: dict) -> dict:
             # AI 노드는 role을 actor로 강제 (Senior/Junior AI 레인 배치)
             if n.get("origin") == "ai" and n.get("actor"):
                 base_data["role"] = n["actor"]
+                # ai_support는 description에 저장 (memo로 두면 hr-workflow-ai에서 노란 스티커로 뜸)
                 if n.get("ai_support"):
-                    base_data.setdefault("memo", n["ai_support"])
+                    base_data.setdefault("description", n["ai_support"])
             # role이 여전히 문자열이 아니면 actors_all + custom_role로 재구성
             if not isinstance(base_data.get("role"), str):
                 parts = list(n.get("actors_all") or [])

@@ -110,6 +110,56 @@ def _write_row(ws, row: int, values: dict[str, str | None]) -> None:
             pass
 
 
+def _derive_scope(wf_tobe_flow_cache: dict | None, step2_cache: dict) -> tuple[set[str], set[str]]:
+    """
+    현재 To-Be 설계 스코프(타겟 L4 ID·이름)를 추출.
+    우선순위:
+      1) wf_tobe_flow_cache.tobe_sheets — Swim Lane 생성 시 고정된 스코프
+      2) step2_cache 에이전트의 assigned_tasks.l4 / task_id 접두사
+    """
+    l4_ids: set[str] = set()
+    l4_names: set[str] = set()
+
+    if wf_tobe_flow_cache:
+        for s in wf_tobe_flow_cache.get("tobe_sheets", []):
+            sid = str(s.get("l4_id") or "").strip()
+            sname = str(s.get("l4_name") or "").strip()
+            # sheet id가 실제 L4 ID(1.1.3)인 경우 추가
+            parts = sid.split(".")
+            if len(parts) == 3 and all(p.isdigit() for p in parts):
+                l4_ids.add(sid)
+            if sname:
+                l4_names.add(sname)
+
+    # 보강: step2_cache의 task_id prefix + l4 이름
+    for agent in step2_cache.get("agents", []):
+        for t in agent.get("assigned_tasks", []):
+            tid = str(t.get("task_id") or "")
+            parts = tid.split(".")
+            if len(parts) >= 3:
+                l4_ids.add(".".join(parts[:3]))
+            l4_text = str(t.get("l4") or "").strip()
+            if l4_text:
+                l4_names.add(l4_text)
+
+    return l4_ids, l4_names
+
+
+def _task_in_scope(tid: str, l4_hint: str, scope_ids: set[str], scope_names: set[str]) -> bool:
+    """주어진 task_id / l4 이름이 스코프 안에 있는지."""
+    if not scope_ids and not scope_names:
+        return True  # 스코프 정보 없으면 모두 포함 (fallback)
+    if tid:
+        parts = tid.split(".")
+        if len(parts) >= 3 and ".".join(parts[:3]) in scope_ids:
+            return True
+    if l4_hint:
+        for tn in scope_names:
+            if tn and (tn in l4_hint or l4_hint in tn):
+                return True
+    return False
+
+
 def export_tobe_excel(
     template_path: str | Path,
     output_path: str | Path,
@@ -121,13 +171,16 @@ def export_tobe_excel(
     """
     To-Be Excel 반출 메인 엔트리.
 
+    스코프: wf_tobe_flow_cache에 설정된 L4 만 포함 (사용자가 작업한 시트 범위).
+    performer: AI+Human의 Human 파트와 Human L5는 원본 As-Is Task의 performer_* 필드 그대로 복사.
+
     Args:
         template_path: 사용자가 업로드한 As-Is 템플릿 xlsx 경로
         output_path: 반출할 xlsx 경로
         step2_cache: _wf_step2_cache (agents + assigned_tasks)
         classification: _wf_classification (엑셀 분류 + hybrid_note)
         excel_tasks: _wf_excel_tasks (원본 Task 리스트)
-        wf_tobe_flow_cache: 선택적 — 이미 생성된 To-Be Flow dict
+        wf_tobe_flow_cache: 생성된 To-Be Flow dict (스코프 확정용)
     """
     template_path = Path(template_path)
     output_path = Path(output_path)
@@ -139,15 +192,32 @@ def export_tobe_excel(
     if ws is None:
         raise RuntimeError("As-Is 데이터 시트를 템플릿에서 찾지 못했습니다.")
 
-    # 데이터 행 초기화
     _clear_data_rows(ws)
 
-    # 엑셀 task를 id 기준 인덱스
+    # 스코프 추출 (현재 작업 중인 L4)
+    scope_l4_ids, scope_l4_names = _derive_scope(wf_tobe_flow_cache, step2_cache)
+
+    # 엑셀 task를 id 기준 인덱스 (원본 performer 필드 참조)
     task_by_id: dict[str, Any] = {t.id: t for t in (excel_tasks or [])}
+
+    def _performer_fields_from_task(orig_task: Any | None) -> dict[str, str]:
+        """원본 As-Is Task의 performer 필드를 dict로 반환."""
+        if orig_task is None:
+            return {
+                "performer": "", "performer_executive": "", "performer_hr": "",
+                "performer_manager": "", "performer_member": "",
+            }
+        return {
+            "performer": orig_task.performer or "",
+            "performer_executive": orig_task.performer_executive or "",
+            "performer_hr": orig_task.performer_hr or "",
+            "performer_manager": orig_task.performer_manager or "",
+            "performer_member": orig_task.performer_member or "",
+        }
 
     row = _DATA_START_ROW
 
-    # ── 1. Junior AI task (AI 파트) 쓰기 ──
+    # ── 1. Senior/Junior AI task — 스코프 내만 ──
     for agent in step2_cache.get("agents", []):
         atype = agent.get("agent_type", "")
         if atype not in ("Senior AI", "Junior AI"):
@@ -155,11 +225,15 @@ def export_tobe_excel(
         agent_name = agent.get("agent_name", "") or ""
         for t in agent.get("assigned_tasks", []):
             tid = str(t.get("task_id") or "").strip()
+            l4_hint = str(t.get("l4") or "").strip()
+            if not _task_in_scope(tid, l4_hint, scope_l4_ids, scope_l4_names):
+                continue
+
             cls = classification.get(tid, {}) if classification else {}
             orig_label = cls.get("label", "")
             orig_task = task_by_id.get(tid)
 
-            # 계층 정보 보강 — 원본 task에서 가져오기
+            # 계층 정보 — 원본 task 우선
             base = {
                 "l2_id": (orig_task.l2_id if orig_task else "") or "",
                 "l2_name": (orig_task.l2 if orig_task else "") or t.get("l2", ""),
@@ -169,7 +243,7 @@ def export_tobe_excel(
                 "l4_name": (orig_task.l4 if orig_task else "") or t.get("l4", ""),
             }
 
-            # AI 파트 행
+            # AI 파트 행 — performer는 Agent 타입명 (원본 performer 체크박스 미설정, AI 수행이므로)
             ai_part_desc = t.get("ai_role", "") or t.get("task_name", "")
             values = {
                 **base,
@@ -177,53 +251,55 @@ def export_tobe_excel(
                 "l5_name": f"[AI] {t.get('task_name', '')}",
                 "l5_desc": ai_part_desc,
                 "performer": f"{atype} — {agent_name}",
+                # AI 수행이므로 As-Is의 임원/HR/팀장/구성원 체크박스는 공란
                 "performer_executive": "",
                 "performer_hr": "",
                 "performer_manager": "",
                 "performer_member": "",
-                "cls_1st_label":    cls.get("label", "AI"),
-                "cls_1st_knockout": cls.get("criterion", ""),
-                "cls_1st_reason":   cls.get("reason", ""),
+                "cls_1st_label":     cls.get("label", "AI"),
+                "cls_1st_knockout":  cls.get("criterion", ""),
+                "cls_1st_reason":    cls.get("reason", ""),
                 "cls_1st_ai_prereq": cls.get("ai_prerequisites", ""),
-                "cls_doosan_label": cls.get("label", ""),
+                "cls_doosan_label":   cls.get("label", ""),
                 "cls_doosan_feedback": cls.get("feedback", ""),
-                "cls_final_label":  orig_label or "AI",
+                "cls_final_label":    orig_label or "AI",
                 "cls_final_feedback": cls.get("feedback", ""),
             }
             _write_row(ws, row, values)
             row += 1
 
-            # AI+Human 인 경우: Human 파트 별도 행 추가
+            # AI+Human 인 경우 Human 파트 별도 행
             is_hybrid = (orig_label == "AI + Human") or bool(t.get("human_role"))
             if is_hybrid:
-                human_part = t.get("human_role", "").strip()
+                human_part = (t.get("human_role") or "").strip()
                 if not human_part and cls.get("hybrid_note"):
-                    # hybrid_note에서 Human 파트 추출
                     hn = cls["hybrid_note"]
                     if "Human 파트:" in hn:
                         human_part = hn.split("Human 파트:", 1)[1].strip()
 
                 if human_part:
+                    # performer: 원본 As-Is Task의 수행주체를 그대로 복사
+                    # (원본이 임원/팀장/구성원이면 그대로 유지. HR로 바꾸지 않음)
+                    performer_vals = _performer_fields_from_task(orig_task)
                     values_h = {
                         **base,
                         "l5_id": tid,
                         "l5_name": f"[Human] {t.get('task_name', '')} 검토",
                         "l5_desc": human_part,
-                        "performer": "HR 담당자",
-                        "performer_hr": "●",
-                        "cls_1st_label": cls.get("label", "AI + Human"),
-                        "cls_1st_knockout": cls.get("criterion", ""),
-                        "cls_1st_reason": cls.get("reason", ""),
+                        **performer_vals,
+                        "cls_1st_label":     cls.get("label", "AI + Human"),
+                        "cls_1st_knockout":  cls.get("criterion", ""),
+                        "cls_1st_reason":    cls.get("reason", ""),
                         "cls_1st_ai_prereq": cls.get("ai_prerequisites", ""),
-                        "cls_doosan_label": cls.get("label", ""),
+                        "cls_doosan_label":   cls.get("label", ""),
                         "cls_doosan_feedback": cls.get("feedback", ""),
-                        "cls_final_label": "Human",
+                        "cls_final_label":    "Human",
                         "cls_final_feedback": cls.get("feedback", ""),
                     }
                     _write_row(ws, row, values_h)
                     row += 1
 
-    # ── 2. Human으로 분류된 As-Is L5 (AI Agent에 미포함) — 그대로 보존 ──
+    # ── 2. Human으로 분류된 As-Is L5 — 스코프 내만, AI Agent에 미포함 ──
     agent_task_ids: set[str] = set()
     for agent in step2_cache.get("agents", []):
         for t in agent.get("assigned_tasks", []):
@@ -236,6 +312,11 @@ def export_tobe_excel(
             continue
         if t.id in agent_task_ids:
             continue
+        # 스코프 필터: task의 L4 정보로 판정
+        l4_hint = str(getattr(t, "l4", "") or "").strip()
+        if not _task_in_scope(t.id, l4_hint, scope_l4_ids, scope_l4_names):
+            continue
+
         values = {
             "l2_id": t.l2_id or "", "l2_name": t.l2,
             "l3_id": t.l3_id or "", "l3_name": t.l3,
@@ -243,15 +324,19 @@ def export_tobe_excel(
             "l5_id": t.id,
             "l5_name": f"[Human] {t.name}",
             "l5_desc": t.description or "",
-            "performer": t.performer or "HR 담당자",
+            # Human L5 — 원본 As-Is의 performer 필드 그대로
+            "performer": t.performer or "",
             "performer_executive": t.performer_executive or "",
             "performer_hr": t.performer_hr or "",
             "performer_manager": t.performer_manager or "",
             "performer_member": t.performer_member or "",
-            "cls_1st_label": label,
-            "cls_1st_knockout": cls.get("criterion", ""),
-            "cls_1st_reason": cls.get("reason", ""),
-            "cls_final_label": label,
+            "cls_1st_label":     label,
+            "cls_1st_knockout":  cls.get("criterion", ""),
+            "cls_1st_reason":    cls.get("reason", ""),
+            "cls_1st_ai_prereq": cls.get("ai_prerequisites", ""),
+            "cls_doosan_label":   cls.get("label", ""),
+            "cls_doosan_feedback": cls.get("feedback", ""),
+            "cls_final_label":    label,
             "cls_final_feedback": cls.get("feedback", ""),
         }
         _write_row(ws, row, values)
