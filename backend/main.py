@@ -2600,8 +2600,11 @@ def _step1_system_prompt(process_name: str, task_summary: str, pain_summary: str
 """
 
 
-async def _call_llm_step1(system: str, messages: list) -> dict | None:
-    """Step 1 LLM 호출 공통 로직."""
+async def _call_llm_step1(system: str, messages: list, max_tokens: int = 16384) -> dict | None:
+    """Step 1 LLM 호출 공통 로직.
+
+    max_tokens: Anthropic 응답 한도. 벤치마킹처럼 긴 JSON 이 나올 땐 상향 전달.
+    """
     settings = load_settings()
     anthropic_key = os.getenv("ANTHROPIC_API_KEY", "") or settings.anthropic_api_key
     result_data = None
@@ -2614,7 +2617,7 @@ async def _call_llm_step1(system: str, messages: list) -> dict | None:
             client = AsyncAnthropic(api_key=anthropic_key)
             response = await client.messages.create(
                 model=settings.anthropic_model or "claude-sonnet-4-6",
-                max_tokens=16384,
+                max_tokens=max_tokens,
                 system=system,
                 messages=messages,
             )
@@ -2623,8 +2626,16 @@ async def _call_llm_step1(system: str, messages: list) -> dict | None:
                            input_tokens=response.usage.input_tokens,
                            output_tokens=response.usage.output_tokens)
             raw = response.content[0].text
+            # stop_reason 체크 — max_tokens 에서 잘린 경우 경고 로그
+            stop_reason = getattr(response, "stop_reason", None)
+            if stop_reason and stop_reason != "end_turn":
+                print(f"[workflow-step1] ⚠️ Anthropic stop_reason={stop_reason} "
+                      f"(max_tokens={max_tokens}, output_len={len(raw)}). JSON 잘림 가능.",
+                      flush=True)
             from new_workflow_generator import _extract_json
             result_data = _extract_json(raw)
+            if result_data is None:
+                print(f"[workflow-step1] ⚠️ JSON 파싱 실패 — raw 앞 500자: {raw[:500]}", flush=True)
             return result_data
         except Exception as e:
             print(f"[workflow-step1] Anthropic 실패: {e}")
@@ -3198,11 +3209,18 @@ async def benchmark_workflow_step1(request: Request):
 - 관련 사례가 3건 미만이면 억지로 채우지 말고 있는 것만 반환
 
 ## ⚠️ 사례 수량 규칙 (필수)
-- **적격 조건을 만족하는 모든 기업 사례를 빠짐없이 포함하세요. 상한 없음.**
-- 10개든, 15개든, 20개든 — 검색 결과에 등장하고 4가지 포함 기준을 충족하면 **모두 나열**
+- **적격 조건을 만족하는 모든 기업 사례를 포함하세요. 상한 없음.**
 - "상위 N건만", "대표 5건" 같은 임의 제한 절대 금지
 - 같은 기업이라도 도입 사례·L4 활동이 다르면 각각 별개 행으로 분리
 - 사례가 부족한 건 OK이지만, 사례가 많을 때 **임의로 추려내지 말 것**
+
+## ⚠️ 각 사례는 간결하게 (JSON 토큰 한도 내에 모든 사례 포함되도록)
+- use_case: 1~2문장 (요점만)
+- outcome: 수치 + 간단 설명 1문장
+- ai_technology·infrastructure: 쉼표 구분 키워드 3~5개
+- implication: 1~2문장
+- 나머지 필드도 장황하지 않게 — **간결성 > 장황함**
+- 목표: 한 사례당 300자 이내 → 15건이어도 JSON 전체가 잘리지 않도록
 
 ## 출력 형식 (JSON만, 마크다운 코드 블록 없음)
 {{
@@ -3255,7 +3273,8 @@ async def benchmark_workflow_step1(request: Request):
                 "관련 사례가 없으면 benchmark_table을 빈 배열로 반환하고 no_cases_note에 이유를 명시하세요."
             )
 
-            result_data = await _call_llm_step1(bm_analysis_system, [{"role": "user", "content": bm_user}])
+            # 벤치마킹은 15~20건이 나올 수 있어 JSON 이 길다 — max_tokens 상향
+            result_data = await _call_llm_step1(bm_analysis_system, [{"role": "user", "content": bm_user}], max_tokens=32768)
 
             sheet_key = sheet_id_bm or "__default__"
 
@@ -5095,7 +5114,7 @@ L4 활동: {', '.join(bm_data['l4_names'][:4])}
                 if _g["urls"]:
                     bm_user_msg += "출처 URL:\n" + "\n".join(f"  - {u}" for u in _g["urls"][:4]) + "\n"
                 bm_user_msg += f"내용: {_g['content'][:800]}\n"
-            bm_result = await _call_llm_step1(bm_sys, [{"role":"user","content":bm_user_msg}])
+            bm_result = await _call_llm_step1(bm_sys, [{"role":"user","content":bm_user_msg}], max_tokens=24576)
             if bm_result and bm_result.get("benchmark_table"):
                 new_bm_entries = bm_result["benchmark_table"]
                 chat_sheet_key = sheet_id or "__chat__"
