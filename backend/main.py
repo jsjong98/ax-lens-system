@@ -4207,13 +4207,14 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
     junior_y = senior_y + 300.0
 
     if senior_agents:
-        # Senior AI는 보통 1개 (오케스트레이터) — 왼쪽 중앙에 배치
+        # Senior AI는 보통 1개 (오케스트레이터) — Junior AI와 동일하게 L5로 통일
+        # (계층은 L5 Task가 기본 단위, Senior/Junior 구분은 actor·lane으로 표현)
         for si, ag in enumerate(senior_agents):
             senior_id = f"senior_{ag['agent_id'] or si}"
             ai_nodes_out.append({
                 "id": senior_id,
                 "label": (ag["agent_name"] or "Senior AI")[:40],
-                "level": "L4",
+                "level": "L5",
                 "actor": "Senior AI",
                 "type": "task",
                 "ai_support": ag.get("ai_technique", ""),
