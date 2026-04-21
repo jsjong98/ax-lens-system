@@ -3942,44 +3942,99 @@ def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
                         "origin": "ai",
                     })
 
-    # 3) AI ↔ As-Is 연결 (input_data / output_data 매칭)
-    # Junior AI task의 input_data가 As-Is 노드 label과 매칭되면 As-Is → AI 엣지
-    # output_data가 매칭되면 AI → As-Is 엣지
-    def _find_asis_by_label(text: str) -> str | None:
-        if not text:
+    # 3) AI ↔ As-Is 연결 — Junior AI task 이름 기반 매칭
+    # Junior AI task는 보통 As-Is L5 task를 자동화·대체하는 관계이므로,
+    # task_name이 As-Is label과 매칭되면 해당 As-Is 노드의 선행/후행 엣지를 Junior AI에 재배선.
+    def _normalize_label(s: str) -> str:
+        """비교용 정규화 — 공백/특수문자/'자동'·'자동화' 접미사 제거."""
+        import re as _re
+        s = _re.sub(r"[\s·_\-/()（）]", "", str(s))
+        for kw in ("자동화", "자동", "개선", "표준화"):
+            s = s.replace(kw, "")
+        return s.lower()
+
+    def _find_asis_by_task_name(task_name: str) -> str | None:
+        """Junior AI task_name과 가장 유사한 As-Is L5 노드 id 반환 (정규화 substring)."""
+        if not task_name:
             return None
-        t = str(text).strip()
+        norm_t = _normalize_label(task_name)
+        if not norm_t:
+            return None
+        best: tuple[int, str] | None = None  # (score, node_id)
         for n in asis_nodes_out:
-            lbl = n["label"]
-            if not lbl:
+            if n["level"] not in ("L4", "L5"):
                 continue
-            if t in lbl or lbl in t:
-                return n["id"]
-        return None
+            norm_l = _normalize_label(n["label"])
+            if not norm_l:
+                continue
+            # 양방향 substring 체크 + 공통 길이로 점수
+            if norm_t in norm_l or norm_l in norm_t:
+                score = min(len(norm_t), len(norm_l))
+                if best is None or score > best[0]:
+                    best = (score, n["id"])
+        return best[1] if best else None
+
+    # As-Is 엣지 인덱스: source/target 역참조
+    asis_preds: dict[str, list[str]] = {n["id"]: [] for n in asis_nodes_out}
+    asis_succs: dict[str, list[str]] = {n["id"]: [] for n in asis_nodes_out}
+    for e in asis_edges_out:
+        if e["target"] in asis_preds:
+            asis_preds[e["target"]].append(e["source"])
+        if e["source"] in asis_succs:
+            asis_succs[e["source"]].append(e["target"])
+
+    # HR 담당자 lane 노드 (있으면) — Human-in-Loop 연결 대상
+    hr_nodes = [n for n in asis_nodes_out if n["actor"] == "HR 담당자"]
+
+    # Junior AI 노드 매칭 맵: junior_id → matched_asis_id
+    jnode_to_asis: dict[str, str] = {}
+    for jnode in [n for n in ai_nodes_out if n["actor"] == "Junior AI"]:
+        matched = _find_asis_by_task_name(jnode["label"])
+        if matched:
+            jnode_to_asis[jnode["id"]] = matched
+
+    # 매칭된 Junior AI: As-Is 선행 → Junior 엣지, Junior → As-Is 후행 엣지 추가
+    for jid, asis_id in jnode_to_asis.items():
+        for pred in asis_preds.get(asis_id, []):
+            # pred가 다른 Junior AI에 매칭된 As-Is가 아니면 연결
+            ai_edges_out.append({
+                "id": f"aie_pre_{pred}_{jid}",
+                "source": pred,
+                "target": jid,
+                "label": "",
+                "origin": "ai",
+            })
+        for succ in asis_succs.get(asis_id, []):
+            ai_edges_out.append({
+                "id": f"aie_suc_{jid}_{succ}",
+                "source": jid,
+                "target": succ,
+                "label": "",
+                "origin": "ai",
+            })
+
+    # 4) Human-in-Loop Junior → HR 담당자 연결
+    # automation_level이 "Human-in-Loop" / "Human-on-the-Loop"이면 HR 담당자 레인 노드로 브랜치
+    def _closest_hr(x: float) -> str | None:
+        if not hr_nodes:
+            return None
+        # x 좌표상 가장 가까운 HR 담당자 노드
+        return min(hr_nodes, key=lambda n: abs(n["position"]["x"] - x))["id"]
 
     for jnode in [n for n in ai_nodes_out if n["actor"] == "Junior AI"]:
-        for inp in jnode.get("input_data", []) or []:
-            src = _find_asis_by_label(inp)
-            if src:
+        alvl = str(jnode.get("automation_level", ""))
+        if "in-the-Loop" in alvl or "in-Loop" in alvl or "on-the-Loop" in alvl or "Supervised" in alvl:
+            hr_id = _closest_hr(jnode["position"]["x"])
+            if hr_id:
                 ai_edges_out.append({
-                    "id": f"aie_in_{src}_{jnode['id']}",
-                    "source": src,
-                    "target": jnode["id"],
-                    "label": str(inp)[:15],
-                    "origin": "ai",
-                })
-        for outp in jnode.get("output_data", []) or []:
-            tgt = _find_asis_by_label(outp)
-            if tgt:
-                ai_edges_out.append({
-                    "id": f"aie_out_{jnode['id']}_{tgt}",
+                    "id": f"aie_hr_{jnode['id']}_{hr_id}",
                     "source": jnode["id"],
-                    "target": tgt,
-                    "label": str(outp)[:15],
+                    "target": hr_id,
+                    "label": "검토",
                     "origin": "ai",
                 })
 
-    # 4) lanes — 표준 순서대로, 실제 등장한 것만 (As-Is에서 내용 있는 레인 + AI 레인)
+    # 5) lanes — 표준 순서대로, 실제 등장한 것만 (As-Is에서 내용 있는 레인 + AI 레인)
     actors_used = [a for a in _TOBE_ACTOR_ORDER if (role_counts.get(a, 0) > 0
                    or (a == "Senior AI" and senior_agents)
                    or (a == "Junior AI" and junior_agents))]
