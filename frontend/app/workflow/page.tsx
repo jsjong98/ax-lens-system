@@ -282,9 +282,40 @@ export default function WorkflowPage() {
     }
   }, [loadSessions]);
 
-  // 새 프로젝트 시작 — 프론트엔드 상태 초기화 (백엔드는 새 엑셀 업로드 시 새 세션 생성)
+  // 새 프로젝트 모달 state
+  const [showNewProjectModal, setShowNewProjectModal] = useState(false);
+  const [newProjectName, setNewProjectName] = useState("");
+  // 다음 엑셀 업로드 시 새로 생길 세션을 rename 할 pending 이름
+  const [pendingProjectName, setPendingProjectName] = useState<string | null>(null);
+
+  // 새 프로젝트 시작 — 이름 입력 모달 오픈
   const handleNewProject = useCallback(() => {
-    if (!confirm("현재 작업 내용이 세션에 저장되어 있습니다.\n새 프로젝트를 시작하면 현재 화면이 초기화됩니다.\n계속할까요?")) return;
+    // 기본 이름 제안: 현재 날짜 기반
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const suggested = `새 프로젝트 ${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+    setNewProjectName(suggested);
+    setShowNewProjectModal(true);
+  }, []);
+
+  // 이름 확정 → 현재 세션 자동 저장 + state 초기화 + pending 이름 저장
+  const handleConfirmNewProject = useCallback(async () => {
+    const name = newProjectName.trim();
+    if (!name) return;
+
+    // 현재 세션이 있으면 자동 저장 (데이터 유실 방지)
+    if (currentSessionId) {
+      try {
+        await saveCurrentSession();
+      } catch (e) {
+        console.warn("현재 세션 저장 실패 (계속 진행):", e);
+      }
+    }
+
+    setShowNewProjectModal(false);
+    setPendingProjectName(name);   // 엑셀 업로드 시 이 이름으로 자동 rename
+
+    // state 초기화
     setExcelResult(null);
     setExcelTasks([]);
     setExcelSheets([]);
@@ -305,7 +336,8 @@ export default function WorkflowPage() {
     setSearchLog([]);
     setError(null);
     setCurrentStep(0);
-  }, []);
+    setCurrentSessionId("");  // 새 세션 기다림
+  }, [newProjectName, currentSessionId]);
 
   // 현재 세션 저장
   const handleSaveSession = useCallback(async () => {
@@ -495,12 +527,28 @@ export default function WorkflowPage() {
       // Task 로드
       const tasks = await getWorkflowExcelTasks();
       setExcelTasks(tasks.tasks);
+
+      // 새 프로젝트에서 시작한 경우: 백엔드가 생성한 새 세션을 pending 이름으로 rename
+      const newSessionId = (result as { session_id?: string }).session_id;
+      if (newSessionId) {
+        setCurrentSessionId(newSessionId);
+        if (pendingProjectName) {
+          try {
+            await renameWorkflowSession(newSessionId, pendingProjectName);
+            await loadSessions();
+          } catch (e) {
+            console.warn("세션 이름 반영 실패:", e);
+          } finally {
+            setPendingProjectName(null);
+          }
+        }
+      }
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [pendingProjectName, loadSessions]);
 
   const handleExcelSheetSelect = useCallback(async (sheetName: string) => {
     setSelectedExcelSheet(sheetName);
@@ -2619,6 +2667,46 @@ export default function WorkflowPage() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ═══ 새 프로젝트 이름 입력 모달 ═══ */}
+      {showNewProjectModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-2xl shadow-xl w-[460px] p-6">
+            <h3 className="text-base font-bold text-gray-900 mb-1">+ 새 프로젝트</h3>
+            <p className="text-xs text-gray-500 mb-4">
+              현재 작업은 자동 저장됩니다. 새 프로젝트의 이름을 입력하세요.
+            </p>
+            <input
+              type="text"
+              value={newProjectName}
+              onChange={(e) => setNewProjectName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleConfirmNewProject();
+                if (e.key === "Escape") setShowNewProjectModal(false);
+              }}
+              autoFocus
+              placeholder="예: 2026 Q1 채용 혁신"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-200 focus:border-red-400"
+            />
+            <div className="flex items-center justify-end gap-2 mt-5">
+              <button
+                onClick={() => setShowNewProjectModal(false)}
+                className="px-4 py-2 rounded-lg text-sm font-semibold text-gray-600 hover:bg-gray-100"
+              >
+                취소
+              </button>
+              <button
+                onClick={handleConfirmNewProject}
+                disabled={!newProjectName.trim()}
+                className="px-4 py-2 rounded-lg text-sm font-bold text-white disabled:opacity-40"
+                style={{ backgroundColor: PWC.primary }}
+              >
+                프로젝트 시작
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
