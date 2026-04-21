@@ -3902,20 +3902,109 @@ def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
     - As-Is 노드/엣지/role 그대로 보존 (level·position 포함)
     - Step 2 Senior/Junior AI agent를 새 레인에 주입
     - 엣지는 As-Is 그대로 + AI 노드 지원 엣지 (점선) 추가
+    - Step 2 스코프(L4)에 해당하는 As-Is 노드만 포함 (스코프 꼬임 방지)
     """
-    # 1) As-Is 노드 변환 (L2/L3/MEMO 제외)
+    sheet_name = (asis_sheet.name or asis_sheet.sheet_id).strip()
+    sheet_id = asis_sheet.sheet_id
+
+    # 0) Step 2 에이전트 먼저 읽기 → 타겟 L4 스코프 도출
+    def _task_matches_sheet(t: dict) -> bool:
+        tl4 = (t.get("l4", "") or "").strip()
+        if not tl4 or not sheet_name:
+            return True
+        return tl4 in sheet_name or sheet_name in tl4
+
+    senior_agents: list[dict] = []
+    junior_agents: list[dict] = []
+    for agent in _wf_step2_cache.get("agents", []):
+        atype = agent.get("agent_type", "")
+        matched = [t for t in agent.get("assigned_tasks", []) if _task_matches_sheet(t)]
+        if not matched and not senior_agents and not junior_agents:
+            matched = agent.get("assigned_tasks", [])[:]
+        if not matched:
+            continue
+        bucket = senior_agents if atype == "Senior AI" else junior_agents if atype == "Junior AI" else None
+        if bucket is not None:
+            bucket.append({
+                "agent_id": agent.get("agent_id", ""),
+                "agent_name": agent.get("agent_name", ""),
+                "ai_technique": agent.get("ai_technique", ""),
+                "tasks": matched,
+            })
+
+    # 타겟 L4 스코프 추출 (task_id 접두사 + l4 이름)
+    target_l4_ids: set[str] = set()
+    target_l4_names: set[str] = set()
+    for ag in senior_agents + junior_agents:
+        for t in ag.get("tasks", []):
+            tid = str(t.get("task_id") or "")
+            if tid:
+                parts = tid.split(".")
+                if len(parts) >= 3:
+                    target_l4_ids.add(".".join(parts[:3]))
+            l4_text = str(t.get("l4") or "").strip()
+            if l4_text:
+                target_l4_names.add(l4_text)
+
+    def _node_in_scope(node) -> bool:
+        """노드가 타겟 L4 스코프 안에 있는지 판단."""
+        if not target_l4_ids and not target_l4_names:
+            return True  # 스코프 정보 없으면 필터 안 함
+        # 1) metadata.l4Id 매칭
+        n_l4id = str(node.metadata.get("l4Id") or "").strip()
+        if n_l4id and n_l4id in target_l4_ids:
+            return True
+        # 2) task_id 접두사 매칭 (L5 노드의 task_id가 L5 ID이면 [:3]이 L4 ID)
+        if node.task_id:
+            tparts = node.task_id.split(".")
+            if len(tparts) >= 3 and ".".join(tparts[:3]) in target_l4_ids:
+                return True
+            # L4 노드는 task_id가 "1.1.4" 형태
+            if len(tparts) == 3 and node.task_id in target_l4_ids:
+                return True
+        # 3) l4Name 매칭 (문자열 포함)
+        n_l4n = str(node.metadata.get("l4Name") or "").strip()
+        if n_l4n:
+            for tn in target_l4_names:
+                if tn and (tn in n_l4n or n_l4n in tn):
+                    return True
+        return False
+
+    # 1) As-Is 노드 변환 (L2/L3/MEMO 제외) — 타겟 L4 스코프만
     asis_nodes_out: list[dict] = []
     role_counts: dict[str, int] = {}
+    kept_ids: set[str] = set()    # 스코프 필터 통과한 노드 id
+    pending_decisions: list = []   # decision/memo는 연결된 노드 기준으로 2-pass 판단
 
-    # position 범위 (AI 노드 x축 배치에 사용)
-    xs = [n.position_x for n in asis_sheet.nodes.values() if n.level not in ("L2", "L3", "MEMO")]
-    ys = [n.position_y for n in asis_sheet.nodes.values() if n.level not in ("L2", "L3", "MEMO")]
+    # 스코프 필터 통과 노드 id 먼저 수집
+    for n in asis_sheet.nodes.values():
+        if n.level in ("L2", "L3", "MEMO"):
+            continue
+        if n.level == "DECISION":
+            pending_decisions.append(n)
+            continue
+        if _node_in_scope(n):
+            kept_ids.add(n.id)
+
+    # Decision 노드는 kept_ids와 엣지로 연결된 경우에만 유지
+    for n in pending_decisions:
+        connected_to_kept = any(
+            (e.source in kept_ids and e.target == n.id) or
+            (e.target in kept_ids and e.source == n.id)
+            for e in asis_sheet.edges
+        )
+        if connected_to_kept:
+            kept_ids.add(n.id)
+
+    # position 범위 — kept만 대상
+    xs = [n.position_x for n in asis_sheet.nodes.values() if n.id in kept_ids]
+    ys = [n.position_y for n in asis_sheet.nodes.values() if n.id in kept_ids]
     min_x = min(xs) if xs else 0.0
     max_x = max(xs) if xs else 1200.0
     max_y = max(ys) if ys else 600.0
 
     for n in sorted(asis_sheet.nodes.values(), key=lambda nd: (nd.position_y, nd.position_x)):
-        if n.level in ("L2", "L3", "MEMO"):
+        if n.id not in kept_ids:
             continue
         actor_raw = n.metadata.get("role", "") or n.metadata.get("actors", "")
         actors_list, custom_role = _parse_role_string(actor_raw)
@@ -3973,35 +4062,7 @@ def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
     for n in asis_nodes_out:
         n["next"] = next_map.get(n["id"], [])
 
-    # 2) Step 2 AI agent 주입
-    sheet_name = (asis_sheet.name or asis_sheet.sheet_id).strip()
-    sheet_id = asis_sheet.sheet_id
-
-    def _task_matches_sheet(t: dict) -> bool:
-        """Step 2 task가 이 시트와 관련 있는지 휴리스틱 매칭."""
-        tl4 = (t.get("l4", "") or "").strip()
-        if not tl4 or not sheet_name:
-            return True  # 단서가 없으면 포함
-        return tl4 in sheet_name or sheet_name in tl4
-
-    senior_agents: list[dict] = []
-    junior_agents: list[dict] = []
-    for agent in _wf_step2_cache.get("agents", []):
-        atype = agent.get("agent_type", "")
-        matched = [t for t in agent.get("assigned_tasks", []) if _task_matches_sheet(t)]
-        if not matched and not senior_agents and not junior_agents:
-            matched = agent.get("assigned_tasks", [])[:]  # fallback: 첫 agent에 전체 포함
-        if not matched:
-            continue
-        bucket = senior_agents if atype == "Senior AI" else junior_agents if atype == "Junior AI" else None
-        if bucket is not None:
-            bucket.append({
-                "agent_id": agent.get("agent_id", ""),
-                "agent_name": agent.get("agent_name", ""),
-                "ai_technique": agent.get("ai_technique", ""),
-                "tasks": matched,
-            })
-
+    # 2) Step 2 AI agent 주입 (senior_agents/junior_agents는 위에서 이미 추출됨)
     ai_nodes_out: list[dict] = []
     ai_edges_out: list[dict] = []
 
