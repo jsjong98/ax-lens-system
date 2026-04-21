@@ -119,6 +119,28 @@ function workflowToSwimlane(result: NewWorkflowResult): SwimlaneData {
     description: seniorAgent?.description || result.blueprint_summary || "",
   };
 
+  // 괄호 밖 구분자만으로 split (괄호 안 쉼표 보존). 예: "A(x, y), B" → ["A(x, y)", "B"]
+  const splitTechStack = (s: string): string[] => {
+    const out: string[] = [];
+    let buf = "";
+    let depth = 0;
+    for (const ch of s) {
+      if (ch === "(" || ch === "（") depth++;
+      else if (ch === ")" || ch === "）") depth = Math.max(0, depth - 1);
+      if (depth === 0 && (ch === "," || ch === "·" || ch === "+" || ch === "/")) {
+        const v = buf.trim();
+        if (v) out.push(v);
+        buf = "";
+      } else {
+        buf += ch;
+      }
+    }
+    const last = buf.trim();
+    if (last) out.push(last);
+    // 배지 1개가 20자 넘으면 뭔가 설명이 들어간 것 — 자르지 말고 그대로 표기 (짧지 않아도 한 덩어리로)
+    return out;
+  };
+
   // Junior AI 컬럼 — effectiveAgents 기준 (inputOwner와 동일 인덱스)
   const agents: AgentColumn[] = effectiveAgents.map((a, i) => ({
     id: a.agent_id,
@@ -132,7 +154,7 @@ function workflowToSwimlane(result: NewWorkflowResult): SwimlaneData {
         id: t.task_id,
         title: t.task_name,
         description: t.ai_role || "",
-        badges: techStr ? techStr.split(/[,·+]/).map((s) => s.trim()).filter(Boolean) : [],
+        badges: techStr ? splitTechStack(techStr) : [],
         needsHumanConfirm: t.automation_level !== "Human-on-the-Loop",
       };
     }),

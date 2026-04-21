@@ -118,13 +118,40 @@ BADGE_MAP = {
 }
 
 
+def _split_tech_stack(technique: str) -> list[str]:
+    """괄호 밖 구분자(,·+/) 만으로 split. 괄호 안 쉼표는 보존.
+    예: 'GenAI 문서 생성(한국어, 영어), 메일 API' → ['GenAI 문서 생성(한국어, 영어)', '메일 API']
+    """
+    if not technique:
+        return []
+    out: list[str] = []
+    buf = ""
+    depth = 0
+    for ch in technique:
+        if ch in ("(", "（"):
+            depth += 1
+        elif ch in (")", "）"):
+            depth = max(0, depth - 1)
+        if depth == 0 and ch in (",", "·", "+", "/"):
+            v = buf.strip()
+            if v:
+                out.append(v)
+            buf = ""
+        else:
+            buf += ch
+    last = buf.strip()
+    if last:
+        out.append(last)
+    return out
+
+
 def _badge_html(technique: str) -> str:
     """AI 기법 문자열에서 뱃지 HTML 생성."""
-    parts = [t.strip() for t in technique.replace("+", ",").replace("·", ",").split(",") if t.strip()]
+    parts = _split_tech_stack(technique)
     badges = []
     for p in parts:
         cls = BADGE_MAP.get(p, "br")
-        badges.append(f'<span class="badge {cls}">{p}</span>')
+        badges.append(f'<span class="badge {cls}">{_html.escape(p)}</span>')
     return " ".join(badges)
 
 

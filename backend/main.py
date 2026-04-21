@@ -5342,11 +5342,30 @@ Step 1에서 도출된 기본 설계를 기반으로, 두산에 최적화된 **A
     }}
   ],
 
-⚠️ **task별 ai_technique 필드 필수 규칙**:
-- 각 task의 `ai_technique`는 **해당 task 고유의** AI 기법을 3~5개 쉼표(,) 구분으로 명시
-- 같은 Agent 안이라도 task마다 다른 기법 조합이 보통 (OCR 파트 task / 분류 task / 생성 task 는 각각 다름)
-- Agent 레벨의 ai_technique은 해당 Agent의 **전반적 기법**, task 레벨은 **그 task에서 실제 쓰는 기법**
-- 비워두면 안 됨 (비어있으면 Agent의 ai_technique이 fallback으로 들어가 모든 task가 동일해짐)
+⚠️ **task별 ai_technique 필드 필수 규칙**
+
+**형식**: 짧은 기술명만 3~5개 쉼표로 구분. 절대 task 설명·문장·괄호 안 콤마 포함 금지.
+
+**허용되는 값** (예시, 이 중에서 선택하거나 유사 기술명으로):
+`LLM` / `RAG` / `OCR` / `IDP` / `NLP 분류` / `ML 회귀` / `ML 분류모델` / `XGBoost` / `시계열 예측`
+`SHAP` / `임베딩 매칭` / `RPA` / `ETL` / `Rule-based` / `Chatbot` / `BI 대시보드` / `전자결재 API`
+`GenAI 문서 생성` / `프로세스 마이닝` / `최적화 알고리즘` / `이상 탐지` / `Template` / `Speech-to-Text`
+
+**❌ 금지 예시** (이런 식으로 쓰지 말 것):
+- `"GenAI 다국어 개인화 문서 생성(한국어, 영어 동시 생성)"` — 너무 길고 괄호 안 쉼표가 파싱 오류 유발
+- `"결재 승인 완료 신호를 트리거로 GenAI가..."` — 이건 ai_role에 쓸 내용, ai_technique 아님
+- `"공지 게시 자동화(HR 포털, 사내 메신저 연동)"` — 설명이지 기술명 아님
+
+**✅ 올바른 예시**:
+- `"GenAI, 다국어 생성, 메일 자동화 API"`
+- `"RPA, ETL, 규칙 엔진"`
+- `"LLM, RAG, 설명가능 AI"`
+
+**규칙**:
+- 각 기술명은 **15자 이내** 짧게
+- 괄호와 괄호 안 쉼표 사용 금지 (파싱 시 뱃지가 중간에 쪼개짐)
+- 같은 Agent 안이라도 task마다 다른 기법 조합 (OCR 파트 / 분류 파트 / 생성 파트 각각 다름)
+- 비워두면 Agent의 ai_technique이 fallback — 모든 task가 동일해지므로 반드시 task별로 작성
   "execution_flow": [
     {{
       "step": 1,
