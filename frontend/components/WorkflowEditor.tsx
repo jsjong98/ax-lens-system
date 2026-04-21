@@ -124,13 +124,18 @@ function workflowToSwimlane(result: NewWorkflowResult): SwimlaneData {
     id: a.agent_id,
     number: i + 1,
     name: a.agent_name,
-    tasks: a.assigned_tasks.map((t) => ({
-      id: t.task_id,
-      title: t.task_name,
-      description: t.ai_role || "",
-      badges: a.ai_technique ? a.ai_technique.split(/[,·+]/).map((s) => s.trim()).filter(Boolean) : [],
-      needsHumanConfirm: t.automation_level !== "Human-on-the-Loop",
-    })),
+    tasks: a.assigned_tasks.map((t) => {
+      // task 전용 ai_technique을 우선, 없으면 Agent 기술로 fallback
+      const taskTech = (t as { ai_technique?: string }).ai_technique;
+      const techStr = (taskTech && taskTech.trim()) || a.ai_technique || "";
+      return {
+        id: t.task_id,
+        title: t.task_name,
+        description: t.ai_role || "",
+        badges: techStr ? techStr.split(/[,·+]/).map((s) => s.trim()).filter(Boolean) : [],
+        needsHumanConfirm: t.automation_level !== "Human-on-the-Loop",
+      };
+    }),
     arrowToHuman: a.assigned_tasks.some((t) => t.automation_level !== "Human-on-the-Loop")
       ? `${a.agent_name} 결과 HR 담당자 확인 요청`
       : undefined,

@@ -33,6 +33,7 @@ class AssignedTask:
     input_data: list[str] = field(default_factory=list)
     output_data: list[str] = field(default_factory=list)
     automation_level: str = "Human-in-Loop"  # "Full-Auto" | "Human-in-Loop" | "Human-Supervised"
+    ai_technique: str = ""   # 이 Task 전용 AI 기법 (쉼표/+ 구분, 예: "LLM, RAG, 규칙 기반 검증")
 
 
 @dataclass
@@ -284,6 +285,7 @@ def _parse_result(data: dict, tasks: list[Task]) -> NewWorkflowResult:
                 input_data=t.get("input_data", []),
                 output_data=t.get("output_data", []),
                 automation_level=t.get("automation_level", "Human-in-Loop"),
+                ai_technique=t.get("ai_technique", "") or a.get("ai_technique", ""),
             ))
         agents.append(AIAgent(
             agent_id=a.get("agent_id", ""),
@@ -514,6 +516,7 @@ def result_to_dict(result: NewWorkflowResult) -> dict[str, Any]:
                         "input_data": t.input_data,
                         "output_data": t.output_data,
                         "automation_level": t.automation_level,
+                        "ai_technique": getattr(t, "ai_technique", "") or a.ai_technique,
                     }
                     for t in a.assigned_tasks
                 ],

@@ -1737,6 +1737,7 @@ export interface NewWorkflowAssignedTask {
   input_data: string[];
   output_data: string[];
   automation_level: "Human-on-the-Loop" | "Human-in-the-Loop" | "Human-Supervised";
+  ai_technique?: string;   // task 전용 AI 기법 (Agent 레벨과 다를 수 있음)
 }
 
 export interface NewWorkflowAgent {

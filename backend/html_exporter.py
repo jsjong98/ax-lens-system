@@ -235,7 +235,8 @@ def export_workflow_html(workflow: dict) -> str:
             if is_human:
                 has_human_task = True
             hf_cls = ' hf' if is_human else ''
-            technique = agent.get("ai_technique", "")
+            # task 전용 ai_technique 우선, 없으면 agent 레벨 fallback
+            technique = task.get("ai_technique") or agent.get("ai_technique", "")
             badges = _badge_html(technique)
             if is_human:
                 human_role = task.get("human_role", "Human 확인")

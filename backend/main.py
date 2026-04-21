@@ -5311,7 +5311,8 @@ Step 1에서 도출된 기본 설계를 기반으로, 두산에 최적화된 **A
           "human_role": "",
           "input_data": ["지원서 PDF"],
           "output_data": ["구조화된 지원자 데이터"],
-          "automation_level": "Full-Auto"
+          "automation_level": "Full-Auto",
+          "ai_technique": "OCR, IDP, LLM 텍스트 추출"
         }},
         {{
           "task_id": "Task ID 2",
@@ -5322,7 +5323,8 @@ Step 1에서 도출된 기본 설계를 기반으로, 두산에 최적화된 **A
           "human_role": "최종 합불 검토",
           "input_data": ["구조화된 지원자 데이터", "JD 요건"],
           "output_data": ["적합도 등급, 사유"],
-          "automation_level": "Human-in-Loop"
+          "automation_level": "Human-in-Loop",
+          "ai_technique": "ML 분류모델, 임베딩 매칭, 설명가능 AI(SHAP)"
         }},
         {{
           "task_id": "Task ID 3",
@@ -5333,11 +5335,18 @@ Step 1에서 도출된 기본 설계를 기반으로, 두산에 최적화된 **A
           "human_role": "",
           "input_data": ["적합도 등급"],
           "output_data": ["합불 통보 메일, 스크리닝 보고서"],
-          "automation_level": "Full-Auto"
+          "automation_level": "Full-Auto",
+          "ai_technique": "LLM 메일 생성, BI 리포트 자동화"
         }}
       ]
     }}
   ],
+
+⚠️ **task별 ai_technique 필드 필수 규칙**:
+- 각 task의 `ai_technique`는 **해당 task 고유의** AI 기법을 3~5개 쉼표(,) 구분으로 명시
+- 같은 Agent 안이라도 task마다 다른 기법 조합이 보통 (OCR 파트 task / 분류 task / 생성 task 는 각각 다름)
+- Agent 레벨의 ai_technique은 해당 Agent의 **전반적 기법**, task 레벨은 **그 task에서 실제 쓰는 기법**
+- 비워두면 안 됨 (비어있으면 Agent의 ai_technique이 fallback으로 들어가 모든 task가 동일해짐)
   "execution_flow": [
     {{
       "step": 1,
