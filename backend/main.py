@@ -2033,6 +2033,12 @@ _KR_ALLOWED = {
 }
 
 
+# 쿼리 ID 형태의 쓰레기 source 패턴 — [R1-3], r1-1, R2-5 등 검색 round 태그가 source로 들어온 경우
+_QUERY_ID_PATTERN = _re_filter.compile(r"^\s*\[?R\s*\d+\s*[-.]\s*\d+\s*\]?\s*$", _re_filter.IGNORECASE)
+# 순수 문자 없는 source (숫자·기호만): 회사명 될 수 없음
+_NO_ALPHA_PATTERN = _re_filter.compile(r"^[^A-Za-z가-힣]+$")
+
+
 def _is_valid_benchmark_source(source: str) -> bool:
     """source 필드가 실명 글로벌 대기업인지 검사합니다."""
     src = source.strip()
@@ -2044,6 +2050,15 @@ def _is_valid_benchmark_source(source: str) -> bool:
         return False
     # 금지 패턴
     if any(pattern in s for pattern in _FORBIDDEN_SOURCE_PATTERNS):
+        return False
+    # 쿼리 ID 형태 차단 (R1-1, [R2-3] 등)
+    if _QUERY_ID_PATTERN.match(src):
+        return False
+    # 알파벳·한글이 하나도 없으면 차단 (숫자·기호만은 회사명 아님)
+    if _NO_ALPHA_PATTERN.match(src):
+        return False
+    # 'R' + 숫자로 시작하는 짧은 문자열 차단 (R1, R2-5 등)
+    if _re_filter.match(r"^R\d", src, _re_filter.IGNORECASE) and len(src) <= 8:
         return False
     # 한국어 포함 여부 확인
     has_korean = any("\uAC00" <= c <= "\uD7A3" for c in src)
@@ -2726,6 +2741,40 @@ async def delete_benchmark_row(request: Request):
         "remaining": len(all_rows),
         "benchmark_table": {k: v for k, v in _wf_benchmark_table.items()},
     }
+
+
+@app.post("/api/workflow/benchmark-table/cleanup", tags=["Workflow"])
+async def cleanup_benchmark_table():
+    """벤치마킹 테이블에서 유효하지 않은 source(쿼리 ID, 익명, 컨설팅펌 등) 행을 일괄 제거.
+    기존 데이터에 R1-1 같은 쓰레기 row 가 남아있을 때 수동으로 정리용.
+    """
+    removed: list[dict] = []
+    for sid in list(_wf_benchmark_table.keys()):
+        kept = []
+        for r in _wf_benchmark_table[sid]:
+            src = (r.get("source") or "").strip()
+            url = (r.get("url") or "").strip()
+            if not src or not _is_valid_benchmark_source(src) or not url or _is_news_url(url):
+                removed.append({"source": src, "url": url, "sheet": sid})
+            else:
+                kept.append(r)
+        _wf_benchmark_table[sid] = kept
+
+    if _current_session_id:
+        session_dir = _get_session_dir(_current_session_id)
+        (session_dir / "benchmark_table.json").write_text(
+            json.dumps(_wf_benchmark_table, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+    all_rows = [r for rows in _wf_benchmark_table.values() for r in rows]
+    return {
+        "ok": True,
+        "removed_count": len(removed),
+        "removed_samples": removed[:10],
+        "remaining": len(all_rows),
+        "benchmark_table": {k: v for k, v in _wf_benchmark_table.items()},
+    }
+
 
 
 @app.get("/api/workflow/benchmark-table/export", tags=["Workflow"])
@@ -5004,11 +5053,12 @@ async def chat_workflow_step1(request: Request):
 
             # ── 채팅 LLM에 넘길 실제 검색 결과 텍스트 구성 ──
             # 쿼리별 R1→R2→R3 순서로 정렬, 각 content는 800자로 제한 (총 토큰 절감)
+            # ⚠️ 과거에 [R1-1] 같은 round-query 태그가 source로 오인되던 문제 → 쿼리 구분선으로만 표시
             sorted_qg = sorted(_qg.items(), key=lambda x: x[1].get("round", 0))
-            raw_search_context = f"## ✅ Perplexity 실시간 검색 결과 (3라운드 {len(sorted_qg)}개 쿼리 실행)\n"
+            raw_search_context = f"## ✅ Perplexity 실시간 검색 결과 ({len(sorted_qg)}개 쿼리 실행)\n"
             raw_search_context += "※ 아래는 실제 웹에서 수집된 내용입니다. 이 내용을 기반으로 답변하세요.\n"
             for idx, (_q, _g) in enumerate(sorted_qg, 1):
-                raw_search_context += f"\n### [R{_g.get('round','?')}-{idx}] 검색 쿼리: {_q[:100]}\n"
+                raw_search_context += f"\n────── 쿼리 {idx}: {_q[:100]} ──────\n"
                 if _g["urls"]:
                     raw_search_context += "출처 URL:\n" + "\n".join(f"  - {u}" for u in _g["urls"][:4]) + "\n"
                 else:
@@ -5019,16 +5069,29 @@ async def chat_workflow_step1(request: Request):
             bm_sys = f"""벤치마킹 분석 전문가입니다. 검색 결과에서 '{process_name}' 프로세스 관련 사례를 추출합니다.
 L4 활동: {', '.join(bm_data['l4_names'][:4])}
 
-⚠️ 절대 규칙:
+## 🚨 source 필드 엄격 규칙
+- source 는 반드시 **AI 솔루션을 실제로 도입·운영한 구체 기업명** (실명, 글로벌 인지도)
+- ❌ 절대 금지 예시:
+  · "R1-1", "[R2-3]", "쿼리 1" 등 검색 라운드 태그 (이건 쿼리 구분선일 뿐 회사명 아님)
+  · "한 제조사", "Fortune 500 기업", "글로벌 HR 부서", "익명" 등 추상·익명 표현
+  · McKinsey/BCG/Gartner 등 컨설팅·리서치펌 (보고서 작성자이지 도입 기업 아님)
+  · Workday/SAP/ServiceNow 등 **솔루션 제공자**가 "도입 기업" 자리에 들어가는 경우
+  · 검색 결과에 기업명이 명시되지 않으면 → 해당 항목 **DROP** (억지로 만들지 말 것)
+- ✅ 허용 예시: Google, Amazon, Microsoft, Unilever, JPMorgan, Siemens, 삼성전자, 현대자동차, 두산 등
+  **특정 기업이 자기 회사에 AI 를 도입한 사례**만
+
+## ⚠️ 절대 규칙:
 1. url 필드는 위 검색 결과의 "출처 URL" 목록에 있는 것만 사용. URL 임의 생성 금지.
 2. url이 없으면 해당 항목을 benchmark_table에 포함하지 말 것.
 3. 학습 지식으로 사례를 만들어내지 말 것. 검색 결과 텍스트에 근거한 내용만.
+4. source 에 구체적 실명 회사명이 없으면 **그 사례는 그냥 빼세요** — 억지로 채우지 마세요.
 
 관련성 없는 사례는 제외. 출력 형식 (JSON만):
-{{"benchmark_table": [{{"source":"","company_type":"Tech 상한선|非Tech 실제 구현","industry":"","process_area":"","ai_adoption_goal":"","ai_technology":"","key_data":"","adoption_method":"","use_case":"","outcome":"","infrastructure":"","implication":"","url":"[검색결과URL만]"}}]}}"""
+{{"benchmark_table": [{{"source":"AI솔루션 도입 기업명 (실명)","company_type":"Tech 선도 | 非Tech 실제 구현","industry":"","process_area":"","ai_adoption_goal":"","ai_technology":"","key_data":"","adoption_method":"","use_case":"","outcome":"","infrastructure":"","implication":"","url":"[검색결과URL만]"}}]}}"""
             bm_user_msg = "## 검색 결과\n"
+            bm_user_msg += "※ 아래 '쿼리 N' 라벨은 검색 쿼리 구분선이지 회사 이름이 아닙니다. source 에 절대 쓰지 마세요.\n"
             for idx, (_q, _g) in enumerate(sorted_qg, 1):
-                bm_user_msg += f"\n### [R{_g.get('round','?')}-{idx}] {_q[:100]}\n"
+                bm_user_msg += f"\n────── 쿼리 {idx}: {_q[:100]} ──────\n"
                 if _g["urls"]:
                     bm_user_msg += "출처 URL:\n" + "\n".join(f"  - {u}" for u in _g["urls"][:4]) + "\n"
                 bm_user_msg += f"내용: {_g['content'][:800]}\n"
