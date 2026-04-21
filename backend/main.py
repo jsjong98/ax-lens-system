@@ -3273,8 +3273,9 @@ async def benchmark_workflow_step1(request: Request):
                 "관련 사례가 없으면 benchmark_table을 빈 배열로 반환하고 no_cases_note에 이유를 명시하세요."
             )
 
-            # 벤치마킹은 15~20건이 나올 수 있어 JSON 이 길다 — max_tokens 상향
-            result_data = await _call_llm_step1(bm_analysis_system, [{"role": "user", "content": bm_user}], max_tokens=32768)
+            # 벤치마킹 LLM 분석 — Anthropic non-streaming 한도(최대 ~16K) 내에서 실행
+            # 간결성 지침(프롬프트)으로 15건도 수용 가능
+            result_data = await _call_llm_step1(bm_analysis_system, [{"role": "user", "content": bm_user}], max_tokens=16384)
 
             sheet_key = sheet_id_bm or "__default__"
 
@@ -5114,7 +5115,7 @@ L4 활동: {', '.join(bm_data['l4_names'][:4])}
                 if _g["urls"]:
                     bm_user_msg += "출처 URL:\n" + "\n".join(f"  - {u}" for u in _g["urls"][:4]) + "\n"
                 bm_user_msg += f"내용: {_g['content'][:800]}\n"
-            bm_result = await _call_llm_step1(bm_sys, [{"role":"user","content":bm_user_msg}], max_tokens=24576)
+            bm_result = await _call_llm_step1(bm_sys, [{"role":"user","content":bm_user_msg}], max_tokens=16384)
             if bm_result and bm_result.get("benchmark_table"):
                 new_bm_entries = bm_result["benchmark_table"]
                 chat_sheet_key = sheet_id or "__chat__"
