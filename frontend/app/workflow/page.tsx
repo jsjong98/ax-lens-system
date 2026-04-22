@@ -38,6 +38,8 @@ import {
   type WorkflowExcelUploadResult,
   type WorkflowStepResult,
   type BenchmarkTableRow,
+  type ReferenceBenchmark,
+  getReferenceBenchmarks,
   type SearchLogItem,
   type GapAnalysisResult,
   type TobeFlowResult,
@@ -91,6 +93,8 @@ export default function WorkflowPage() {
   const [chatInput, setChatInput] = useState("");
   // 시트별 벤치마킹 결과 {sheet_id: rows[]}
   const [benchmarkTableBySheet, setBenchmarkTableBySheet] = useState<Record<string, BenchmarkTableRow[]>>({});
+  // 채용 도메인 레퍼런스 벤치마킹 (Doosan 큐레이션) — L2 매칭 시 표시
+  const [referenceBenchmarks, setReferenceBenchmarks] = useState<ReferenceBenchmark[]>([]);
   // 벤치마킹이 완료된 시트 ID — Gap 분석·기본 설계의 고정 스코프
   // (activeSheet는 "보기용 탭 선택"이고, bmSheetId는 "분석 범위"로 분리)
   const [bmSheetId, setBmSheetId] = useState<string | null>(null);
@@ -269,6 +273,11 @@ export default function WorkflowPage() {
           setGapAnalysis(r.gap_analysis);
         }
       }
+      // 레퍼런스 벤치마킹 (채용 도메인 L2 매칭 시) 복원
+      try {
+        const ref = await getReferenceBenchmarks();
+        setReferenceBenchmarks(ref.references || []);
+      } catch { /* 조용히 실패 */ }
       // 누적 리서치 자료 복원
       try {
         const rr = await getWorkflowResources();
@@ -538,6 +547,11 @@ export default function WorkflowPage() {
       // Task 로드
       const tasks = await getWorkflowExcelTasks();
       setExcelTasks(tasks.tasks);
+      // 레퍼런스 벤치마킹 (채용 도메인 L2 매칭 시) 자동 조회
+      try {
+        const ref = await getReferenceBenchmarks();
+        setReferenceBenchmarks(ref.references || []);
+      } catch { /* 조용히 실패 */ }
 
       // 새 프로젝트에서 시작한 경우: 백엔드가 생성한 새 세션을 pending 이름으로 rename
       const newSessionId = (result as { session_id?: string }).session_id;
@@ -1823,6 +1837,68 @@ export default function WorkflowPage() {
                     )}
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* 📚 레퍼런스 벤치마킹 (Doosan 채용 도메인 큐레이션) — 파란색 강조 */}
+            {referenceBenchmarks.length > 0 && (
+              <div className="mb-4 rounded-lg overflow-hidden" style={{ border: "2px solid #2563EB" }}>
+                <div className="px-3 py-2 flex items-center gap-2" style={{ backgroundColor: "#2563EB", color: "#FFFFFF" }}>
+                  <span className="text-sm font-bold">📚 레퍼런스 벤치마킹</span>
+                  <span className="text-[10px] opacity-90">
+                    채용 도메인 큐레이션 · {referenceBenchmarks.length}건
+                  </span>
+                  <span className="ml-auto text-[10px] opacity-80">IBM · GM · Siemens</span>
+                </div>
+                <div className="p-3 space-y-2" style={{ backgroundColor: "#EFF6FF" }}>
+                  {referenceBenchmarks.map((ref) => (
+                    <div
+                      key={ref.case_no}
+                      className="rounded-lg p-3 bg-white"
+                      style={{ border: "1px solid #93C5FD" }}
+                    >
+                      <div className="flex items-start gap-2">
+                        <div
+                          className="flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold"
+                          style={{ backgroundColor: "#2563EB", color: "#FFFFFF" }}
+                        >
+                          {ref.case_no}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[12px] font-bold" style={{ color: "#1E3A8A" }}>
+                            {ref.title}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                            <span className="text-[10px] font-semibold" style={{ color: "#1D4ED8" }}>
+                              적용 Player:
+                            </span>
+                            {ref.companies.map((c) => (
+                              <span
+                                key={c}
+                                className="text-[10px] font-bold px-2 py-0.5 rounded"
+                                style={{
+                                  backgroundColor: "#2563EB",
+                                  color: "#FFFFFF",
+                                  letterSpacing: "0.3px",
+                                }}
+                              >
+                                {c}
+                              </span>
+                            ))}
+                            <span className="text-[10px] text-gray-400 mx-1">·</span>
+                            <span className="text-[10px] font-medium" style={{ color: "#1E40AF" }}>
+                              적용 구간:
+                            </span>
+                            <span className="text-[10px] text-gray-700">{ref.stage}</span>
+                          </div>
+                          <div className="text-[11px] text-gray-700 leading-relaxed mt-1.5">
+                            {ref.description}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 

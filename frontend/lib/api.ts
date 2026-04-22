@@ -1023,6 +1023,23 @@ export async function getWorkflowExcelTasks(): Promise<{
   return apiFetch("/workflow/excel-tasks");
 }
 
+export interface ReferenceBenchmark {
+  case_no: number;
+  title: string;
+  companies: string[];      // 정확한 명칭 (IBM/GM/Siemens 등)
+  stage: string;
+  description: string;
+  applicable_l2: string[];
+}
+
+export async function getReferenceBenchmarks(): Promise<{
+  ok: boolean;
+  references: ReferenceBenchmark[];
+  total: number;
+}> {
+  return apiFetch("/workflow/reference-benchmarks");
+}
+
 export interface BenchmarkTableRow {
   source: string;
   company_type?: string;

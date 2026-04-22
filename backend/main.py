@@ -2883,6 +2883,19 @@ async def cleanup_benchmark_table():
 
 
 
+@app.get("/api/workflow/reference-benchmarks", tags=["Workflow"])
+async def get_reference_benchmarks():
+    """현재 엑셀 L2 에 매칭되는 레퍼런스 (Doosan 큐레이션) 벤치마킹 사례 반환.
+
+    - 현재는 '채용 기획' · '채용 운영' L2 에만 큐레이션 사례 존재 (recruit_benchmarks.py)
+    - 프론트엔드에서 일반 Perplexity/캡쳐 벤치마킹과 구분하여 파란색으로 표시
+    - L2 매칭 안 되면 빈 배열 반환 (UI 섹션 자동 숨김)
+    """
+    from recruit_benchmarks import get_reference_benchmarks_for_tasks
+    refs = get_reference_benchmarks_for_tasks(_wf_excel_tasks)
+    return {"ok": True, "references": refs, "total": len(refs)}
+
+
 @app.get("/api/workflow/benchmark-table/export", tags=["Workflow"])
 async def export_benchmark_table_xlsx():
     """벤치마킹 결과 테이블을 xlsx 파일로 내보냅니다."""
@@ -3737,6 +3750,20 @@ async def generate_workflow_step1(request: Request):
                         f"- **{bm.get('source', '')}** ({bm.get('industry', '')}): "
                         f"{bm.get('use_case', '')} → {bm.get('outcome', '')}\n"
                     )
+
+    # 🔑 채용 도메인 큐레이션 레퍼런스 주입 — L2 '채용 기획' / '채용 운영' 에만 매칭
+    # (recruit_benchmarks.py) — 동적 Perplexity 결과 외 정제된 선도사 사례를 LLM 에 함께 제공
+    try:
+        from recruit_benchmarks import (
+            get_reference_benchmarks_for_tasks,
+            format_references_for_prompt,
+        )
+        _refs = get_reference_benchmarks_for_tasks(_wf_excel_tasks)
+        if _refs:
+            benchmark_text += "\n" + format_references_for_prompt(_refs)
+            print(f"[STEP1] 레퍼런스 벤치마킹 {len(_refs)}건 주입 (채용 도메인)", flush=True)
+    except Exception as _re:
+        print(f"[STEP1] 레퍼런스 주입 실패 (무시): {_re}", flush=True)
 
     # Gap 분석 결과 — 기본 설계의 핵심 인풋
     gap_text = ""
