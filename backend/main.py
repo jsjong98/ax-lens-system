@@ -1878,10 +1878,13 @@ _wf_gap_analysis: dict = {}        # Gap 분석 결과 캐시
 
 # ── AI+Human 분리 (hybrid split) ──────────────────────────────────────────────
 
-async def _split_hybrid_tasks_with_llm() -> int:
+async def _split_hybrid_tasks_with_llm(target_task_ids: set[str] | None = None) -> int:
     """
     AI+Human으로 분류된 Task에 대해 AI 파트·Human 파트를 LLM으로 자동 분리.
     hybrid_note가 비어있는 Task만 처리하고 결과를 _wf_classification에 저장.
+
+    Args:
+        target_task_ids: None이면 전체 분리, set을 주면 해당 task_id만 분리 (Step 2 스코프 한정용)
 
     Returns:
         분리된 Task 수
@@ -1898,6 +1901,8 @@ async def _split_hybrid_tasks_with_llm() -> int:
             continue
         if cls.get("hybrid_note"):
             continue
+        if target_task_ids is not None and tid not in target_task_ids:
+            continue   # 스코프 밖 태스크는 건너뜀 (Step 2 에서 필요한 것만 우선 처리)
         task = task_map.get(tid)
         if not task:
             continue
@@ -1912,13 +1917,19 @@ async def _split_hybrid_tasks_with_llm() -> int:
     if not hybrid_targets:
         return 0
 
-    print(f"[HYBRID] {len(hybrid_targets)}개 AI+Human 태스크 AI/Human 파트 분리 시작", flush=True)
+    scope_label = f"스코프 내 {len(hybrid_targets)}개" if target_task_ids else f"전체 {len(hybrid_targets)}개"
+    print(f"[HYBRID] {scope_label} AI+Human 태스크 AI/Human 파트 병렬 분리 시작", flush=True)
 
     BATCH_SIZE = 15
-    split_count = 0
+    import asyncio as _asyncio
+    import time as _time
+    _t0 = _time.time()
 
-    for i in range(0, len(hybrid_targets), BATCH_SIZE):
-        batch = hybrid_targets[i:i + BATCH_SIZE]
+    # 배치 구성
+    batches = [hybrid_targets[i:i + BATCH_SIZE] for i in range(0, len(hybrid_targets), BATCH_SIZE)]
+
+    async def _process_batch(batch: list[dict]) -> int:
+        """한 배치 LLM 호출 + 결과 저장. 반환: 성공 분리 수"""
         task_lines = []
         for idx, t in enumerate(batch, 1):
             task_lines.append(
@@ -1959,9 +1970,11 @@ async def _split_hybrid_tasks_with_llm() -> int:
             result = await _call_llm_step1(
                 system_prompt,
                 [{"role": "user", "content": "각 Task를 AI 파트와 Human 파트로 분리해주세요. JSON만 출력하세요."}],
+                max_tokens=4096,   # 15개 간단 JSON 이면 4K 면 충분
             )
             if not result:
-                continue
+                return 0
+            count = 0
             items = result.get("tasks") or result.get("results") or []
             for item in items:
                 tid = str(item.get("task_id") or "").strip()
@@ -1973,12 +1986,24 @@ async def _split_hybrid_tasks_with_llm() -> int:
                     )
                     _wf_classification[tid]["ai_part"] = ai_part
                     _wf_classification[tid]["human_part"] = human_part
-                    split_count += 1
+                    count += 1
+            return count
         except Exception as e:
-            print(f"[HYBRID] 배치 {i // BATCH_SIZE + 1} 실패: {e}", flush=True)
-            continue
+            print(f"[HYBRID] 배치 실패: {e}", flush=True)
+            return 0
 
-    print(f"[HYBRID] 분리 완료 — {split_count}/{len(hybrid_targets)}개 성공", flush=True)
+    # 동시 실행 제한 — API rate limit 고려해 최대 5개 배치 병렬
+    semaphore = _asyncio.Semaphore(5)
+
+    async def _bounded_batch(b: list[dict]) -> int:
+        async with semaphore:
+            return await _process_batch(b)
+
+    results = await _asyncio.gather(*[_bounded_batch(b) for b in batches], return_exceptions=True)
+    split_count = sum(r for r in results if isinstance(r, int))
+
+    elapsed = _time.time() - _t0
+    print(f"[HYBRID] 병렬 분리 완료 — {split_count}/{len(hybrid_targets)}개 성공, {len(batches)}배치 {elapsed:.1f}s", flush=True)
 
     # 세션 저장
     if _current_session_id:
@@ -5282,17 +5307,8 @@ async def generate_workflow_step2(request: Request):
 
     process_name = _wf_step1_cache.get("process_name", "HR 프로세스")
 
-    # AI+Human Task lazy 분리 보증 — 업로드 시 fire-and-forget이 실패했거나
-    # 아직 안 끝났으면 여기서 동기 실행 (Step 2 프롬프트에 파트 정보 필수)
-    pending_hybrid = [
-        tid for tid, cls in _wf_classification.items()
-        if cls.get("label") == "AI + Human" and not cls.get("hybrid_note")
-    ]
-    if pending_hybrid:
-        print(f"[STEP2] 미분리 AI+Human Task {len(pending_hybrid)}개 → 동기 분리 실행", flush=True)
-        await _split_hybrid_tasks_with_llm()
-
     # 상세 설계 스코프: sheet_id 있으면 해당 L4만, 없으면 JSON 전체(L3)
+    # (스코프를 먼저 계산해서, hybrid 분리를 스코프 내 태스크로만 한정 → 속도 대폭 향상)
     scoped_tasks_step2, _, _ = _build_task_and_pain_summary(step2_sheet_id or "")
     # _build_task_and_pain_summary가 relevant_tasks를 반환하지 않으므로 직접 구성
     scoped_tasks_step2 = _wf_excel_tasks  # 기본: 전체
@@ -5328,6 +5344,19 @@ async def generate_workflow_step2(request: Request):
             if not _filtered2: _filtered2 = [t for t in _wf_excel_tasks if t.l3_id in _l3ids2]
             if _filtered2: scoped_tasks_step2 = _filtered2
             print(f"[STEP2] L3 scope → {len(scoped_tasks_step2)}개 태스크", flush=True)
+
+    # AI+Human Task lazy 분리 보증 — 스코프 내 태스크만 대상으로 병렬 실행
+    # (이전엔 전체 AI+Human 태스크 329개를 순차 분리해서 수 분간 블록되던 문제 해결)
+    scoped_task_ids = {t.id for t in scoped_tasks_step2}
+    pending_hybrid = [
+        tid for tid, cls in _wf_classification.items()
+        if cls.get("label") == "AI + Human"
+        and not cls.get("hybrid_note")
+        and tid in scoped_task_ids
+    ]
+    if pending_hybrid:
+        print(f"[STEP2] 미분리 AI+Human Task {len(pending_hybrid)}개 (스코프 내) → 병렬 분리 실행", flush=True)
+        await _split_hybrid_tasks_with_llm(target_task_ids=scoped_task_ids)
 
     # 상세 Pain Point 분석 (스코프 내 tasks만)
     pain_detail_lines = []
@@ -5450,6 +5479,15 @@ Step 1에서 도출된 기본 설계를 기반으로, 두산에 최적화된 **A
 **세 가지 모두 No** 이면 Senior AI 를 **생성하지 마세요** (agents 배열에서 Senior AI 항목 자체 제외).
 
 평가 초점: **워크플로우의 구조적 복잡성**
+
+### 📌 판단 근거 데이터 (반드시 참고)
+아래 섹션들을 **먼저 읽고** Q1~Q3 을 평가하세요:
+- **"As-Is 워크플로우 + 엑셀 매핑"** 섹션의 각 노드에 **`수행주체: ...`** 라인 → Q1 판단 핵심 (수행주체가 1개 vs 2+, 동일 팀 vs 서로 다른 조직)
+- **`(복수 주체 — 협의 관계)`** 표기가 있는 노드 → Q1=Yes 강력 시그널
+- **`[외부 업체/시스템]`** 표기 → Q1 의 (c) 외부 이해관계자에 해당
+- **As-Is 엣지 구조**(decision 노드, 분기 개수) → Q2 판단 데이터
+- **엑셀의 `logic.mixed` / `logic.rule` / `outputs.decision`** 필드 → Q2/Q3 판단 힌트
+- **Pain Point "의사소통/협업"** 내용 → 여러 주체 간 협의 복잡성 드러나면 Q1/Q3 Yes 시그널
 
 ### Q1. 여러 이질적인 작업자 참여
 "서로 다른 역량·도구·권한을 가진 2개 이상의 작업자(AI Agent 또는 인간)가 참여하며, 이들 간 **작업 위임 & 결과 통합**이 필요한가?"
