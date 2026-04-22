@@ -4316,6 +4316,60 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
                     return s[:60], s
         return "", ""
 
+    # ── 🔑 노드 y 좌표 → swim lane 추론 (hr-workflow-ai 의 lane band 구조) ──
+    # 사용자가 노드를 swim lane 영역에 배치한 행위 자체가 수행주체 정보임.
+    # data.role 이 비어있어도 position.y / lane_height 로 lane 인덱스 결정 가능.
+    sheet_lanes_raw = list(asis_sheet.lanes or [])
+    # 표준 actor 로 매핑된 lane 명 리스트 (Q3 inference 용)
+    sheet_lane_actors: list[str] = []
+    for ln in sheet_lanes_raw:
+        _la, _ = _parse_role_string(ln)
+        sheet_lane_actors.append(_la[0] if _la else ln)
+
+    # lane band 추정: hr-workflow-ai 기본 swimHeight=2400, 6 lanes → 400/lane
+    # 사용자 데이터의 y 범위에서 자동 계산 (band_height = (y_max - y_min) / num_lanes)
+    # 단, hr-workflow-ai 기본값 400 이 더 합리적이면 그것 사용
+    _y_to_lane_cache: dict | None = None
+
+    def _y_to_lane_actor(node_y: float) -> tuple[str, str]:
+        """노드 y 좌표 기반 swim lane actor 추론.
+        Returns: (actor, raw_lane_name) — actor 가 표준 8-actor 중 하나면 사용.
+        """
+        nonlocal _y_to_lane_cache
+        if not sheet_lanes_raw or not sheet_lane_actors:
+            return "", ""
+        # 캐시: band_height 와 y_origin 계산
+        if _y_to_lane_cache is None:
+            all_ys = [
+                nd.position_y for nd in asis_sheet.nodes.values()
+                if nd.level not in ("L2", "L3", "MEMO")
+            ]
+            if not all_ys:
+                _y_to_lane_cache = {"valid": False}
+            else:
+                y_min, y_max = min(all_ys), max(all_ys)
+                # hr-workflow-ai default 400/lane 사용 — 절대 y 기준
+                # 단 데이터가 너무 좁으면 (y range < 400 * num_lanes) 비례 분할
+                num_lanes = len(sheet_lanes_raw)
+                expected_height = 400.0 * num_lanes
+                if y_max - y_min < expected_height * 0.5:
+                    # 비례 분할 — y 범위가 좁을 때
+                    band = max(50.0, (y_max - y_min + 1) / num_lanes)
+                    y_origin = y_min
+                else:
+                    # 절대 좌표 기준 (hr-workflow-ai default)
+                    band = 400.0
+                    y_origin = 0.0
+                _y_to_lane_cache = {
+                    "valid": True, "band": band, "y_origin": y_origin,
+                    "num_lanes": num_lanes,
+                }
+        if not _y_to_lane_cache.get("valid"):
+            return "", ""
+        idx = int((node_y - _y_to_lane_cache["y_origin"]) / _y_to_lane_cache["band"])
+        idx = max(0, min(idx, _y_to_lane_cache["num_lanes"] - 1))
+        return sheet_lane_actors[idx], sheet_lanes_raw[idx]
+
     # ── 노드 lane 상속 헬퍼 — 선행/후행 노드의 actor 를 상속 ──
     def _infer_neighbor_actor(node_id: str) -> tuple[str, list[str], str]:
         """선행 노드(우선) → 후행 노드 actor 를 상속. 못 찾으면 ('','',[]) 반환."""
@@ -4391,24 +4445,30 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
                 if raw_role_text and ("그 외" in raw_role_text or "기타" in raw_role_text):
                     primary_actor = "그 외"
                 else:
-                    # inheritance 시도
-                    inh_actor, inh_list, inh_custom = _infer_neighbor_actor(n.id)
-                    if inh_actor:
-                        primary_actor = inh_actor
-                        actors_list = inh_list
-                        custom_role = inh_custom
+                    # 🔑 1) sheet lanes + 노드 y 좌표 → swim lane 추론 (사용자가 영역에 배치한 정보)
+                    lane_actor, raw_lane_name = _y_to_lane_actor(n.position_y)
+                    if lane_actor and lane_actor in _TOBE_ACTOR_ORDER:
+                        primary_actor = lane_actor
+                        actors_list = [lane_actor]
+                    elif lane_actor and "그 외" in str(raw_lane_name):
+                        primary_actor = "그 외"
+                        if not custom_role:
+                            custom_role = raw_lane_name.replace("그 외", "").strip(":, ")
                     else:
-                        # 분류 정보로 fallback (AI/Human 라벨이 있으면 합리적 default)
-                        if cls_label in ("AI", "AI + Human"):
-                            primary_actor = "HR 담당자"
-                            actors_list = ["HR 담당자"]
-                        elif cls_label == "Human":
+                        # 2) 선/후행 inheritance
+                        inh_actor, inh_list, inh_custom = _infer_neighbor_actor(n.id)
+                        if inh_actor:
+                            primary_actor = inh_actor
+                            actors_list = inh_list
+                            custom_role = inh_custom
+                        elif cls_label in ("AI", "AI + Human", "Human"):
+                            # 3) 분류 라벨 있으면 HR 담당자 default
                             primary_actor = "HR 담당자"
                             actors_list = ["HR 담당자"]
                         else:
-                            # 진짜로 정보 없음 — 노드 SKIP (사용자 요구)
+                            # 4) 진짜로 정보 없음 — SKIP
                             print(f"[TOBE] '{n.label}' 노드 SKIP — 수행주체 정보 없음 "
-                                  f"(role/actors/inheritance/classification 모두 없음)", flush=True)
+                                  f"(role/actors/y-lane/inheritance/classification 모두 없음)", flush=True)
                             continue
 
             # primary_actor 가 결정된 후 — '그 외' 로 끝났는데 custom_role 비어있으면
