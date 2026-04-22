@@ -5661,20 +5661,28 @@ L4 활동: {', '.join(bm_data['l4_names'][:4])}
 
     # 🔑 새로 첨부된 리소스 (캡쳐·URL) → 그 내용에서 벤치마킹 항목 추출
     # Perplexity 검색 없이 리소스 content 에서만 LLM 으로 추출 → 빠름
-    # 사용자가 "이 캡쳐 벤치마킹에 넣어줘" 라고 하지 않아도 새 리소스면 자동 추출
+    # 여러 장의 캡쳐를 한 번에 올리는 경우가 메인 유스케이스 — 최대 15건까지 처리
     if _new_resources:
         resource_text = ""
-        for i, r in enumerate(_new_resources[:5]):   # 최대 5건
+        _img_count = sum(1 for r in _new_resources if r.get("type") == "image")
+        _url_count = sum(1 for r in _new_resources if r.get("type") == "url")
+        for i, r in enumerate(_new_resources[:15]):
             rtype = "URL" if r.get("type") == "url" else "이미지"
             resource_text += (
                 f"\n────── 리소스 {i+1} ({rtype}) ──────\n"
                 f"제목: {r.get('title','')}\n"
                 f"출처: {r.get('source','')}\n"
-                f"내용: {r.get('content','')[:2000]}\n"
+                f"내용: {r.get('content','')[:2500]}\n"
             )
         res_extract_sys = f"""당신은 벤치마킹 사례 추출 전문가입니다.
-사용자가 첨부한 리소스(URL 본문·이미지 분석 결과)에서 '{process_name}' 프로세스에 관련된
-**AI 도입 사례**를 벤치마킹 테이블 항목으로 추출하세요.
+사용자가 첨부한 리소스(이미지 캡쳐 {_img_count}장, URL {_url_count}건)를 종합 분석하여
+'{process_name}' 프로세스에 관련된 **AI 도입 사례**를 벤치마킹 테이블 항목으로 추출하세요.
+
+## 📎 다중 이미지 처리 원칙 (중요)
+- 여러 장의 이미지가 같은 기업·같은 사례의 다른 페이지·섹션일 수 있습니다
+- 같은 기업명이 여러 리소스에 등장하면 **하나의 항목으로 통합** — 여러 리소스 내용을 합쳐서 더 풍부한 사례로
+- 서로 다른 기업이면 각각 별도 항목으로 분리
+- 리소스 간 상충하는 정보가 있으면 더 구체적·정량적인 쪽을 사용
 
 ## 🚨 엄격 규칙
 - source: AI 솔루션을 실제로 도입·운영한 구체 기업명 (실명, 글로벌 인지도)
@@ -5683,14 +5691,15 @@ L4 활동: {', '.join(bm_data['l4_names'][:4])}
 - ❌ 기업명이 명확히 없으면 해당 항목 **DROP** (억지로 만들지 말 것)
 - url: 리소스 '출처' 가 URL 이면 그 URL 사용. 이미지·인쇄물이면 url 빈 값 허용
 - {process_name} 과 무관한 사례는 제외
+- use_case / outcome 은 리소스 내용을 종합해서 구체적으로 작성 (수치·기간·범위 포함)
 
 ## 출력 형식 (JSON만)
 {{"benchmark_table": [{{"source":"기업명","company_type":"Tech 선도 | 非Tech 실제 구현","industry":"","process_area":"","ai_adoption_goal":"","ai_technology":"","key_data":"","adoption_method":"","use_case":"","outcome":"","infrastructure":"","implication":"","url":""}}]}}"""
         try:
             _res_bm = await _call_llm_step1(
                 res_extract_sys,
-                [{"role": "user", "content": f"## 첨부 리소스\n{resource_text}"}],
-                max_tokens=8192,
+                [{"role": "user", "content": f"## 첨부 리소스 ({len(_new_resources)}건 중 {min(15, len(_new_resources))}건 분석)\n{resource_text}"}],
+                max_tokens=16384,   # 다중 이미지 종합 분석 대비 상향
             )
             if _res_bm and _res_bm.get("benchmark_table"):
                 _res_entries = _res_bm["benchmark_table"]
@@ -5709,7 +5718,7 @@ L4 활동: {', '.join(bm_data['l4_names'][:4])}
                         _added_from_resource += 1
                 extra_bm_text += (
                     f"\n\n[📎 첨부 리소스에서 벤치마킹 {_added_from_resource}건 추출 "
-                    f"({len(_new_resources)}개 리소스 분석)]"
+                    f"(이미지 {_img_count}장, URL {_url_count}건 종합 분석)]"
                 )
                 print(f"[CHAT] 리소스 기반 벤치마킹 추출 — {_added_from_resource}건 추가", flush=True)
         except Exception as _e:

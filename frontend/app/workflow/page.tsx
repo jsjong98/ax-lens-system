@@ -707,48 +707,78 @@ export default function WorkflowPage() {
     if (!chatInput.trim() && pendingImages.length === 0) return;
     setResourceLoading(true);
 
-    // 1) pending 이미지 업로드 → Vision 분석
+    // 1) pending 이미지 병렬 업로드 → Vision 분석 (N 장이면 N × 2-5초 → 한 라운드로)
     const addedResources: UserResource[] = [];
-    for (const img of pendingImages) {
-      try {
-        const r = await addImageResource(img.b64, img.type, img.name);
-        addedResources.push(r.resource);
-        setUserResources((prev) => [...prev, r.resource]);
-      } catch (e) {
-        setChatMessages((prev) => [
-          ...prev,
-          { role: "assistant", content: `이미지 분석 실패: ${(e as Error).message}` },
-        ]);
+    if (pendingImages.length > 0) {
+      // 업로드 시작 안내 — 여러 장일 때 사용자 체감 시간 단축
+      setChatMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: `📎 ${pendingImages.length}장의 이미지를 병렬 분석 중... (Vision AI)`,
+        },
+      ]);
+      const results = await Promise.allSettled(
+        pendingImages.map((img) => addImageResource(img.b64, img.type, img.name))
+      );
+      for (let i = 0; i < results.length; i++) {
+        const r = results[i];
+        if (r.status === "fulfilled") {
+          addedResources.push(r.value.resource);
+          setUserResources((prev) => [...prev, r.value.resource]);
+        } else {
+          setChatMessages((prev) => [
+            ...prev,
+            {
+              role: "assistant",
+              content: `이미지 ${i + 1} (${pendingImages[i].name}) 분석 실패: ${
+                (r.reason as Error).message
+              }`,
+            },
+          ]);
+        }
       }
     }
     setPendingImages([]);
 
-    // 2) 메시지 내 URL 크롤링
+    // 2) 메시지 내 URL 병렬 크롤링
     const urls = extractUrls(chatInput);
-    for (const url of urls) {
-      try {
-        const r = await addUrlResource(url);
-        addedResources.push(r.resource);
-        setUserResources((prev) => [...prev, r.resource]);
-      } catch (e) {
-        setChatMessages((prev) => [
-          ...prev,
-          { role: "assistant", content: `URL 접근 실패 (${url}): ${(e as Error).message}` },
-        ]);
+    if (urls.length > 0) {
+      const urlResults = await Promise.allSettled(urls.map((u) => addUrlResource(u)));
+      for (let i = 0; i < urlResults.length; i++) {
+        const r = urlResults[i];
+        if (r.status === "fulfilled") {
+          addedResources.push(r.value.resource);
+          setUserResources((prev) => [...prev, r.value.resource]);
+        } else {
+          setChatMessages((prev) => [
+            ...prev,
+            { role: "assistant", content: `URL 접근 실패 (${urls[i]}): ${(r.reason as Error).message}` },
+          ]);
+        }
       }
     }
     setResourceLoading(false);
 
     // 3) 리소스가 추가됐으면 채팅 메시지에 요약 표시
     if (addedResources.length > 0) {
+      const imageCount = addedResources.filter((r) => r.type === "image").length;
+      const urlCount = addedResources.filter((r) => r.type === "url").length;
       const summary = addedResources
         .map((r) => `📎 [${r.type === "url" ? "URL" : "이미지"}] ${r.title}`)
         .join("\n");
+      const countSummary = [
+        imageCount > 0 ? `이미지 ${imageCount}장` : "",
+        urlCount > 0 ? `URL ${urlCount}건` : "",
+      ].filter(Boolean).join(" + ");
       setChatMessages((prev) => [
         ...prev,
         {
           role: "assistant",
-          content: `다음 자료를 리서치 라이브러리에 추가했습니다:\n${summary}\n\n이 내용을 기반으로 기본 설계에 반영하겠습니다.`,
+          content:
+            `${countSummary}을 리서치 라이브러리에 추가했습니다:\n${summary}\n\n` +
+            `이 내용에서 벤치마킹 사례를 자동 추출해 벤치마킹 테이블에 반영하겠습니다. ` +
+            `설계에 적용하려면 [기본 설계 재생성] 버튼을 눌러주세요.`,
         },
       ]);
       if (showResources === false) setShowResources(true);
