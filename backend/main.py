@@ -1123,6 +1123,8 @@ def _load_session_data(sid: str) -> bool:
             _wf_excel_tasks = tasks
             _wf_excel_path = str(xls[-1])
             # 분류 결과는 session_data.json에서 복구하므로 여기서는 비움
+            # Background BM 자동 주입 (L2='채용 기획'/'채용 운영' 매칭 시)
+            _inject_background_benchmarks()
         except Exception as e:
             print(f"[SESSION] Excel 복구 실패({sid}): {e}", flush=True)
 
@@ -1787,6 +1789,10 @@ async def upload_workflow_excel(request: Request, file: UploadFile = File(...)):
     _wf_benchmark_table = {}
     _wf_user_resources = []
 
+    # Background BM 자동 주입 — L2='채용 기획'/'채용 운영' 매칭 시 _wf_benchmark_table['__background__']
+    # 에 PwC 큐레이션 사례를 기본 행으로 주입. Perplexity 검색 없어도 Step 1 실행 가능.
+    _inject_background_benchmarks()
+
     # 분류 결과 추출 (최종 > 두산 > 1차 순 fallback)
     # '-'(대시)는 "두산 검토: 변경 불필요" 표시이므로 실제 label이 아님 → skip
     def _resolve_label(*candidates: str) -> str:
@@ -1880,6 +1886,8 @@ async def select_workflow_excel_sheet(request: Request):
     _wf_excel_path = excel_path   # 시트 선택해도 경로 유지
     _tasks_cache = tasks
     _wf_classification = {}
+    # 시트 변경 후에도 Background BM 재주입 (L2 변경될 수 있음)
+    _inject_background_benchmarks()
 
     def _resolve_lbl(*candidates: str) -> str:
         for c in candidates:
@@ -2883,17 +2891,58 @@ async def cleanup_benchmark_table():
 
 
 
-@app.get("/api/workflow/reference-benchmarks", tags=["Workflow"])
-async def get_reference_benchmarks():
-    """현재 엑셀 L2 에 매칭되는 레퍼런스 (Doosan 큐레이션) 벤치마킹 사례 반환.
+def _inject_background_benchmarks():
+    """엑셀 L2 에 매칭되는 Background BM 을 _wf_benchmark_table['__background__'] 에 주입.
 
-    - 현재는 '채용 기획' · '채용 운영' L2 에만 큐레이션 사례 존재 (recruit_benchmarks.py)
-    - 프론트엔드에서 일반 Perplexity/캡쳐 벤치마킹과 구분하여 파란색으로 표시
+    - 엑셀 업로드 / 세션 로드 시 호출 → 프론트가 /benchmark-table 로 불러갈 때 이미 포함됨
+    - Step 1 프롬프트도 이 테이블을 참조하므로, Perplexity 검색 없이도 기본 벤치마킹으로 Step 1 실행 가능
+    - 기존 동적 벤치마킹(sheet_id 별) 과 공존 — '__background__' 키로 분리 저장
+    """
+    try:
+        from recruit_benchmarks import build_background_benchmark_rows
+        if not _wf_excel_tasks:
+            return
+        l2_names = list({getattr(t, "l2", "") or "" for t in _wf_excel_tasks})
+        l2_names = [n for n in l2_names if n]
+        rows = build_background_benchmark_rows(l2_names)
+        if rows:
+            _wf_benchmark_table["__background__"] = rows
+            print(f"[BACKGROUND BM] {len(rows)}건 주입 (L2 매칭: {l2_names})", flush=True)
+        else:
+            # L2 매칭 안 되면 혹시 남아있던 __background__ 제거 (세션 전환 대응)
+            _wf_benchmark_table.pop("__background__", None)
+    except Exception as _e:
+        print(f"[BACKGROUND BM] 주입 실패 (무시): {_e}", flush=True)
+
+
+@app.get("/api/workflow/background-benchmarks", tags=["Workflow"])
+async def get_background_benchmarks():
+    """현재 엑셀 L2 에 매칭되는 Background BM (PwC 큐레이션) 사례 title 리스트 반환.
+
+    - UI 의 'Background BM' 블록 상단에 title chip 으로 표시
+    - 실제 테이블 행은 /benchmark-table 의 '__background__' 키에 들어 있음
     - L2 매칭 안 되면 빈 배열 반환 (UI 섹션 자동 숨김)
     """
-    from recruit_benchmarks import get_reference_benchmarks_for_tasks
-    refs = get_reference_benchmarks_for_tasks(_wf_excel_tasks)
+    from recruit_benchmarks import get_background_cases_for_tasks
+    cases = get_background_cases_for_tasks(_wf_excel_tasks)
+    # 기존 ReferenceBenchmark 필드 유지 (case_no, title, companies, applicable_l2)
+    refs = [
+        {
+            "case_no": c["case_no"],
+            "title": c["title"],
+            "companies": c["companies"],
+            "applicable_l2": c["applicable_l2"],
+        }
+        for c in cases
+    ]
     return {"ok": True, "references": refs, "total": len(refs)}
+
+
+# 하위 호환 alias — 기존 /reference-benchmarks 도 계속 지원 (점진 전환)
+@app.get("/api/workflow/reference-benchmarks", tags=["Workflow"], include_in_schema=False)
+async def get_reference_benchmarks_legacy():
+    """구 엔드포인트 — /background-benchmarks 로 리네임됨. 하위 호환용."""
+    return await get_background_benchmarks()
 
 
 @app.get("/api/workflow/benchmark-table/export", tags=["Workflow"])
@@ -3751,22 +3800,34 @@ async def generate_workflow_step1(request: Request):
                         f"{bm.get('use_case', '')} → {bm.get('outcome', '')}\n"
                     )
 
-    # 🔑 채용 도메인 큐레이션 레퍼런스 title 주입 — LLM 이 Task 명명 시 참조
-    # (recruit_benchmarks.py) — Step 2 에서 Task 이름 앞에 attribution prefix 부착 시 활용
+    # 🔑 Background BM 주입 — L2 '채용 기획'/'채용 운영' 매칭 시 (recruit_benchmarks.py)
+    # 1) Title 리스트: Task 이름 attribution 용 (LLM 이 Task 명명 시 참조)
+    # 2) Player 개요 (Siemens/GM/IBM): 기본 설계 시 선도사 접근 방식 참조
+    # 3) 통합 시사점: 설계 방향성 가이드
     try:
-        from recruit_benchmarks import get_reference_benchmarks_for_tasks
-        _refs = get_reference_benchmarks_for_tasks(_wf_excel_tasks)
-        if _refs:
+        from recruit_benchmarks import (
+            get_background_cases_for_tasks,
+            get_applicable_players_for_tasks,
+            format_players_for_prompt,
+            format_insights_for_prompt,
+        )
+        _cases = get_background_cases_for_tasks(_wf_excel_tasks)
+        if _cases:
             benchmark_text += (
-                "\n## 📚 레퍼런스 벤치마킹 Title (Doosan HR 큐레이션 - 채용 도메인)\n"
-                "※ 아래 title 은 Task 이름 attribution 용. AI 기능이 해당 벤치마킹과 같으면\n"
-                "   Task 이름 앞에 'title - ' 형태로 prefix 부착됨 (후처리로 자동 적용).\n\n"
+                "\n## 📚 Background BM — 사례 Title (Task 이름 attribution 용)\n"
+                "※ AI 기능이 이 사례와 같으면 Task 이름 앞에 'title - ' 형태로 prefix 자동 부착됨.\n\n"
             )
-            for bm in _refs:
-                benchmark_text += f"- [{bm['case_no']}] **{bm['title']}**\n"
-            print(f"[STEP1] 레퍼런스 벤치마킹 title {len(_refs)}건 주입 (채용 도메인)", flush=True)
+            for c in _cases:
+                benchmark_text += f"- [{c['case_no']}] **{c['title']}** (Player: {', '.join(c['companies'])})\n"
+
+            # Player 개요 + 통합 시사점 추가 주입
+            _players = get_applicable_players_for_tasks(_wf_excel_tasks)
+            if _players:
+                benchmark_text += "\n" + format_players_for_prompt(_players)
+            benchmark_text += "\n" + format_insights_for_prompt()
+            print(f"[STEP1] Background BM 주입 — 사례 {len(_cases)}건 + Player {len(_players)}사 + 통합 시사점", flush=True)
     except Exception as _re:
-        print(f"[STEP1] 레퍼런스 주입 실패 (무시): {_re}", flush=True)
+        print(f"[STEP1] Background BM 주입 실패 (무시): {_re}", flush=True)
 
     # Gap 분석 결과 — 기본 설계의 핵심 인풋
     gap_text = ""
@@ -8134,6 +8195,8 @@ async def select_workflow_file(request: Request):
     _wf_step2_cache = {}
     _wf_benchmark_table = {}
     _wf_user_resources = []
+    # 파일 선택 후 Background BM 재주입
+    _inject_background_benchmarks()
 
     # 분류 결과 재추출
     def _resolve_label(*candidates: str) -> str:

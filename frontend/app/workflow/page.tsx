@@ -38,8 +38,8 @@ import {
   type WorkflowExcelUploadResult,
   type WorkflowStepResult,
   type BenchmarkTableRow,
-  type ReferenceBenchmark,
-  getReferenceBenchmarks,
+  type BackgroundBenchmark,
+  getBackgroundBenchmarks,
   type SearchLogItem,
   type GapAnalysisResult,
   type TobeFlowResult,
@@ -94,7 +94,7 @@ export default function WorkflowPage() {
   // 시트별 벤치마킹 결과 {sheet_id: rows[]}
   const [benchmarkTableBySheet, setBenchmarkTableBySheet] = useState<Record<string, BenchmarkTableRow[]>>({});
   // 채용 도메인 레퍼런스 벤치마킹 (Doosan 큐레이션) — L2 매칭 시 표시
-  const [referenceBenchmarks, setReferenceBenchmarks] = useState<ReferenceBenchmark[]>([]);
+  const [backgroundBenchmarks, setBackgroundBenchmarks] = useState<BackgroundBenchmark[]>([]);
   // 벤치마킹이 완료된 시트 ID — Gap 분석·기본 설계의 고정 스코프
   // (activeSheet는 "보기용 탭 선택"이고, bmSheetId는 "분석 범위"로 분리)
   const [bmSheetId, setBmSheetId] = useState<string | null>(null);
@@ -275,8 +275,8 @@ export default function WorkflowPage() {
       }
       // 레퍼런스 벤치마킹 (채용 도메인 L2 매칭 시) 복원
       try {
-        const ref = await getReferenceBenchmarks();
-        setReferenceBenchmarks(ref.references || []);
+        const ref = await getBackgroundBenchmarks();
+        setBackgroundBenchmarks(ref.references || []);
       } catch { /* 조용히 실패 */ }
       // 누적 리서치 자료 복원
       try {
@@ -549,8 +549,8 @@ export default function WorkflowPage() {
       setExcelTasks(tasks.tasks);
       // 레퍼런스 벤치마킹 (채용 도메인 L2 매칭 시) 자동 조회
       try {
-        const ref = await getReferenceBenchmarks();
-        setReferenceBenchmarks(ref.references || []);
+        const ref = await getBackgroundBenchmarks();
+        setBackgroundBenchmarks(ref.references || []);
       } catch { /* 조용히 실패 */ }
 
       // 새 프로젝트에서 시작한 경우: 백엔드가 생성한 새 세션을 pending 이름으로 rename
@@ -1840,24 +1840,25 @@ export default function WorkflowPage() {
               </div>
             )}
 
-            {/* 📚 레퍼런스 벤치마킹 Title — Task 이름 attribution 용 (파란색 강조) */}
-            {referenceBenchmarks.length > 0 && (
+            {/* 📚 Background BM (PwC 큐레이션) — Step 1 기본 벤치마킹 + Task attribution title 리스트 */}
+            {backgroundBenchmarks.length > 0 && (
               <div className="mb-4 rounded-lg overflow-hidden" style={{ border: "2px solid #2563EB" }}>
                 <div className="px-3 py-1.5 flex items-center gap-2" style={{ backgroundColor: "#2563EB", color: "#FFFFFF" }}>
-                  <span className="text-[11px] font-bold">📚 레퍼런스 벤치마킹 Title</span>
+                  <span className="text-[11px] font-bold">📚 Background BM</span>
                   <span className="text-[9.5px] opacity-90">
-                    · 채용 도메인 · {referenceBenchmarks.length}건
+                    · PwC 큐레이션 · IBM · GM · Siemens · {backgroundBenchmarks.length}건
                   </span>
                   <span className="ml-auto text-[9.5px] opacity-85 italic">
-                    Task 이름 앞에 이 title 이 prefix 로 붙어 파란색 표시
+                    Step 1 기본 벤치마킹으로 자동 반영 · Task 이름 prefix 로도 사용
                   </span>
                 </div>
                 <div className="px-3 py-2 flex flex-wrap gap-1.5" style={{ backgroundColor: "#EFF6FF" }}>
-                  {referenceBenchmarks.map((ref) => (
+                  {backgroundBenchmarks.map((ref) => (
                     <span
                       key={ref.case_no}
                       className="text-[11px] font-semibold px-2 py-1 rounded inline-flex items-center gap-1.5"
                       style={{ backgroundColor: "#FFFFFF", color: "#1E40AF", border: "1px solid #93C5FD" }}
+                      title={`적용 Player: ${ref.companies.join(" · ")}`}
                     >
                       <span
                         className="text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center"
@@ -1868,6 +1869,10 @@ export default function WorkflowPage() {
                       {ref.title}
                     </span>
                   ))}
+                </div>
+                <div className="px-3 py-1.5 text-[9.5px]" style={{ backgroundColor: "#DBEAFE", color: "#1E3A8A" }}>
+                  💡 아래 벤치마킹 표에 이 사례들이 파란색으로 표시됩니다.
+                  추가 벤치마킹을 원하면 상단 <b>[벤치마킹 실행]</b> 버튼 또는 채팅에 캡쳐 업로드.
                 </div>
               </div>
             )}
@@ -1911,8 +1916,26 @@ export default function WorkflowPage() {
                     </thead>
                     <tbody>
                       {benchmarkTable.map((row, i) => (
-                        <tr key={i} className="border-b border-blue-100 hover:bg-blue-50/50 group">
-                          <td className="px-3 py-2 font-medium text-gray-800 whitespace-nowrap">{row.source}</td>
+                        <tr
+                          key={i}
+                          className="border-b border-blue-100 hover:bg-blue-50/50 group"
+                          style={row.is_background ? {
+                            backgroundColor: "#EFF6FF",
+                            borderLeft: "3px solid #2563EB",
+                          } : undefined}
+                        >
+                          <td className="px-3 py-2 font-medium text-gray-800 whitespace-nowrap">
+                            {row.is_background && (
+                              <span
+                                className="inline-block text-[8.5px] font-bold mr-1.5 px-1.5 py-0.5 rounded align-middle"
+                                style={{ backgroundColor: "#2563EB", color: "#FFFFFF" }}
+                                title={row.benchmark_title ? `Background BM: ${row.benchmark_title}` : "Background BM"}
+                              >
+                                📚 PwC
+                              </span>
+                            )}
+                            {row.source}
+                          </td>
                           <td className="px-3 py-2 whitespace-nowrap">
                             {row.company_type && (
                               <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${row.company_type.includes("Tech") && !row.company_type.includes("非") ? "bg-indigo-50 text-indigo-700" : "bg-orange-50 text-orange-700"}`}>
@@ -1943,21 +1966,30 @@ export default function WorkflowPage() {
                             )}
                           </td>
                           <td className="px-2 py-2 text-center">
-                            <button
-                              title={`"${row.source}" 행 삭제`}
-                              onClick={async () => {
-                                if (!confirm(`"${row.source}" 행을 삭제하시겠습니까?`)) return;
-                                try {
-                                  const res = await deleteBenchmarkRow(row.source, activeSheet ?? undefined);
-                                  setBenchmarkTableBySheet(res.benchmark_table);
-                                } catch (e) {
-                                  alert((e as Error).message);
-                                }
-                              }}
-                              className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-red-50 text-red-400 hover:text-red-600"
-                            >
-                              ✕
-                            </button>
+                            {row.is_background ? (
+                              <span
+                                className="text-[9px] text-blue-500"
+                                title="Background BM 은 PwC 큐레이션 기본 데이터라 삭제할 수 없습니다"
+                              >
+                                🔒
+                              </span>
+                            ) : (
+                              <button
+                                title={`"${row.source}" 행 삭제`}
+                                onClick={async () => {
+                                  if (!confirm(`"${row.source}" 행을 삭제하시겠습니까?`)) return;
+                                  try {
+                                    const res = await deleteBenchmarkRow(row.source, activeSheet ?? undefined);
+                                    setBenchmarkTableBySheet(res.benchmark_table);
+                                  } catch (e) {
+                                    alert((e as Error).message);
+                                  }
+                                }}
+                                className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-red-50 text-red-400 hover:text-red-600"
+                              >
+                                ✕
+                              </button>
+                            )}
                           </td>
                         </tr>
                       ))}

@@ -1023,22 +1023,26 @@ export async function getWorkflowExcelTasks(): Promise<{
   return apiFetch("/workflow/excel-tasks");
 }
 
-export interface ReferenceBenchmark {
+/** Background BM (PwC 큐레이션) 사례 — Step 1 UI title chip 용.
+ *  실제 테이블 행은 BenchmarkTableRow (is_background=true) 로 _wf_benchmark_table 에 주입됨. */
+export interface BackgroundBenchmark {
   case_no: number;
   title: string;
   companies: string[];      // 정확한 명칭 (IBM/GM/Siemens 등)
-  stage: string;
-  description: string;
   applicable_l2: string[];
 }
 
-export async function getReferenceBenchmarks(): Promise<{
+export async function getBackgroundBenchmarks(): Promise<{
   ok: boolean;
-  references: ReferenceBenchmark[];
+  references: BackgroundBenchmark[];   // 필드명은 하위 호환 유지
   total: number;
 }> {
-  return apiFetch("/workflow/reference-benchmarks");
+  return apiFetch("/workflow/background-benchmarks");
 }
+
+// 하위 호환 alias — 기존 호출처 한 번에 전환하기 전까지 유지
+export type ReferenceBenchmark = BackgroundBenchmark;
+export const getReferenceBenchmarks = getBackgroundBenchmarks;
 
 export interface BenchmarkTableRow {
   source: string;
@@ -1054,6 +1058,10 @@ export interface BenchmarkTableRow {
   infrastructure?: string;
   implication: string;
   url: string;
+  // Background BM (PwC 큐레이션) 플래그 — 파란색 하이라이트 + 읽기 전용
+  is_background?: boolean;
+  benchmark_case_no?: number;
+  benchmark_title?: string;
 }
 
 export interface SearchLogItem {
