@@ -4476,13 +4476,13 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
             for ti, t in enumerate(ag["tasks"]):
                 tid = t.get("task_id", f"t{ti}")
                 jid = f"{agent_prefix}_{tid}"
-                # Junior AI는 가능하면 매칭되는 As-Is L5 와 같은 x 로 세로 정렬 (replacement 관계 시각화)
-                matched_asis = asis_by_task_id.get(tid)
-                if matched_asis and matched_asis.get("position"):
-                    x = float(matched_asis["position"].get("x", 0))
-                else:
-                    x = min_x + x_step * (task_i + 0.5)
+                # 🔑 Junior AI x 는 항상 pipeline 순서대로 sequential (좌→우 흐름 보장)
+                # 이전에 매칭된 As-Is x 를 상속했더니 원본 좌표가 뒤죽박죽이라 흐름이 꼬임
+                # → 순수 task_i 기반 sequential 배치
+                x = min_x + x_step * (task_i + 0.5)
                 task_i += 1
+
+                matched_asis = asis_by_task_id.get(tid)
 
                 # L5 표시용 ID — 기존 As-Is task_id 와 매칭되면 재사용,
                 # 새 task (NEW_xxx 등) 이면 L4 의 다음 순번 할당 (2.1.4.16 형식)
@@ -4555,6 +4555,39 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
                 "action": str(ha.get("action") or "").strip(),
                 "performer": str(ha.get("performer") or "HR 담당자").strip() or "HR 담당자",
             }
+
+    # ── 🔑 As-Is L5 x 정렬: Junior AI 가 대체하는 As-Is 는 같은 x 로 끌어올림 ──
+    # (좌→우 pipeline 흐름 유지 + 대체 관계 세로 정렬 시각화)
+    junior_by_taskid: dict[str, dict] = {}
+    for jn in ai_nodes_out:
+        if jn["actor"] != "Junior AI":
+            continue
+        # jn["id"] 에서 task_id 추출 (junior_agentid_taskid 형식)
+        # 또는 직접 매칭된 As-Is task_id 사용
+        for tid_key, asis_node in asis_by_task_id.items():
+            if jn["id"].endswith(f"_{tid_key}") or jn["id"].endswith(f"_{tid_key}_AI"):
+                junior_by_taskid[tid_key] = jn
+                break
+    # 매칭된 As-Is 의 x 를 Junior AI 의 x 로 업데이트
+    for asis_n in asis_nodes_out:
+        tid = asis_n.get("task_id")
+        if tid and tid in junior_by_taskid:
+            jx = junior_by_taskid[tid]["position"]["x"]
+            asis_n["position"]["x"] = jx
+
+    # 매칭 안 된 As-Is (Human 분류 등) 는 원본 x 유지 — 하지만 Junior x 범위 내로 들어와야
+    # pipeline 안에서 자연스럽게 섞임. 너무 멀리 떨어진 노드는 normalize.
+    if junior_nodes_count := len([n for n in ai_nodes_out if n["actor"] == "Junior AI"]):
+        junior_x_list = [n["position"]["x"] for n in ai_nodes_out if n["actor"] == "Junior AI"]
+        jr_min_x, jr_max_x = min(junior_x_list), max(junior_x_list)
+        unmatched_asis = [n for n in asis_nodes_out
+                          if n.get("task_id") not in junior_by_taskid]
+        if unmatched_asis:
+            # 원본 x 순서 유지하되, junior 범위 뒤에 이어붙임
+            unmatched_asis.sort(key=lambda n: n["position"]["x"])
+            extra_step = 440.0
+            for i, n in enumerate(unmatched_asis):
+                n["position"]["x"] = jr_max_x + extra_step * (i + 1)
 
     # 3-1) Human 행동 노드 생성 — Junior AI 중 사람 개입 필요한 것
     human_nodes_out: list[dict] = []
