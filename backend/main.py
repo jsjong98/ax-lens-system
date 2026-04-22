@@ -1635,6 +1635,76 @@ _wf_chat_history: list = []    # Step 1 채팅 이력
 _manual_matches: dict = {}     # 수동 매칭: json_task_id → excel_task_id
 _wf_user_resources: list = []  # 사용자가 첨부한 URL/이미지 리소스 (누적)
 
+def _build_deprecated_scope() -> tuple[set[str], set[str], set[str]]:
+    """Step 1 redesigned_process 에서 change_type='삭제'/'통합' L3/L4/L5 수집.
+    Returns: (task_ids, l4_ids, l3_ids) — Swim Lane · AI Service Flow 공통 제외 대상."""
+    task_ids: set[str] = set()
+    l4_ids: set[str] = set()
+    l3_ids: set[str] = set()
+    for l3 in (_wf_step1_cache.get("redesigned_process") or []):
+        l3_ct = str(l3.get("change_type") or "").strip()
+        l3_id = str(l3.get("l3_id") or "").strip()
+        if l3_ct in ("삭제", "통합") and l3_id:
+            l3_ids.add(l3_id)
+        for l4 in (l3.get("l4_list") or []):
+            l4_ct = str(l4.get("change_type") or "").strip()
+            l4_id = str(l4.get("l4_id") or "").strip()
+            if l4_ct in ("삭제", "통합") and l4_id:
+                l4_ids.add(l4_id)
+            for l5 in (l4.get("l5_list") or []):
+                ct = str(l5.get("change_type") or "").strip()
+                tid = str(l5.get("task_id") or "").strip()
+                if ct in ("삭제", "통합") and tid and not tid.startswith("NEW"):
+                    task_ids.add(tid)
+    return task_ids, l4_ids, l3_ids
+
+
+def _make_deprecation_check():
+    """폐기/통합 판정 클로저. Returns: is_deprecated(task_id: str) -> bool"""
+    tids, l4s, l3s = _build_deprecated_scope()
+
+    def _check(tid: str) -> bool:
+        tid = (tid or "").strip()
+        if not tid:
+            return False
+        if tid in tids:
+            return True
+        parts = tid.split(".")
+        if len(parts) >= 3 and ".".join(parts[:3]) in l4s:
+            return True
+        if len(parts) >= 2 and ".".join(parts[:2]) in l3s:
+            return True
+        return False
+    return _check
+
+
+def _filter_step2_deprecated(step2: dict) -> dict:
+    """Step 2 캐시를 deep-copy 후 assigned_tasks 에서 Step 1 폐기/통합 task 제거.
+    AI Service Flow · HTML · PPT · Excel export 직전 공통 필터."""
+    if not step2:
+        return step2
+    import copy
+    is_deprecated = _make_deprecation_check()
+    cleaned = copy.deepcopy(step2)
+    removed = 0
+    for agent in cleaned.get("agents", []) or []:
+        before = len(agent.get("assigned_tasks", []) or [])
+        agent["assigned_tasks"] = [
+            t for t in (agent.get("assigned_tasks") or [])
+            if not is_deprecated(str(t.get("task_id") or ""))
+        ]
+        removed += before - len(agent["assigned_tasks"])
+    # execution_flow 의 task_ids 에도 동일 필터 적용
+    for step in cleaned.get("execution_flow", []) or []:
+        step["task_ids"] = [
+            tid for tid in (step.get("task_ids") or [])
+            if not is_deprecated(str(tid))
+        ]
+    if removed:
+        print(f"[STEP2-FILTER] Step 1 폐기/통합 필터 — assigned_tasks 에서 {removed}건 제거", flush=True)
+    return cleaned
+
+
 def _manual_matches_path() -> Path:
     """현재 세션의 manual_matches.json 경로. 세션 없으면 _WF_DIR 루트 (하위 호환)."""
     if _current_session_id:
@@ -4158,38 +4228,8 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
             return True
         return tl4 in sheet_name or sheet_name in tl4
 
-    # Step 1 에서 '삭제'/'통합' 처리된 task_id 수집 (Step 2 tasks 에서도 제외)
-    _pre_deprecated_tids: set[str] = set()
-    _pre_deprecated_l4s: set[str] = set()
-    _pre_deprecated_l3s: set[str] = set()
-    for _l3 in (_wf_step1_cache.get("redesigned_process") or []):
-        _l3_ct = str(_l3.get("change_type") or "").strip()
-        _l3_id = str(_l3.get("l3_id") or "").strip()
-        if _l3_ct in ("삭제", "통합") and _l3_id:
-            _pre_deprecated_l3s.add(_l3_id)
-        for _l4 in (_l3.get("l4_list") or []):
-            _l4_ct = str(_l4.get("change_type") or "").strip()
-            _l4_id = str(_l4.get("l4_id") or "").strip()
-            if _l4_ct in ("삭제", "통합") and _l4_id:
-                _pre_deprecated_l4s.add(_l4_id)
-            for _l5 in (_l4.get("l5_list") or []):
-                _ct = str(_l5.get("change_type") or "").strip()
-                _tid = str(_l5.get("task_id") or "").strip()
-                if _ct in ("삭제", "통합") and _tid and not _tid.startswith("NEW"):
-                    _pre_deprecated_tids.add(_tid)
-
-    def _is_deprecated_tid(tid: str) -> bool:
-        tid = (tid or "").strip()
-        if not tid:
-            return False
-        if tid in _pre_deprecated_tids:
-            return True
-        parts = tid.split(".")
-        if len(parts) >= 3 and ".".join(parts[:3]) in _pre_deprecated_l4s:
-            return True
-        if len(parts) >= 2 and ".".join(parts[:2]) in _pre_deprecated_l3s:
-            return True
-        return False
+    # Step 1 에서 '삭제'/'통합' 처리된 task_id 판정기 (공용 helper)
+    _is_deprecated_tid = _make_deprecation_check()
 
     senior_agents: list[dict] = []
     junior_agents: list[dict] = []
@@ -5273,11 +5313,13 @@ async def export_tobe_excel_endpoint():
     with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
         output_path = tmp.name
 
+    # Step 1 에서 '삭제'/'통합' 처리된 task 는 엑셀 export 에서도 제외
+    _filtered_step2_for_excel = _filter_step2_deprecated(_wf_step2_cache)
     try:
         export_tobe_excel(
             template_path=_wf_excel_path,
             output_path=output_path,
-            step2_cache=_wf_step2_cache,
+            step2_cache=_filtered_step2_for_excel,
             classification=_wf_classification,
             excel_tasks=_wf_excel_tasks,
             wf_tobe_flow_cache=_wf_tobe_flow_cache,
@@ -6139,7 +6181,13 @@ Step 1에서 도출된 기본 설계를 기반으로, 두산에 최적화된 **A
 
 @app.get("/api/workflow/step-results", tags=["Workflow"])
 async def get_workflow_step_results():
-    """Step 1 / Step 2 결과를 반환합니다. 벤치마킹·Gap 분석 결과도 포함."""
+    """Step 1 / Step 2 결과를 반환합니다. 벤치마킹·Gap 분석 결과도 포함.
+
+    AI Service Flow 는 프론트엔드 WorkflowEditor 가 step2.agents[].assigned_tasks 를
+    기반으로 그리므로, Step 1 에서 '삭제'/'통합' 으로 처리된 task 는 여기서 제거하여
+    Swim Lane · AI Service Flow 양쪽에서 일관되게 빠지게 한다.
+    """
+    filtered_step2 = _filter_step2_deprecated(_wf_step2_cache) if _wf_step2_cache else None
     return {
         "ok": True,
         "has_excel": len(_wf_excel_tasks) > 0,
@@ -6147,7 +6195,7 @@ async def get_workflow_step_results():
         "has_step1": bool(_wf_step1_cache),
         "has_step2": bool(_wf_step2_cache),
         "step1": _wf_step1_cache if _wf_step1_cache else None,
-        "step2": _wf_step2_cache if _wf_step2_cache else None,
+        "step2": filtered_step2,
         "chat_history": _wf_chat_history,
         # 벤치마킹·Gap 분석 복원용
         "benchmark_table": _wf_benchmark_table,
@@ -6177,6 +6225,10 @@ async def export_tobe_workflow_json():
     cache = _wf_step2_cache if _wf_step2_cache else _wf_step1_cache
     if not cache:
         raise HTTPException(404, "Step 1 또는 Step 2를 먼저 실행하세요.")
+
+    # Step 1 에서 '삭제'/'통합' 처리된 task 는 export 에서도 제외 (Swim Lane 과 동일)
+    if _wf_step2_cache:
+        cache = _filter_step2_deprecated(cache)
 
     agents = []
     for a in cache.get("agents", []):
