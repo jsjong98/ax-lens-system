@@ -96,21 +96,39 @@ function workflowToSwimlane(result: NewWorkflowResult): SwimlaneData {
   const juniorAgents = result.agents.filter((a) => a.agent_type === "Junior AI");
   const effectiveAgents = juniorAgents.length > 0 ? juniorAgents : result.agents;
 
-  // Input: Junior AI 인덱스 기준으로 owner 매핑 (Senior AI 제외)
-  const inputOwner: Record<string, number> = {};
+  // Input → 해당 input 을 사용하는 모든 Junior AI 인덱스 (shared input 대응)
+  // 하나의 Input 이 여러 Junior AI 에게 공급되면 각 agent 컬럼에 모두 표시됨 (색상 일치)
+  const inputOwners: Record<string, number[]> = {};
   for (let ai = 0; ai < effectiveAgents.length; ai++) {
     for (const task of effectiveAgents[ai].assigned_tasks) {
       task.input_data?.forEach((d) => {
-        if (!(d in inputOwner)) inputOwner[d] = ai;
+        const owners = inputOwners[d] ?? (inputOwners[d] = []);
+        if (!owners.includes(ai)) owners.push(ai);
       });
     }
   }
-  const inputs: InputBox[] = Object.keys(inputOwner).slice(0, 10).map((d, i) => ({
-    id: `input-${i}`,
-    title: d,
-    subtitle: "",
-    ownerAgent: inputOwner[d],
-  }));
+
+  // 각 owner 컬럼별로 input 을 복제 배치 → 색상 = 해당 agent 색상 (정렬 보장)
+  const inputs: InputBox[] = [];
+  const _seenTitles = new Set<string>();
+  // agent 순서대로 순회 — 컬럼 정렬 위해 ownerAgent 오름차순
+  for (let ai = 0; ai < effectiveAgents.length; ai++) {
+    for (const d of Object.keys(inputOwners)) {
+      if (!inputOwners[d].includes(ai)) continue;
+      // 같은 title + 같은 ownerAgent 조합만 중복 제거 (다른 agent 컬럼에는 중복 허용)
+      const key = `${ai}::${d}`;
+      if (_seenTitles.has(key)) continue;
+      _seenTitles.add(key);
+      inputs.push({
+        id: `input-${ai}-${inputs.length}`,
+        title: d,
+        subtitle: "",
+        ownerAgent: ai,
+      });
+      if (inputs.length >= 20) break;
+    }
+    if (inputs.length >= 20) break;
+  }
 
   // Senior AI: agent_type="Senior AI"인 첫 번째 에이전트를 오케스트레이터로 사용
   const seniorAgent = result.agents.find((a) => a.agent_type === "Senior AI");
@@ -534,44 +552,58 @@ export default function WorkflowEditor({ result, onSave }: WorkflowEditorProps) 
         <div style={{ transform: `scale(${zoom / 100})`, transformOrigin: "top left", minWidth: zoom < 100 ? `${100 / (zoom / 100)}%` : "100%" }}>
         <div ref={diagramRef} style={{ borderColor: "#D3D1C7" }}>
 
-        {/* ── INPUT 레인 ───────────────────────────────────────────────── */}
+        {/* ── INPUT 레인 — Junior AI 컬럼과 동일한 grid 로 정렬 (색상 매칭 가시화) ── */}
         <div className="grid" style={{ gridTemplateColumns: "56px 1fr", borderBottom: "0.5px solid #D3D1C7" }}>
           <div className="flex flex-col items-center justify-center gap-1 p-2 border-r bg-white" style={{ borderColor: "#D3D1C7" }}>
             <span className="text-lg">📥</span>
             <span className="text-[9px] font-bold text-[#5F5E5A]">Input</span>
           </div>
           <div className="p-3" style={{ backgroundColor: "#FAFAF8" }}>
-            <div className="flex gap-2 flex-wrap">
-              {data.inputs.map((inp, i) => (
-                <div key={inp.id}
-                  className="flex-1 min-w-[120px] rounded-lg p-2 border-2 text-center cursor-pointer hover:ring-2 hover:ring-[#A62121] transition-shadow"
-                  style={{ backgroundColor: "#F5F4F1", borderColor: agentColor(inp.ownerAgent) }}
-                  onClick={() => setEditingInput(i)}>
-                  <div className="text-[9.5px] font-semibold text-[#2C2C2A]">{inp.title}</div>
-                  {inp.subtitle && <div className="text-[8px] text-[#888780]">{inp.subtitle}</div>}
-                </div>
-              ))}
-              <button onClick={addInput}
-                className="min-w-[60px] rounded-lg border-2 border-dashed p-2 text-[10px] text-gray-400 hover:text-[#A62121] hover:border-[#A62121] transition-colors"
-                style={{ borderColor: "#D3D1C7" }}>
-                <Plus className="h-4 w-4 mx-auto" />
-              </button>
+            <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${Math.max(data.agents.length, 1)}, 1fr)` }}>
+              {data.agents.map((_agent, ai) => {
+                const colInputs = data.inputs
+                  .map((inp, originalIdx) => ({ inp, originalIdx }))
+                  .filter(({ inp }) => inp.ownerAgent === ai);
+                return (
+                  <div key={`input-col-${ai}`} className="flex flex-col gap-1.5">
+                    {colInputs.map(({ inp, originalIdx }) => (
+                      <div key={inp.id}
+                        className="rounded-lg p-2 border-2 text-center cursor-pointer hover:ring-2 hover:ring-[#A62121] transition-shadow"
+                        style={{ backgroundColor: "#F5F4F1", borderColor: agentColor(inp.ownerAgent) }}
+                        onClick={() => setEditingInput(originalIdx)}>
+                        <div className="text-[9.5px] font-semibold text-[#2C2C2A]">{inp.title}</div>
+                        {inp.subtitle && <div className="text-[8px] text-[#888780]">{inp.subtitle}</div>}
+                      </div>
+                    ))}
+                    {ai === data.agents.length - 1 && (
+                      <button onClick={addInput}
+                        className="rounded-lg border-2 border-dashed p-2 text-[10px] text-gray-400 hover:text-[#A62121] hover:border-[#A62121] transition-colors"
+                        style={{ borderColor: "#D3D1C7" }}>
+                        <Plus className="h-4 w-4 mx-auto" />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
 
-        {/* ── Input → Junior AI 직접 연결선 (Agent 색상) ──────────────── */}
+        {/* ── Input → Junior AI 직접 연결선 (Agent 색상, 컬럼 정렬) ──────── */}
         <div className="grid" style={{ gridTemplateColumns: "56px 1fr" }}>
           <div className="border-r bg-white" style={{ borderColor: "#D3D1C7" }} />
           <div className="py-1 px-3" style={{ backgroundColor: "#FAFAF8" }}>
-            <div className="flex gap-2" style={{ paddingLeft: data.inputs.length > 0 ? "0" : "40%" }}>
-              {data.inputs.map((inp, i) => (
-                <div key={`conn-${i}`} className="flex-1 flex justify-center">
-                  <div className="flex flex-col items-center">
-                    <div className="w-[2px] h-3" style={{ backgroundColor: agentColor(inp.ownerAgent) }} />
+            <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${Math.max(data.agents.length, 1)}, 1fr)` }}>
+              {data.agents.map((_agent, ai) => {
+                const hasInput = data.inputs.some((inp) => inp.ownerAgent === ai);
+                return (
+                  <div key={`conn-col-${ai}`} className="flex justify-center">
+                    {hasInput && (
+                      <div className="w-[2px] h-3" style={{ backgroundColor: agentColor(ai) }} />
+                    )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>
