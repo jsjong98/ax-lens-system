@@ -17,8 +17,8 @@ import openpyxl
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import Alignment, Border, Side
 
-# 데이터 시작 행 (헤더 4~9, 데이터는 10부터)
-_DATA_START_ROW = 10
+# 데이터 시작 행 (헤더 4~9, 10행은 템플릿 예시/여백으로 비움, 실제 데이터는 11행부터)
+_DATA_START_ROW = 11
 
 # As-Is 템플릿의 열 레이아웃 (1-based)
 _COL = {
@@ -63,11 +63,13 @@ def _find_data_sheet(wb) -> Any | None:
 
 
 def _clear_data_rows(ws) -> None:
-    """데이터 시작 행부터 마지막까지 비움 (스타일 유지)."""
+    """10행(템플릿 예시) + 실제 데이터 행 전부 비움 (스타일 유지)."""
     max_row = ws.max_row
-    if max_row < _DATA_START_ROW:
+    # 10행부터 끝까지 비움 (실제 데이터는 11행부터 다시 쓰기 시작)
+    start_clear = 10
+    if max_row < start_clear:
         return
-    for r in range(_DATA_START_ROW, max_row + 1):
+    for r in range(start_clear, max_row + 1):
         for c in range(1, min(ws.max_column + 1, 100)):
             cell = ws.cell(r, c)
             if cell.value is not None and not isinstance(cell, openpyxl.cell.cell.MergedCell):
@@ -200,6 +202,47 @@ def export_tobe_excel(
     # 엑셀 task를 id 기준 인덱스 (원본 performer 필드 참조)
     task_by_id: dict[str, Any] = {t.id: t for t in (excel_tasks or [])}
 
+    # ── NEW_xxx 같은 임시 ID 를 실제 L5 순번(예: 2.1.4.16)으로 치환하는 카운터 ──
+    # L4 별 현재 최대 L5 seq 추적 (excel_tasks 에서 파싱)
+    l4_max_seq: dict[str, int] = {}
+    for et in (excel_tasks or []):
+        if et.id:
+            parts = et.id.split(".")
+            if len(parts) >= 4:
+                l4 = ".".join(parts[:3])
+                try:
+                    seq = int(parts[3])
+                    l4_max_seq[l4] = max(l4_max_seq.get(l4, 0), seq)
+                except ValueError:
+                    pass
+
+    def _resolve_l5_id(raw_tid: str, l4_hint: str) -> str:
+        """
+        raw_tid 가 'NEW_xxx' / 빈 값 / 숫자 포맷 아닐 때 L4 기준 다음 순번 할당.
+        유효한 숫자 포맷이면 그대로 반환.
+        """
+        tid = (raw_tid or "").strip()
+        # 이미 올바른 L5 숫자 포맷이면 그대로
+        if tid:
+            parts = tid.split(".")
+            if len(parts) == 4 and all(p.replace(' ', '').isdigit() for p in parts):
+                return tid
+        # L4 id 추정: scope 에서 추정 or l4_hint 에서 찾기
+        l4_id = ""
+        if l4_hint:
+            # l4_hint 가 이름이면 excel_tasks 에서 매칭되는 l4_id 찾기
+            for et in (excel_tasks or []):
+                if et.l4 and et.l4.strip() == l4_hint.strip():
+                    l4_id = et.l4_id or ""
+                    break
+        # scope 에서 primary L4 추정
+        if not l4_id and scope_l4_ids:
+            l4_id = next(iter(scope_l4_ids))
+        if not l4_id:
+            return tid  # L4 를 알 수 없으면 원본 유지
+        l4_max_seq[l4_id] = l4_max_seq.get(l4_id, 0) + 1
+        return f"{l4_id}.{l4_max_seq[l4_id]}"
+
     def _performer_fields_from_task(orig_task: Any | None) -> dict[str, str]:
         """원본 As-Is Task의 performer 필드를 dict로 반환."""
         if orig_task is None:
@@ -243,11 +286,14 @@ def export_tobe_excel(
                 "l4_name": (orig_task.l4 if orig_task else "") or t.get("l4", ""),
             }
 
+            # L5 ID 치환: NEW_xxx / 빈값 / 비표준 포맷이면 {l4_id}.N 순번 할당
+            display_l5_id = _resolve_l5_id(tid, l4_hint)
+
             # AI 파트 행 — performer는 Agent 타입명 (원본 performer 체크박스 미설정, AI 수행이므로)
             ai_part_desc = t.get("ai_role", "") or t.get("task_name", "")
             values = {
                 **base,
-                "l5_id": tid,
+                "l5_id": display_l5_id,
                 "l5_name": f"[AI] {t.get('task_name', '')}",
                 "l5_desc": ai_part_desc,
                 "performer": f"{atype} — {agent_name}",
@@ -281,9 +327,10 @@ def export_tobe_excel(
                     # performer: 원본 As-Is Task의 수행주체를 그대로 복사
                     # (원본이 임원/팀장/구성원이면 그대로 유지. HR로 바꾸지 않음)
                     performer_vals = _performer_fields_from_task(orig_task)
+                    # Human 파트 행은 AI 행과 **같은 display_l5_id 재사용** (같은 task 의 두 측면)
                     values_h = {
                         **base,
-                        "l5_id": tid,
+                        "l5_id": display_l5_id,
                         "l5_name": f"[Human] {t.get('task_name', '')} 검토",
                         "l5_desc": human_part,
                         **performer_vals,
