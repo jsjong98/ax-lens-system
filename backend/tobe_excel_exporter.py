@@ -258,7 +258,9 @@ def export_tobe_excel(
             "performer_member": orig_task.performer_member or "",
         }
 
-    row = _DATA_START_ROW
+    # 🔑 행을 즉시 쓰지 말고 버퍼에 모은 뒤 L4 별로 재번호한다 (1부터 sequential)
+    # 각 버퍼 항목 형식: {"l4_id": ..., "original_seq": int|None, "kind": 'ai'|'human_part'|'human_asis', "pair_key": ..., "values": {...}}
+    buffered_rows: list[dict] = []
 
     # ── 1. Senior/Junior AI task — 스코프 내만 ──
     for agent in step2_cache.get("agents", []):
@@ -285,19 +287,25 @@ def export_tobe_excel(
                 "l4_id": (orig_task.l4_id if orig_task else "") or "",
                 "l4_name": (orig_task.l4 if orig_task else "") or t.get("l4", ""),
             }
+            row_l4 = base["l4_id"]
 
-            # L5 ID 치환: NEW_xxx / 빈값 / 비표준 포맷이면 {l4_id}.N 순번 할당
-            display_l5_id = _resolve_l5_id(tid, l4_hint)
+            # 원본 task_id의 L5 seq 추출 (정렬 기준 — 없으면 None)
+            orig_seq: int | None = None
+            tparts = tid.split(".")
+            if len(tparts) == 4 and all(p.isdigit() for p in tparts):
+                try:
+                    orig_seq = int(tparts[3])
+                except ValueError:
+                    orig_seq = None
 
-            # AI 파트 행 — performer는 Agent 타입명 (원본 performer 체크박스 미설정, AI 수행이므로)
+            # AI 파트 행
             ai_part_desc = t.get("ai_role", "") or t.get("task_name", "")
             values = {
                 **base,
-                "l5_id": display_l5_id,
+                "l5_id": "",   # ← 나중에 재번호
                 "l5_name": f"[AI] {t.get('task_name', '')}",
                 "l5_desc": ai_part_desc,
                 "performer": f"{atype} — {agent_name}",
-                # AI 수행이므로 As-Is의 임원/HR/팀장/구성원 체크박스는 공란
                 "performer_executive": "",
                 "performer_hr": "",
                 "performer_manager": "",
@@ -311,8 +319,13 @@ def export_tobe_excel(
                 "cls_final_label":    orig_label or "AI",
                 "cls_final_feedback": cls.get("feedback", ""),
             }
-            _write_row(ws, row, values)
-            row += 1
+            buffered_rows.append({
+                "l4_id": row_l4,
+                "original_seq": orig_seq,
+                "kind": "ai",
+                "pair_key": tid or f"ai_{len(buffered_rows)}",
+                "values": values,
+            })
 
             # AI+Human 인 경우 Human 파트 별도 행
             is_hybrid = (orig_label == "AI + Human") or bool(t.get("human_role"))
@@ -324,13 +337,10 @@ def export_tobe_excel(
                         human_part = hn.split("Human 파트:", 1)[1].strip()
 
                 if human_part:
-                    # performer: 원본 As-Is Task의 수행주체를 그대로 복사
-                    # (원본이 임원/팀장/구성원이면 그대로 유지. HR로 바꾸지 않음)
                     performer_vals = _performer_fields_from_task(orig_task)
-                    # Human 파트 행은 AI 행과 **같은 display_l5_id 재사용** (같은 task 의 두 측면)
                     values_h = {
                         **base,
-                        "l5_id": display_l5_id,
+                        "l5_id": "",   # 재번호 (AI 행과 같은 번호 부여)
                         "l5_name": f"[Human] {t.get('task_name', '')} 검토",
                         "l5_desc": human_part,
                         **performer_vals,
@@ -343,8 +353,13 @@ def export_tobe_excel(
                         "cls_final_label":    "Human",
                         "cls_final_feedback": cls.get("feedback", ""),
                     }
-                    _write_row(ws, row, values_h)
-                    row += 1
+                    buffered_rows.append({
+                        "l4_id": row_l4,
+                        "original_seq": orig_seq,
+                        "kind": "human_part",
+                        "pair_key": tid or f"ai_{len(buffered_rows)}",   # AI 행과 동일 pair_key → 같은 번호
+                        "values": values_h,
+                    })
 
     # ── 2. Human으로 분류된 As-Is L5 — 스코프 내만, AI Agent에 미포함 ──
     agent_task_ids: set[str] = set()
@@ -364,11 +379,20 @@ def export_tobe_excel(
         if not _task_in_scope(t.id, l4_hint, scope_l4_ids, scope_l4_names):
             continue
 
+        # 원본 L5 seq 추출 (정렬용)
+        h_orig_seq: int | None = None
+        hparts = t.id.split(".") if t.id else []
+        if len(hparts) == 4 and all(p.isdigit() for p in hparts):
+            try:
+                h_orig_seq = int(hparts[3])
+            except ValueError:
+                h_orig_seq = None
+
         values = {
             "l2_id": t.l2_id or "", "l2_name": t.l2,
             "l3_id": t.l3_id or "", "l3_name": t.l3,
             "l4_id": t.l4_id or "", "l4_name": t.l4,
-            "l5_id": t.id,
+            "l5_id": "",   # 재번호
             "l5_name": f"[Human] {t.name}",
             "l5_desc": t.description or "",
             # Human L5 — 원본 As-Is의 performer 필드 그대로
@@ -386,7 +410,53 @@ def export_tobe_excel(
             "cls_final_label":    label,
             "cls_final_feedback": cls.get("feedback", ""),
         }
-        _write_row(ws, row, values)
+        buffered_rows.append({
+            "l4_id": t.l4_id or "",
+            "original_seq": h_orig_seq,
+            "kind": "human_asis",
+            "pair_key": t.id or f"human_{len(buffered_rows)}",
+            "values": values,
+        })
+
+    # ── 🔑 L4 별 재번호: 1부터 sequential 할당 ───────────────────────────────
+    # 정렬 규칙 (각 L4 내부):
+    #   1) original_seq 가 있는 행이 먼저 (As-Is 원본 순서 유지)
+    #   2) original_seq 가 없는 신규 task 들이 뒤에
+    #   3) 같은 pair_key (AI + Human part 쌍) 는 같은 번호 부여 (두 행 연속 배치)
+    from collections import defaultdict as _dd
+    by_l4: dict[str, list[dict]] = _dd(list)
+    for br in buffered_rows:
+        by_l4[br["l4_id"]].append(br)
+
+    # L4 정렬 (l4_id 오름차순)
+    sorted_l4s = sorted(by_l4.keys())
+
+    final_rows: list[dict] = []
+    for l4_id in sorted_l4s:
+        items = by_l4[l4_id]
+        # 1차 정렬: (original_seq or inf, pair_key)
+        items.sort(key=lambda x: (
+            x["original_seq"] if x["original_seq"] is not None else 10**9,
+            x["pair_key"],
+            0 if x["kind"] == "ai" else (1 if x["kind"] == "human_part" else 2),
+        ))
+
+        # pair_key 단위로 그룹핑하여 번호 부여 (같은 pair → 같은 번호)
+        seq_counter = 0
+        pair_to_seq: dict[str, int] = {}
+        for br in items:
+            pk = br["pair_key"]
+            if pk not in pair_to_seq:
+                seq_counter += 1
+                pair_to_seq[pk] = seq_counter
+            # 최종 L5 ID 할당
+            br["values"]["l5_id"] = f"{l4_id}.{pair_to_seq[pk]}" if l4_id else ""
+            final_rows.append(br)
+
+    # ── Excel 쓰기 (11행부터) ────────────────────────────────────────────────
+    row = _DATA_START_ROW
+    for br in final_rows:
+        _write_row(ws, row, br["values"])
         row += 1
 
     wb.save(output_path)
