@@ -4771,7 +4771,7 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
             actor_lane = "HR 담당자"
 
         # 짧은 타이틀 = "{AI task 이름 (AI 파트/(AI 파트) 접미사 제거)} 검토"
-        # → 한눈에 무슨 검토인지 드러나도록
+        # → 한눈에 무슨 검토인지 드러나도록 (단, 이미 검토/확정/승인 등 종료어가 있으면 중복 안 함)
         raw_task_label = str(jnode.get("label") or "")
         clean_task_name = (
             raw_task_label
@@ -4780,7 +4780,15 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
             .replace(" - AI 파트", "")
             .strip()
         )
-        review_title = f"{clean_task_name} 검토" if clean_task_name else "AI 결과 검토"
+        # 종료어 중복 방지: clean_task_name 이 이미 검토/확정/승인/검증 등으로 끝나면
+        # "검토" 접미를 다시 붙이지 않음
+        _SUFFIX_KEYWORDS = ("검토", "확정", "승인", "검증", "확인", "최종 결정", "판단")
+        if any(clean_task_name.endswith(k) for k in _SUFFIX_KEYWORDS):
+            review_title = clean_task_name
+        elif clean_task_name:
+            review_title = f"{clean_task_name} 검토"
+        else:
+            review_title = "AI 결과 검토"
 
         # 상세 설명: LLM이 제시한 구체 action > human_role > 기본 문구
         review_description = llm_action or human_role or f"{clean_task_name} 결과 검토 및 확정"
