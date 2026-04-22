@@ -5715,6 +5715,24 @@ Step 1에서 도출된 기본 설계를 기반으로, 두산에 최적화된 **A
     result_dict = result_to_dict(parsed)
     result_dict["design_philosophy"] = result_data.get("design_philosophy", "")
 
+    # ── task별 ai_technique 준수 여부 진단 로그 ──
+    # LLM 이 프롬프트 지침을 무시하고 task.ai_technique 을 비우면 frontend/html 이
+    # agent.ai_technique 으로 fallback 해 모든 task 가 동일한 기술 스택으로 보임
+    _task_tech_stats = {"total": 0, "has_task_tech": 0, "agent_tech_only": 0}
+    for _a in result_dict.get("agents", []):
+        _agent_tech = (_a.get("ai_technique") or "").strip()
+        for _t in _a.get("assigned_tasks", []):
+            _task_tech_stats["total"] += 1
+            _task_tech = (_t.get("ai_technique") or "").strip()
+            if _task_tech and _task_tech != _agent_tech:
+                _task_tech_stats["has_task_tech"] += 1
+            else:
+                _task_tech_stats["agent_tech_only"] += 1
+    print(f"[STEP2] task별 ai_technique 준수: "
+          f"{_task_tech_stats['has_task_tech']}/{_task_tech_stats['total']} task 고유 | "
+          f"{_task_tech_stats['agent_tech_only']}개 task 는 agent fallback "
+          f"(agent와 같거나 빈 값)", flush=True)
+
     # Pain Point 가시성: Step 2 설계에 실제 반영된 Pain Point + 분류 맥락을 결과에 저장
     pain_context_items = []
     for _t in scoped_tasks_step2:
