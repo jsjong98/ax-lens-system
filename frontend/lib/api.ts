@@ -957,6 +957,15 @@ export interface PainContextItem {
   pain_points: Array<{ type: string; text: string }>;
 }
 
+export interface HumanOnlyTask {
+  task_id: string;
+  task_name: string;
+  l4: string;
+  l3: string;
+  actor: string;       // HR 임원 · HR 담당자 · 현업 팀장 등
+  description: string;
+}
+
 export interface WorkflowStepResult extends NewWorkflowResult {
   benchmark_insights?: Array<{ source: string; insight: string; application: string }> | string[];
   l2_restructure?: string;
@@ -964,6 +973,7 @@ export interface WorkflowStepResult extends NewWorkflowResult {
   redesigned_process?: RedesignedL3[];
   pain_context?: PainContextItem[];
   classification_stats?: { AI: number; "AI + Human": number; Human: number };
+  human_only_tasks?: HumanOnlyTask[];
 }
 
 export interface WorkflowChatResponse {

@@ -6194,6 +6194,38 @@ Step 1에서 도출된 기본 설계를 기반으로, 두산에 최적화된 **A
     result_dict["pain_context"] = pain_context_items
     result_dict["classification_stats"] = cls_stats
 
+    # ── Human 전용 task (cls='Human') 를 AI Service Flow 에서도 보이도록 포함 ──
+    # 기존에는 agents.assigned_tasks (AI 로 자동화되는 것) 만 보였는데,
+    # HR 임원 에게 '서류 합격자 보고' 같은 사람 수행 task 는 어디에도 안 나타남.
+    # → Human 분류 task 를 human_only_tasks 로 내려서 프론트가 actor 별로 lane 표시.
+    asis_role_map: dict[str, str] = {}
+    if "parsed" in _workflow_cache:
+        _parsed = _workflow_cache["parsed"]
+        for _sh in _parsed.sheets:
+            for _nd in _sh.nodes.values():
+                if _nd.task_id and _nd.level == "L5":
+                    _rr = _nd.metadata.get("role") or _nd.metadata.get("actors") or ""
+                    _acts, _ = _parse_role_string(_rr)
+                    if _acts:
+                        asis_role_map[_nd.task_id] = _acts[0]
+    human_only_tasks: list[dict] = []
+    for _t in scoped_tasks_step2:
+        _cls = _wf_classification.get(_t.id, {})
+        if _cls.get("label") != "Human":
+            continue
+        _actor = asis_role_map.get(_t.id, "") or "HR 담당자"
+        human_only_tasks.append({
+            "task_id": _t.id,
+            "task_name": _t.name,
+            "l4": _t.l4,
+            "l3": _t.l3,
+            "actor": _actor,
+            "description": _cls.get("reason", "") or "",
+        })
+    result_dict["human_only_tasks"] = human_only_tasks
+    print(f"[STEP2] Human 전용 task {len(human_only_tasks)}건 수집 (actor 별 AI Service Flow 표시)",
+          flush=True)
+
     global _wf_step2_cache
     _wf_step2_cache = result_dict
     if _current_session_id:

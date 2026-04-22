@@ -37,11 +37,24 @@ interface HumanTask {
   column: number; // 어떤 agent column 아래에 위치할지 (0-based)
 }
 
+interface HumanOnlyLaneTask {
+  id: string;
+  task_id: string;
+  title: string;
+  description: string;
+}
+
+interface HumanOnlyLane {
+  actor: string;                    // 예: HR 임원, 현업 팀장
+  tasks: HumanOnlyLaneTask[];
+}
+
 interface SwimlaneData {
   inputs: InputBox[];
   seniorAI: { title: string; description: string };
   agents: AgentColumn[];
   humanTasks: HumanTask[];
+  humanOnlyLanes: HumanOnlyLane[];
 }
 
 /* ── 뱃지 옵션 ────────────────────────────────────────────────────────────── */
@@ -92,7 +105,12 @@ function Badge({ value }: { value: string }) {
 }
 
 /* ── Workflow → Swimlane 변환 ─────────────────────────────────────────────── */
-function workflowToSwimlane(result: NewWorkflowResult): SwimlaneData {
+function workflowToSwimlane(result: NewWorkflowResult & {
+  human_only_tasks?: Array<{
+    task_id: string; task_name: string; l4: string; l3: string;
+    actor: string; description: string;
+  }>;
+}): SwimlaneData {
   // Junior AI 먼저 필터링 — inputOwner 인덱스를 Junior AI 기준으로 통일
   const juniorAgents = result.agents.filter((a) => a.agent_type === "Junior AI");
   const effectiveAgents = juniorAgents.length > 0 ? juniorAgents : result.agents;
@@ -191,7 +209,30 @@ function workflowToSwimlane(result: NewWorkflowResult): SwimlaneData {
       });
   });
 
-  return { inputs, seniorAI, agents, humanTasks };
+  // Human 전용 Task → actor 별 lane 구성 (HR 임원 보고 등 AI 가 대체 안 하는 사람 행동)
+  // 표준 lane 순서: 임원 → 현업 팀장 → HR 임원 → HR 담당자 → 현업 구성원 → 그 외
+  const LANE_ORDER = ["임원", "현업 팀장", "HR 임원", "HR 담당자", "현업 구성원", "그 외"];
+  const humanGrouped: Record<string, HumanOnlyLaneTask[]> = {};
+  for (const ht of result.human_only_tasks ?? []) {
+    const actor = ht.actor || "그 외";
+    (humanGrouped[actor] ??= []).push({
+      id: `human-only-${ht.task_id}`,
+      task_id: ht.task_id,
+      title: ht.task_name,
+      description: ht.description || "",
+    });
+  }
+  const humanOnlyLanes: HumanOnlyLane[] = LANE_ORDER
+    .filter((a) => humanGrouped[a]?.length)
+    .map((actor) => ({ actor, tasks: humanGrouped[actor] }))
+    .concat(
+      // LANE_ORDER 에 없는 actor 도 뒤에 추가 (예외적 actor 대응)
+      Object.keys(humanGrouped)
+        .filter((a) => !LANE_ORDER.includes(a))
+        .map((actor) => ({ actor, tasks: humanGrouped[actor] }))
+    );
+
+  return { inputs, seniorAI, agents, humanTasks, humanOnlyLanes };
 }
 
 /* ── 편집 모달 ────────────────────────────────────────────────────────────── */
@@ -367,6 +408,10 @@ interface WorkflowEditorProps {
       pain_points: Array<{ type: string; text: string }>;
     }>;
     classification_stats?: { AI: number; "AI + Human": number; Human: number };
+    human_only_tasks?: Array<{
+      task_id: string; task_name: string; l4: string; l3: string;
+      actor: string; description: string;
+    }>;
   };
   onSave: (updated: SwimlaneData) => void;
 }
@@ -737,11 +782,38 @@ export default function WorkflowEditor({ result, onSave }: WorkflowEditorProps) 
           </div>
         </div>
 
-        {/* ── HR 담당자 레인 ──────────────────────────────────────────── */}
+        {/* ── Human 전용 task 레인 (HR 임원 보고 등 AI 가 대체 안 하는 사람 행동) ── */}
+        {data.humanOnlyLanes.map((lane) => (
+          <div key={`human-only-${lane.actor}`} className="grid" style={{ gridTemplateColumns: "56px 1fr", borderBottom: "0.5px solid #D3D1C7" }}>
+            <div className="flex flex-col items-center justify-center gap-1 p-2 border-r bg-white" style={{ borderColor: "#D3D1C7" }}>
+              <span className="text-lg">🧑</span>
+              <span className="text-[8.5px] font-bold text-[#2C2C2A] text-center leading-tight">
+                {lane.actor.split(" ").map((w, i) => <div key={i}>{w}</div>)}
+              </span>
+            </div>
+            <div className="p-3" style={{ backgroundColor: "#F9F7F2" }}>
+              <div className="flex gap-2 flex-wrap">
+                {lane.tasks.map((t) => (
+                  <div key={t.id}
+                    className="flex-1 min-w-[140px] rounded-lg p-2 border-2 text-center"
+                    style={{ backgroundColor: "#FFFFFF", borderColor: "#7A7265" }}
+                    title={t.description}>
+                    <div className="text-[9.5px] font-semibold text-[#2C2C2A]">{t.title}</div>
+                    {t.task_id && (
+                      <div className="text-[8px] text-[#888780] mt-0.5">{t.task_id}</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        ))}
+
+        {/* ── HR 담당자 레인 (AI 검토용) ──────────────────────────────────── */}
         <div className="grid" style={{ gridTemplateColumns: "56px 1fr" }}>
           <div className="flex flex-col items-center justify-center gap-1 p-2 border-r bg-white" style={{ borderColor: "#D3D1C7" }}>
             <span className="text-lg">👤</span>
-            <span className="text-[9px] font-bold text-[#2C2C2A]">HR<br/>담당자</span>
+            <span className="text-[9px] font-bold text-[#2C2C2A]">HR<br/>담당자<br/>(AI 검토)</span>
           </div>
           <div className="p-3" style={{ backgroundColor: "#FAFAF8" }}>
             <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${Math.max(data.agents.length, 1)}, 1fr)` }}>
