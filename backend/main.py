@@ -3899,6 +3899,7 @@ async def add_url_resource(request: Request):
         "title": fetched["title"],
         "content": fetched["content"],
         "added_at": _now_kst(),
+        "processed": False,   # 다음 채팅 때 벤치마킹 테이블로 추출
     }
     _wf_user_resources.append(resource)
     _save_session_data(_current_session_id)
@@ -3942,6 +3943,7 @@ async def add_image_resource(request: Request):
         "image_path": img_path,
         "image_b64": image_b64,   # 메모리에만 보관 (session_data 저장 시 제외)
         "added_at": _now_kst(),
+        "processed": False,   # 다음 채팅 때 벤치마킹 테이블로 추출
     }
     _wf_user_resources.append(resource)
     _save_session_data(_current_session_id)
@@ -5493,9 +5495,21 @@ async def chat_workflow_step1(request: Request):
     new_bm_entries: list[dict] = []
     raw_search_context = ""   # 채팅 LLM에 직접 전달할 실제 검색 결과 텍스트
 
-    # 엑셀 데이터가 로드된 경우 항상 추가 벤치마킹 검색 수행
-    # (채팅의 핵심 목적: Excel/JSON/PPT 업무 내용 기반으로 추가 사례 발굴)
-    if _wf_excel_tasks:
+    # 🔑 사용자 의도 감지 — 매 채팅마다 Perplexity 돌리는 게 아니라 조건부 실행
+    # 1) 메시지에 기업명 언급됨 → 해당 기업 벤치마킹 검색
+    # 2) 벤치마킹 요청 키워드 ("벤치마킹", "사례", "찾아", "검색") → Perplexity 호출
+    # 3) 그 외 (단순 Q&A) → 검색 건너뜀 (빠른 응답)
+    _BM_INTENT_KEYWORDS = ["벤치마킹", "사례", "찾아", "검색", "선도사", "best practice", "case study"]
+    wants_bm_search = (
+        bool(company_pattern)
+        or any(kw in user_message.lower() for kw in _BM_INTENT_KEYWORDS)
+    )
+
+    # 새로 첨부된 리소스 (processed=False) — 채팅 시 자동으로 벤치마킹 항목 추출
+    _new_resources = [r for r in _wf_user_resources if not r.get("processed")]
+
+    # 엑셀 데이터 로드 + 벤치마킹 의도 있을 때만 Perplexity 검색
+    if _wf_excel_tasks and wants_bm_search:
         companies = list(set(company_pattern)) if company_pattern else []
 
         # JSON 전체 시트 기준 L4 ID 수집
@@ -5645,6 +5659,66 @@ L4 활동: {', '.join(bm_data['l4_names'][:4])}
                         _wf_benchmark_table[chat_sheet_key].append(entry)
             extra_bm_text = f"\n\n[✅ Perplexity 검색 완료 — 3라운드 {len(sorted_qg)}개 쿼리 실행, {len(new_bm_entries)}건 사례 분석]"
 
+    # 🔑 새로 첨부된 리소스 (캡쳐·URL) → 그 내용에서 벤치마킹 항목 추출
+    # Perplexity 검색 없이 리소스 content 에서만 LLM 으로 추출 → 빠름
+    # 사용자가 "이 캡쳐 벤치마킹에 넣어줘" 라고 하지 않아도 새 리소스면 자동 추출
+    if _new_resources:
+        resource_text = ""
+        for i, r in enumerate(_new_resources[:5]):   # 최대 5건
+            rtype = "URL" if r.get("type") == "url" else "이미지"
+            resource_text += (
+                f"\n────── 리소스 {i+1} ({rtype}) ──────\n"
+                f"제목: {r.get('title','')}\n"
+                f"출처: {r.get('source','')}\n"
+                f"내용: {r.get('content','')[:2000]}\n"
+            )
+        res_extract_sys = f"""당신은 벤치마킹 사례 추출 전문가입니다.
+사용자가 첨부한 리소스(URL 본문·이미지 분석 결과)에서 '{process_name}' 프로세스에 관련된
+**AI 도입 사례**를 벤치마킹 테이블 항목으로 추출하세요.
+
+## 🚨 엄격 규칙
+- source: AI 솔루션을 실제로 도입·운영한 구체 기업명 (실명, 글로벌 인지도)
+- ❌ 익명·추상 표현 금지 ("한 제조사", "글로벌 HR 부서", "Fortune 500" 등)
+- ❌ 솔루션 제공자(Workday/SAP 등)를 도입 기업으로 쓰지 말 것
+- ❌ 기업명이 명확히 없으면 해당 항목 **DROP** (억지로 만들지 말 것)
+- url: 리소스 '출처' 가 URL 이면 그 URL 사용. 이미지·인쇄물이면 url 빈 값 허용
+- {process_name} 과 무관한 사례는 제외
+
+## 출력 형식 (JSON만)
+{{"benchmark_table": [{{"source":"기업명","company_type":"Tech 선도 | 非Tech 실제 구현","industry":"","process_area":"","ai_adoption_goal":"","ai_technology":"","key_data":"","adoption_method":"","use_case":"","outcome":"","infrastructure":"","implication":"","url":""}}]}}"""
+        try:
+            _res_bm = await _call_llm_step1(
+                res_extract_sys,
+                [{"role": "user", "content": f"## 첨부 리소스\n{resource_text}"}],
+                max_tokens=8192,
+            )
+            if _res_bm and _res_bm.get("benchmark_table"):
+                _res_entries = _res_bm["benchmark_table"]
+                _sheet_key = sheet_id or "__chat__"
+                _existing_sources = {b.get("source", "") for rows in _wf_benchmark_table.values() for b in rows}
+                if _sheet_key not in _wf_benchmark_table:
+                    _wf_benchmark_table[_sheet_key] = []
+                _added_from_resource = 0
+                for entry in _res_entries:
+                    src = entry.get("source", "")
+                    if (src and src not in _existing_sources
+                            and _is_valid_benchmark_source(src)
+                            and (entry.get("use_case") or entry.get("outcome"))):
+                        _wf_benchmark_table[_sheet_key].append(entry)
+                        new_bm_entries.append(entry)
+                        _added_from_resource += 1
+                extra_bm_text += (
+                    f"\n\n[📎 첨부 리소스에서 벤치마킹 {_added_from_resource}건 추출 "
+                    f"({len(_new_resources)}개 리소스 분석)]"
+                )
+                print(f"[CHAT] 리소스 기반 벤치마킹 추출 — {_added_from_resource}건 추가", flush=True)
+        except Exception as _e:
+            print(f"[CHAT] 리소스 추출 실패 (무시): {_e}", flush=True)
+
+        # processed 마킹 — 같은 리소스 재추출 방지
+        for r in _new_resources:
+            r["processed"] = True
+
     # 기존 설계 결과 or 벤치마킹 결과가 있으면 포함
     context = ""
     if _wf_step1_cache:
@@ -5673,9 +5747,12 @@ L4 활동: {', '.join(bm_data['l4_names'][:4])}
 - ✅ 허용: 추가 사례 조사 결과 설명, 사용자 질문에 대한 답변, 벤치마킹 테이블에 새 기업 사례를 찾아 추가
 - ❌ **절대 금지**: Step 1 기본 설계(redesigned_process, agents 같은 구조) JSON 반환
 - ❌ 금지: L3/L4/L5 재설계, automation_level/ai_technique 등 설계 의사결정을 직접 내리지 말 것
+- ❌ 금지: "기본 설계를 다음과 같이 업데이트했습니다/수정하겠습니다" 같이 설계 변경을 단언하는 표현
+  (설계 변경은 사용자가 '기본 설계 재생성' 버튼을 눌러야만 실행됨. 채팅은 그 전까지 정보 수집·제안 단계)
 
-사용자가 설계 반영을 원하면 → "추가된 벤치마킹 사례를 반영하려면 **[기본 설계 재생성]** 버튼을 눌러주세요"로 안내하세요.
+사용자가 설계 반영을 원하면 → "추가된 벤치마킹 사례가 테이블에 반영되었습니다. **[기본 설계 재생성]** 버튼을 눌러야 이 내용이 설계에 들어갑니다" 로 안내하세요.
 
+첨부한 캡쳐·URL 도 벤치마킹 테이블 항목으로 자동 추출되며, 설계에는 반영되지 않습니다.
 채팅은 벤치마킹 enrichment 까지만, 그 다음 Gap 분석·기본 설계 생성은 사용자가 명시적으로 버튼을 눌러 단계별로 진행합니다.
 
 ## 출력 형식
