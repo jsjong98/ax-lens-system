@@ -2897,22 +2897,36 @@ def _inject_background_benchmarks():
     - 엑셀 업로드 / 세션 로드 시 호출 → 프론트가 /benchmark-table 로 불러갈 때 이미 포함됨
     - Step 1 프롬프트도 이 테이블을 참조하므로, Perplexity 검색 없이도 기본 벤치마킹으로 Step 1 실행 가능
     - 기존 동적 벤치마킹(sheet_id 별) 과 공존 — '__background__' 키로 분리 저장
+    - 도메인별 모듈 (recruit_benchmarks, evaluation_benchmarks …) 결과를 병합
     """
+    if not _wf_excel_tasks:
+        return
+    l2_names = list({getattr(t, "l2", "") or "" for t in _wf_excel_tasks})
+    l2_names = [n for n in l2_names if n]
+
+    all_rows: list[dict] = []
     try:
-        from recruit_benchmarks import build_background_benchmark_rows
-        if not _wf_excel_tasks:
-            return
-        l2_names = list({getattr(t, "l2", "") or "" for t in _wf_excel_tasks})
-        l2_names = [n for n in l2_names if n]
-        rows = build_background_benchmark_rows(l2_names)
-        if rows:
-            _wf_benchmark_table["__background__"] = rows
-            print(f"[BACKGROUND BM] {len(rows)}건 주입 (L2 매칭: {l2_names})", flush=True)
-        else:
-            # L2 매칭 안 되면 혹시 남아있던 __background__ 제거 (세션 전환 대응)
-            _wf_benchmark_table.pop("__background__", None)
+        from recruit_benchmarks import build_background_benchmark_rows as _build_recruit
+        _recruit_rows = _build_recruit(l2_names)
+        for r in _recruit_rows:
+            r["benchmark_domain"] = r.get("benchmark_domain") or "recruit"
+        all_rows.extend(_recruit_rows)
     except Exception as _e:
-        print(f"[BACKGROUND BM] 주입 실패 (무시): {_e}", flush=True)
+        print(f"[BACKGROUND BM] recruit 주입 실패 (무시): {_e}", flush=True)
+    try:
+        from evaluation_benchmarks import build_background_benchmark_rows as _build_eval
+        _eval_rows = _build_eval(l2_names)
+        all_rows.extend(_eval_rows)  # evaluation 은 자체에서 domain 채움
+    except Exception as _e:
+        print(f"[BACKGROUND BM] evaluation 주입 실패 (무시): {_e}", flush=True)
+
+    if all_rows:
+        _wf_benchmark_table["__background__"] = all_rows
+        _domains = {r.get("benchmark_domain", "?") for r in all_rows}
+        print(f"[BACKGROUND BM] {len(all_rows)}건 주입 (L2 매칭: {l2_names}, 도메인: {_domains})", flush=True)
+    else:
+        # L2 매칭 안 되면 혹시 남아있던 __background__ 제거 (세션 전환 대응)
+        _wf_benchmark_table.pop("__background__", None)
 
 
 @app.get("/api/workflow/background-benchmarks", tags=["Workflow"])
@@ -2922,19 +2936,33 @@ async def get_background_benchmarks():
     - UI 의 'Background BM' 블록 상단에 title chip 으로 표시
     - 실제 테이블 행은 /benchmark-table 의 '__background__' 키에 들어 있음
     - L2 매칭 안 되면 빈 배열 반환 (UI 섹션 자동 숨김)
+    - recruit + evaluation 도메인 병합 (case_no 는 도메인 prefix 로 구분)
     """
-    from recruit_benchmarks import get_background_cases_for_tasks
-    cases = get_background_cases_for_tasks(_wf_excel_tasks)
-    # 기존 ReferenceBenchmark 필드 유지 (case_no, title, companies, applicable_l2)
-    refs = [
-        {
-            "case_no": c["case_no"],
-            "title": c["title"],
-            "companies": c["companies"],
-            "applicable_l2": c["applicable_l2"],
-        }
-        for c in cases
-    ]
+    refs: list[dict] = []
+    try:
+        from recruit_benchmarks import get_background_cases_for_tasks as _recruit_cases
+        for c in _recruit_cases(_wf_excel_tasks):
+            refs.append({
+                "case_no": c["case_no"],
+                "title": c["title"],
+                "companies": c["companies"],
+                "applicable_l2": c["applicable_l2"],
+                "domain": "recruit",
+            })
+    except Exception as _e:
+        print(f"[BG BM] recruit cases fetch 실패: {_e}", flush=True)
+    try:
+        from evaluation_benchmarks import get_background_cases_for_tasks as _eval_cases
+        for c in _eval_cases(_wf_excel_tasks):
+            refs.append({
+                "case_no": c["case_no"],
+                "title": c["title"],
+                "companies": c["companies"],
+                "applicable_l2": c["applicable_l2"],
+                "domain": "evaluation",
+            })
+    except Exception as _e:
+        print(f"[BG BM] evaluation cases fetch 실패: {_e}", flush=True)
     return {"ok": True, "references": refs, "total": len(refs)}
 
 
@@ -3800,34 +3828,61 @@ async def generate_workflow_step1(request: Request):
                         f"{bm.get('use_case', '')} → {bm.get('outcome', '')}\n"
                     )
 
-    # 🔑 Background BM 주입 — L2 '채용 기획'/'채용 운영' 매칭 시 (recruit_benchmarks.py)
+    # 🔑 Background BM 주입 — 도메인별 모듈 (recruit/evaluation) 병합
     # 1) Title 리스트: Task 이름 attribution 용 (LLM 이 Task 명명 시 참조)
-    # 2) Player 개요 (Siemens/GM/IBM): 기본 설계 시 선도사 접근 방식 참조
+    # 2) Player 개요: 선도사 접근 방식 참조
     # 3) 통합 시사점: 설계 방향성 가이드
+    _bg_domains_injected: list[str] = []
+    # recruit 도메인 (채용 기획/운영 L2)
     try:
         from recruit_benchmarks import (
-            get_background_cases_for_tasks,
-            get_applicable_players_for_tasks,
-            format_players_for_prompt,
-            format_insights_for_prompt,
+            get_background_cases_for_tasks as _rc_cases,
+            get_applicable_players_for_tasks as _rc_players,
+            format_players_for_prompt as _rc_fmt_players,
+            format_insights_for_prompt as _rc_fmt_insights,
         )
-        _cases = get_background_cases_for_tasks(_wf_excel_tasks)
+        _cases = _rc_cases(_wf_excel_tasks)
         if _cases:
             benchmark_text += (
-                "\n## 📚 Background BM — 사례 Title (Task 이름 attribution 용)\n"
+                "\n## 📚 Background BM — 채용 도메인 사례 Title (Task 이름 attribution 용)\n"
                 "※ AI 기능이 이 사례와 같으면 Task 이름 앞에 'title - ' 형태로 prefix 자동 부착됨.\n\n"
             )
             for c in _cases:
                 benchmark_text += f"- [{c['case_no']}] **{c['title']}** (Player: {', '.join(c['companies'])})\n"
-
-            # Player 개요 + 통합 시사점 추가 주입
-            _players = get_applicable_players_for_tasks(_wf_excel_tasks)
+            _players = _rc_players(_wf_excel_tasks)
             if _players:
-                benchmark_text += "\n" + format_players_for_prompt(_players)
-            benchmark_text += "\n" + format_insights_for_prompt()
-            print(f"[STEP1] Background BM 주입 — 사례 {len(_cases)}건 + Player {len(_players)}사 + 통합 시사점", flush=True)
+                benchmark_text += "\n" + _rc_fmt_players(_players)
+            benchmark_text += "\n" + _rc_fmt_insights()
+            _bg_domains_injected.append(f"recruit({len(_cases)}사례)")
     except Exception as _re:
-        print(f"[STEP1] Background BM 주입 실패 (무시): {_re}", flush=True)
+        print(f"[STEP1] recruit Background 주입 실패 (무시): {_re}", flush=True)
+
+    # evaluation 도메인 (평가/TM/DS/육성 L2)
+    try:
+        from evaluation_benchmarks import (
+            get_background_cases_for_tasks as _ev_cases,
+            get_applicable_players_for_tasks as _ev_players,
+            format_players_for_prompt as _ev_fmt_players,
+            format_insights_for_prompt as _ev_fmt_insights,
+        )
+        _cases = _ev_cases(_wf_excel_tasks)
+        if _cases:
+            benchmark_text += (
+                "\n## 📚 Background BM — 평가 도메인 사례 Title (Task 이름 attribution 용)\n"
+                "※ AI 기능이 이 사례와 같으면 Task 이름 앞에 'title - ' 형태로 prefix 자동 부착됨.\n\n"
+            )
+            for c in _cases:
+                benchmark_text += f"- [{c['case_no']}] **{c['title']}** (Player: {', '.join(c['companies'])})\n"
+            _players = _ev_players(_wf_excel_tasks)
+            if _players:
+                benchmark_text += "\n" + _ev_fmt_players(_players)
+            benchmark_text += "\n" + _ev_fmt_insights()
+            _bg_domains_injected.append(f"evaluation({len(_cases)}사례)")
+    except Exception as _re:
+        print(f"[STEP1] evaluation Background 주입 실패 (무시): {_re}", flush=True)
+
+    if _bg_domains_injected:
+        print(f"[STEP1] Background BM 주입 완료 — {' + '.join(_bg_domains_injected)}", flush=True)
 
     # Gap 분석 결과 — 기본 설계의 핵심 인풋
     gap_text = ""
@@ -4928,11 +4983,17 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
                 # '{벤치마킹 title} - {원본 Task명}' 형태로 prefix 부착 + benchmark_source 저장.
                 # 프론트 LevelNode 에서 prefix 부분을 파란색으로 강조 표시.
                 _orig_task_name = t.get("task_name", "") or tid
-                try:
-                    from recruit_benchmarks import attribute_task_name as _attr_task
-                    _display_label, _bm_source = _attr_task(_orig_task_name)
-                except Exception:
-                    _display_label, _bm_source = _orig_task_name, None
+                # 도메인별 attribution 시도 — 먼저 매칭되는 쪽이 prefix (recruit → evaluation 순)
+                _display_label, _bm_source = _orig_task_name, None
+                for _dom_mod in ("recruit_benchmarks", "evaluation_benchmarks"):
+                    try:
+                        _mod = __import__(_dom_mod)
+                        _lbl, _src = _mod.attribute_task_name(_orig_task_name)
+                        if _src:
+                            _display_label, _bm_source = _lbl, _src
+                            break
+                    except Exception:
+                        continue
 
                 ai_nodes_out.append({
                     "id": jid,

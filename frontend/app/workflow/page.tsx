@@ -887,14 +887,17 @@ export default function WorkflowPage() {
   const analysisSheet = summary?.sheets.find((s) => s.sheet_id === bmSheetId);
   // 현재 시트의 벤치마킹 결과 (테이블 표시용) — bmSheetId 기준
   // L3 전체 scope면 "__default__" 키 fallback, 없으면 전체 시트 합산
-  const benchmarkTable = bmSheetId
+  const benchmarkTableRaw = bmSheetId
     ? (benchmarkTableBySheet[bmSheetId] ?? benchmarkTableBySheet[activeSheet ?? ""] ?? [])
     : (activeSheet
         ? (benchmarkTableBySheet[activeSheet]
             ?? benchmarkTableBySheet["__default__"]
             ?? Object.values(benchmarkTableBySheet).flat())
         : (benchmarkTableBySheet["__default__"] ?? Object.values(benchmarkTableBySheet).flat()));
-  // 전체 시트 벤치마킹 건수 합산 (기본 설계 활성화 조건)
+  // Background BM 과 동적 벤치마킹을 분리 — 별도 섹션으로 렌더링
+  const backgroundBmRows = (benchmarkTableBySheet["__background__"] ?? []) as BenchmarkTableRow[];
+  const benchmarkTable = benchmarkTableRaw.filter((r) => !r.is_background);
+  // 전체 시트 벤치마킹 건수 합산 (기본 설계 활성화 조건) — Background 포함
   const totalBenchmarkCount = Object.values(benchmarkTableBySheet).reduce((s, r) => s + r.length, 0);
 
   return (
@@ -1840,39 +1843,103 @@ export default function WorkflowPage() {
               </div>
             )}
 
-            {/* 📚 Background BM (PwC 큐레이션) — Step 1 기본 벤치마킹 + Task attribution title 리스트 */}
-            {backgroundBenchmarks.length > 0 && (
-              <div className="mb-4 rounded-lg overflow-hidden" style={{ border: "2px solid #2563EB" }}>
-                <div className="px-3 py-1.5 flex items-center gap-2" style={{ backgroundColor: "#2563EB", color: "#FFFFFF" }}>
+            {/* 📚 Background BM (PwC 큐레이션) — 자체 테이블로 완전 분리된 블록 */}
+            {backgroundBmRows.length > 0 && (
+              <div className="mb-5 rounded-lg overflow-hidden" style={{ border: "2px solid #2563EB" }}>
+                {/* 헤더 */}
+                <div className="px-3 py-2 flex items-center gap-2" style={{ backgroundColor: "#2563EB", color: "#FFFFFF" }}>
                   <span className="text-[11px] font-bold">📚 Background BM</span>
                   <span className="text-[9.5px] opacity-90">
-                    · PwC 큐레이션 · IBM · GM · Siemens · {backgroundBenchmarks.length}건
+                    · PwC 큐레이션 · {backgroundBmRows.length}건
                   </span>
                   <span className="ml-auto text-[9.5px] opacity-85 italic">
                     Step 1 기본 벤치마킹으로 자동 반영 · Task 이름 prefix 로도 사용
                   </span>
                 </div>
-                <div className="px-3 py-2 flex flex-wrap gap-1.5" style={{ backgroundColor: "#EFF6FF" }}>
-                  {backgroundBenchmarks.map((ref) => (
-                    <span
-                      key={ref.case_no}
-                      className="text-[11px] font-semibold px-2 py-1 rounded inline-flex items-center gap-1.5"
-                      style={{ backgroundColor: "#FFFFFF", color: "#1E40AF", border: "1px solid #93C5FD" }}
-                      title={`적용 Player: ${ref.companies.join(" · ")}`}
-                    >
+
+                {/* Title chip 리스트 */}
+                {backgroundBenchmarks.length > 0 && (
+                  <div className="px-3 py-2 flex flex-wrap gap-1.5" style={{ backgroundColor: "#EFF6FF" }}>
+                    {backgroundBenchmarks.map((ref) => (
                       <span
-                        className="text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center"
-                        style={{ backgroundColor: "#2563EB", color: "#FFFFFF" }}
+                        key={`${(ref as { domain?: string }).domain ?? "?"}-${ref.case_no}`}
+                        className="text-[11px] font-semibold px-2 py-1 rounded inline-flex items-center gap-1.5"
+                        style={{ backgroundColor: "#FFFFFF", color: "#1E40AF", border: "1px solid #93C5FD" }}
+                        title={`적용 Player: ${ref.companies.join(" · ")}`}
                       >
-                        {ref.case_no}
+                        <span
+                          className="text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center"
+                          style={{ backgroundColor: "#2563EB", color: "#FFFFFF" }}
+                        >
+                          {ref.case_no}
+                        </span>
+                        {ref.title}
                       </span>
-                      {ref.title}
-                    </span>
-                  ))}
+                    ))}
+                  </div>
+                )}
+
+                {/* Background BM 전용 테이블 */}
+                <div className="overflow-x-auto" style={{ backgroundColor: "#FFFFFF" }}>
+                  <table className="w-full text-[10.5px] border-collapse">
+                    <thead style={{ backgroundColor: "#DBEAFE" }}>
+                      <tr>
+                        <th className="text-left px-2 py-1.5 font-semibold text-blue-900 whitespace-nowrap">출처</th>
+                        <th className="text-left px-2 py-1.5 font-semibold text-blue-900 whitespace-nowrap">유형</th>
+                        <th className="text-left px-2 py-1.5 font-semibold text-blue-900 whitespace-nowrap">산업</th>
+                        <th className="text-left px-2 py-1.5 font-semibold text-blue-900 whitespace-nowrap">사례 (Case)</th>
+                        <th className="text-left px-2 py-1.5 font-semibold text-blue-900 whitespace-nowrap">도입 목표</th>
+                        <th className="text-left px-2 py-1.5 font-semibold text-blue-900 whitespace-nowrap">AI 기술</th>
+                        <th className="text-left px-2 py-1.5 font-semibold text-blue-900 whitespace-nowrap">핵심 데이터</th>
+                        <th className="text-left px-2 py-1.5 font-semibold text-blue-900 whitespace-nowrap">도입 방식</th>
+                        <th className="text-left px-2 py-1.5 font-semibold text-blue-900 whitespace-nowrap">적용 사례</th>
+                        <th className="text-left px-2 py-1.5 font-semibold text-blue-900 whitespace-nowrap">성과</th>
+                        <th className="text-left px-2 py-1.5 font-semibold text-blue-900 whitespace-nowrap">인프라</th>
+                        <th className="text-left px-2 py-1.5 font-semibold text-blue-900 whitespace-nowrap">두산 시사점</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {backgroundBmRows.map((row, i) => (
+                        <tr
+                          key={`bg-${i}`}
+                          className="border-b"
+                          style={{ borderColor: "#DBEAFE", backgroundColor: i % 2 === 0 ? "#FFFFFF" : "#F8FBFF" }}
+                        >
+                          <td className="px-2 py-1.5 font-semibold text-blue-900 whitespace-nowrap">{row.source}</td>
+                          <td className="px-2 py-1.5 whitespace-nowrap">
+                            {row.company_type && (
+                              <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium ${row.company_type.includes("Tech") && !row.company_type.includes("非") ? "bg-indigo-50 text-indigo-700" : "bg-orange-50 text-orange-700"}`}>
+                                {row.company_type.includes("非") ? "非Tech" : "Tech"}
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-2 py-1.5 text-gray-600 whitespace-nowrap">{row.industry}</td>
+                          <td className="px-2 py-1.5 text-gray-800 font-medium max-w-[180px]" title={row.process_area}>
+                            {row.process_area}
+                          </td>
+                          <td className="px-2 py-1.5 text-gray-600 max-w-[140px]">{row.ai_adoption_goal}</td>
+                          <td className="px-2 py-1.5">
+                            <span className="px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 text-[9px] font-medium">
+                              {row.ai_technology}
+                            </span>
+                          </td>
+                          <td className="px-2 py-1.5 text-gray-500 max-w-[140px]">{row.key_data}</td>
+                          <td className="px-2 py-1.5 text-gray-500 whitespace-nowrap">{row.adoption_method}</td>
+                          <td className="px-2 py-1.5 text-gray-600 max-w-[240px]">{row.use_case}</td>
+                          <td className="px-2 py-1.5 text-green-700 font-medium max-w-[160px]">{row.outcome}</td>
+                          <td className="px-2 py-1.5 text-gray-500 max-w-[160px]">{row.infrastructure}</td>
+                          <td className="px-2 py-1.5 text-gray-600 max-w-[180px]">{row.implication}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
+
+                {/* 안내 푸터 */}
                 <div className="px-3 py-1.5 text-[9.5px]" style={{ backgroundColor: "#DBEAFE", color: "#1E3A8A" }}>
-                  💡 아래 벤치마킹 표에 이 사례들이 파란색으로 표시됩니다.
-                  추가 벤치마킹을 원하면 상단 <b>[벤치마킹 실행]</b> 버튼 또는 채팅에 캡쳐 업로드.
+                  💡 Step 1 기본 설계에 자동 반영됩니다 (추가 검색 불필요).
+                  다른 선도사/사례가 필요하면 상단 <b>[벤치마킹 실행]</b> 버튼 또는 채팅에 캡쳐 업로드.
+                  <span className="ml-2 text-[9px] opacity-70">🔒 Background BM 은 큐레이션 데이터라 편집 불가.</span>
                 </div>
               </div>
             )}
@@ -1919,15 +1986,8 @@ export default function WorkflowPage() {
                         <tr
                           key={i}
                           className="border-b border-blue-100 hover:bg-blue-50/50 group"
-                          style={row.is_background ? {
-                            backgroundColor: "#EFF6FF",
-                            borderLeft: "3px solid #2563EB",
-                          } : undefined}
                         >
-                          <td
-                            className="px-3 py-2 font-medium text-gray-800 whitespace-nowrap"
-                            title={row.is_background && row.benchmark_title ? `Background BM: ${row.benchmark_title}` : undefined}
-                          >
+                          <td className="px-3 py-2 font-medium text-gray-800 whitespace-nowrap">
                             {row.source}
                           </td>
                           <td className="px-3 py-2 whitespace-nowrap">
@@ -1960,30 +2020,21 @@ export default function WorkflowPage() {
                             )}
                           </td>
                           <td className="px-2 py-2 text-center">
-                            {row.is_background ? (
-                              <span
-                                className="text-[9px] text-blue-500"
-                                title="Background BM 은 PwC 큐레이션 기본 데이터라 삭제할 수 없습니다"
-                              >
-                                🔒
-                              </span>
-                            ) : (
-                              <button
-                                title={`"${row.source}" 행 삭제`}
-                                onClick={async () => {
-                                  if (!confirm(`"${row.source}" 행을 삭제하시겠습니까?`)) return;
-                                  try {
-                                    const res = await deleteBenchmarkRow(row.source, activeSheet ?? undefined);
-                                    setBenchmarkTableBySheet(res.benchmark_table);
-                                  } catch (e) {
-                                    alert((e as Error).message);
-                                  }
-                                }}
-                                className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-red-50 text-red-400 hover:text-red-600"
-                              >
-                                ✕
-                              </button>
-                            )}
+                            <button
+                              title={`"${row.source}" 행 삭제`}
+                              onClick={async () => {
+                                if (!confirm(`"${row.source}" 행을 삭제하시겠습니까?`)) return;
+                                try {
+                                  const res = await deleteBenchmarkRow(row.source, activeSheet ?? undefined);
+                                  setBenchmarkTableBySheet(res.benchmark_table);
+                                } catch (e) {
+                                  alert((e as Error).message);
+                                }
+                              }}
+                              className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-red-50 text-red-400 hover:text-red-600"
+                            >
+                              ✕
+                            </button>
                           </td>
                         </tr>
                       ))}
