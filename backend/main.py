@@ -5125,28 +5125,16 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
     lane_heights = [LANE_HEIGHT] * len(actors_used)
     swim_height = LANE_HEIGHT * len(actors_used)
 
-    # x 스케일 정규화 — hr-workflow-ai 는 1 PPT 슬라이드(13.33인치≈1280px)에
-    # 맞춘 overflow 경고를 띄움. 현재 x 최대값이 너무 크면 스케일 축소.
+    # x 좌표: 시작점만 x=60 으로 offset 정렬 — 스케일 축소는 하지 않음
+    # (이전엔 [60, 2800] 로 강제 압축해서 노드 수 많을 때 서로 겹치는 "찌부" 문제 발생.
+    #  hr-workflow-ai 는 Panel 로 zoom/pan 지원하므로 가로로 길어도 문제없음 —
+    #  오히려 노드 폭 380 + gap 60 = 440px 간격을 유지해야 겹치지 않음.)
     all_xs = [n["position"]["x"] for n in all_nodes if n.get("position")]
     if all_xs:
-        cur_min_x = min(all_xs)
-        cur_max_x = max(all_xs)
-        # 전체 노드를 x=60 ~ x=2800 범위로 정규화 (hr-workflow-ai 의 2-슬라이드 폭 허용)
-        target_min_x = 60.0
-        target_max_x = 2800.0
-        cur_span = max(cur_max_x - cur_min_x, 1.0)
-        target_span = target_max_x - target_min_x
-        if cur_span > target_span:
-            scale = target_span / cur_span
-            for n in all_nodes:
-                if n.get("position"):
-                    n["position"]["x"] = target_min_x + (n["position"]["x"] - cur_min_x) * scale
-        else:
-            # 이미 target 범위 안이면 offset 만 적용
-            shift = target_min_x - cur_min_x
-            for n in all_nodes:
-                if n.get("position"):
-                    n["position"]["x"] += shift
+        shift = 60.0 - min(all_xs)
+        for n in all_nodes:
+            if n.get("position"):
+                n["position"]["x"] += shift
 
     return {
         "l4_id": sheet_id,
