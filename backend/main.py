@@ -4364,6 +4364,18 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
             actor_raw = n.metadata.get("role", "") or n.metadata.get("actors", "")
             actors_list, custom_role = _parse_role_string(actor_raw)
             primary_actor = actors_list[0] if actors_list else "그 외"
+            # 🔑 '그 외' 로 default 된 경우 — 왜 '그 외' 인지 사유 뱃지 자동 부여
+            if primary_actor == "그 외" and not custom_role:
+                # 원본 role 텍스트가 있으면 그대로 (매핑 실패 사유)
+                raw_text = ""
+                if isinstance(actor_raw, str):
+                    raw_text = actor_raw.strip()
+                elif isinstance(actor_raw, list) and actor_raw:
+                    raw_text = ", ".join(str(x) for x in actor_raw if x).strip()
+                if raw_text:
+                    custom_role = raw_text[:30]   # 매핑 안 된 원본 role
+                else:
+                    custom_role = "수행주체 미지정"   # 완전히 빈 경우
         # 모든 actor를 카운트 (lane 등장 여부 판단용)
         for a in actors_list or [primary_actor]:
             role_counts[a] = role_counts.get(a, 0) + 1
@@ -4374,10 +4386,23 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
         full_data = dict(n.metadata)
         existing_role = full_data.get("role")
         if not isinstance(existing_role, str):
-            parts = list(actors_list)
+            # role 이 dict/None 인 경우 — actors_list 기반 재구성
+            parts = list(actors_list) if actors_list else [primary_actor]
             if custom_role and "그 외" in parts:
                 parts = [f"그 외:{custom_role}" if p == "그 외" else p for p in parts]
+            elif custom_role and primary_actor == "그 외" and "그 외" not in parts:
+                parts.append(f"그 외:{custom_role}")
             full_data["role"] = ", ".join(parts)
+        else:
+            # role 이 이미 문자열 — '그 외' default + custom_role 새로 부여한 경우 추가
+            # ("그 외:..." 가 원본에 없으면 끝에 부착해서 LevelNode 가 sky-blue 뱃지 표시하게 함)
+            if (primary_actor == "그 외" and custom_role
+                    and "그 외:" not in existing_role
+                    and "기타:" not in existing_role):
+                if existing_role.strip():
+                    full_data["role"] = f"{existing_role}, 그 외:{custom_role}"
+                else:
+                    full_data["role"] = f"그 외:{custom_role}"
 
         # ── AI + Human: label 은 원본 task 이름 유지, 상세 Human action 은 description ───
         # (기존엔 Human 파트 60자 문장을 label 로 사용 → 너무 길어서 가독성 저하)
