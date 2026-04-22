@@ -4031,7 +4031,14 @@ def _parse_role_string(raw) -> tuple[list[str], str]:
     parts = [p.strip() for p in s.replace("·", ",").replace("/", ",").split(",") if p.strip()]
     for part in parts:
         if part.startswith("그 외:") or part.startswith("기타:"):
-            custom = part.split(":", 1)[1].strip()
+            # hr-workflow-ai 규약: 값이 encodeURIComponent 로 저장되므로 디코드
+            # plain 한글 ("지주") 은 unquote 가 그대로 반환, 인코딩값 ("%EC%A7...") 은 디코드
+            _raw_val = part.split(":", 1)[1].strip()
+            try:
+                from urllib.parse import unquote as _unquote
+                custom = _unquote(_raw_val)
+            except Exception:
+                custom = _raw_val
             actors.append("그 외")
             continue
         if part in ("그 외", "기타"):
@@ -4063,6 +4070,21 @@ def _parse_role_string(raw) -> tuple[list[str], str]:
             seen.add(a)
             unique.append(a)
     return unique, custom
+
+
+def _encode_custom_role(custom: str) -> str:
+    """hr-workflow-ai 규약에 맞춰 커스텀 role 값을 encodeURIComponent 와 호환되도록 인코딩.
+    이미 %XX 형태로 인코딩된 경우 중복 인코딩 방지 (휴리스틱: unquote 후 다시 quote).
+    예: "자회사 HR" → "%EC%9E%90%ED%9A%8C%EC%82%AC%20HR" """
+    if not custom:
+        return ""
+    from urllib.parse import quote as _quote, unquote as _unquote
+    try:
+        decoded = _unquote(custom)   # 이미 인코딩된 경우 원본 복원, 아니면 그대로
+        # safe='' → 한글·공백 모두 인코딩 (JS encodeURIComponent 와 동일 동작)
+        return _quote(decoded, safe="")
+    except Exception:
+        return custom
 
 
 def _normalize_actor(raw) -> str:
@@ -4643,24 +4665,25 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
         # 원본 data 객체를 그대로 보존 (LevelNode가 systems/painPoints/inputs/outputs/logic 등을 사용)
         full_data = dict(n.metadata)
         existing_role = full_data.get("role")
+        _enc_cr = _encode_custom_role(custom_role) if custom_role else ""
         if not isinstance(existing_role, str):
             # role 이 dict/None 인 경우 — actors_list 기반 재구성
             parts = list(actors_list) if actors_list else [primary_actor]
-            if custom_role and "그 외" in parts:
-                parts = [f"그 외:{custom_role}" if p == "그 외" else p for p in parts]
-            elif custom_role and primary_actor == "그 외" and "그 외" not in parts:
-                parts.append(f"그 외:{custom_role}")
+            if _enc_cr and "그 외" in parts:
+                parts = [f"그 외:{_enc_cr}" if p == "그 외" else p for p in parts]
+            elif _enc_cr and primary_actor == "그 외" and "그 외" not in parts:
+                parts.append(f"그 외:{_enc_cr}")
             full_data["role"] = ", ".join(parts)
         else:
             # role 이 이미 문자열 — '그 외' default + custom_role 새로 부여한 경우 추가
             # ("그 외:..." 가 원본에 없으면 끝에 부착해서 LevelNode 가 sky-blue 뱃지 표시하게 함)
-            if (primary_actor == "그 외" and custom_role
+            if (primary_actor == "그 외" and _enc_cr
                     and "그 외:" not in existing_role
                     and "기타:" not in existing_role):
                 if existing_role.strip():
-                    full_data["role"] = f"{existing_role}, 그 외:{custom_role}"
+                    full_data["role"] = f"{existing_role}, 그 외:{_enc_cr}"
                 else:
-                    full_data["role"] = f"그 외:{custom_role}"
+                    full_data["role"] = f"그 외:{_enc_cr}"
 
         # ── AI + Human: label 은 원본 task 이름 유지, 상세 Human action 은 description ───
         # (기존엔 Human 파트 60자 문장을 label 로 사용 → 너무 길어서 가독성 저하)
@@ -4724,8 +4747,45 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
     senior_y = max_y + 220.0
     junior_y = senior_y + 300.0 if senior_agents else max_y + 220.0   # Senior 없으면 바로 Junior 부터
 
-    senior_node_ids: list[str] = []   # 생성된 Senior AI 노드 id 추적 (오케스트레이션 엣지용)
-    if senior_agents:
+    # ── Senior AI 체크포인트 배치 ──
+    # LLM 은 보통 Senior 1개만 생성하지만, Swim Lane 에서는 "연속 오케스트레이션"을
+    # 시각화하기 위해 Junior agent 수만큼 체크포인트 노드를 생성한다.
+    # 각 체크포인트는 대응하는 Junior agent 바로 위에 배치 (x 는 Junior 배치 후 동기화).
+    # - ①→②→③→④ sequential 연결 = 오케스트레이션 연속성
+    # - 각 체크포인트 → Junior agent 첫 task = "기동"
+    # - Junior agent 마지막 task → 체크포인트 = "결과 반환"
+    # 이렇게 해야 기동 엣지가 수직으로 깔끔하게 떨어져 overlap 없이 모두 보임.
+    senior_node_ids: list[str] = []
+    _ORDINAL = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮"
+    if senior_agents and junior_agents:
+        senior_template = senior_agents[0]   # 보통 1개. 여러 개여도 첫 번째 기반
+        senior_name = senior_template.get("agent_name") or "Senior AI Orchestrator"
+        for ji, _ag in enumerate(junior_agents):
+            cp_id = f"senior_cp_{ji}"
+            senior_node_ids.append(cp_id)
+            ord_mark = _ORDINAL[ji] if ji < len(_ORDINAL) else f"({ji+1})"
+            cp_label = f"{ord_mark} {senior_name}"[:40]
+            ai_nodes_out.append({
+                "id": cp_id,
+                "label": cp_label,
+                "level": "L5",
+                "actor": "Senior AI",
+                "type": "task",
+                "ai_support": senior_template.get("ai_technique", ""),
+                # x 는 placeholder. Junior 배치 후 각 agent 첫 task x 로 재조정됨
+                "position": {"x": min_x, "y": senior_y},
+                "origin": "ai",
+                "description": senior_template.get("description", ""),
+                "data": {
+                    "role": "Senior AI",
+                    "label": cp_label,
+                    "level": "L5",
+                    "description": senior_template.get("description", ""),
+                },
+                "next": [],
+            })
+    elif senior_agents and not junior_agents:
+        # Junior 없는 희귀 케이스 — 체크포인트 1개만 생성 (기존 동작 유지)
         for si, ag in enumerate(senior_agents):
             senior_id = f"senior_{ag['agent_id'] or si}"
             senior_node_ids.append(senior_id)
@@ -4809,21 +4869,43 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
             if prev_id:
                 prev_agent_last_jid = prev_id
 
-            # Senior AI ↔ Junior AI 양방향 (기동 / 결과 반환) — Senior AI 가 존재할 때만
-            if senior_node_ids and ag["tasks"]:
+            # 🔑 Senior AI 체크포인트 배치: 이 agent 전용 체크포인트를 agent 첫 task x 위에 정렬
+            # + 기동/결과 반환 엣지를 해당 체크포인트와만 연결 (overlap 없음)
+            if senior_node_ids and ag["tasks"] and ji < len(senior_node_ids):
                 first_jid = f"{agent_prefix}_{ag['tasks'][0].get('task_id', 't0')}"
                 last_jid = f"{agent_prefix}_{ag['tasks'][-1].get('task_id', 't0')}"
-                senior_first = senior_node_ids[0]
-                # 지시 (Senior → Junior 첫 task)
+                senior_cp = senior_node_ids[ji]   # agent 별 전용 체크포인트
+
+                # 체크포인트 x 를 이 agent 의 첫 task x 에 맞춤 (수직 정렬)
+                # first task 의 x 는 min_x + x_step * (ji 시작 task_i + 0.5)
+                # 이미 ai_nodes_out 에 해당 Junior 가 있으므로 검색
+                for jn in ai_nodes_out:
+                    if jn["id"] == first_jid:
+                        for sn in ai_nodes_out:
+                            if sn["id"] == senior_cp:
+                                sn["position"]["x"] = jn["position"]["x"]
+                                break
+                        break
+
+                # 기동 (Senior cp → Junior 첫 task) — 수직 arrow
                 ai_edges_out.append(_std_edge(
-                    eid=f"aie_orc_{senior_first}_{first_jid}",
-                    src=senior_first, tgt=first_jid, label="기동", origin="ai",
+                    eid=f"aie_orc_{senior_cp}_{first_jid}",
+                    src=senior_cp, tgt=first_jid, label="기동", origin="ai",
                 ))
-                # 결과 반환 (Junior 마지막 task → Senior)
+                # 결과 반환 (Junior 마지막 task → Senior cp) — 수직 arrow
                 ai_edges_out.append(_std_edge(
-                    eid=f"aie_ret_{last_jid}_{senior_first}",
-                    src=last_jid, tgt=senior_first, label="결과 반환", origin="ai",
+                    eid=f"aie_ret_{last_jid}_{senior_cp}",
+                    src=last_jid, tgt=senior_cp, label="결과 반환", origin="ai",
                 ))
+
+        # 🔑 Senior AI 체크포인트 간 sequential 연결 (오케스트레이션 연속성)
+        # ① → ② → ③ → ④  (Senior 레인 안에서 좌→우 흐름)
+        for i in range(len(senior_node_ids) - 1):
+            ai_edges_out.append(_std_edge(
+                eid=f"aie_senior_seq_{i}",
+                src=senior_node_ids[i], tgt=senior_node_ids[i+1],
+                label="", origin="ai",
+            ))
 
     # 3) LLM 지능형 배선 — AI Service Flow + As-Is Process Map 분석
     llm_routing = await _llm_route_tobe_flow(
@@ -5304,11 +5386,13 @@ def _tobe_cache_to_hr_json(cache: dict) -> dict:
                 if n.get("ai_support"):
                     base_data.setdefault("description", n["ai_support"])
             # role이 여전히 문자열이 아니면 actors_all + custom_role로 재구성
+            # 커스텀 값은 hr-workflow-ai 규약에 맞춰 URI 인코딩 (split/trim 구분자 충돌 방지)
             if not isinstance(base_data.get("role"), str):
                 parts = list(n.get("actors_all") or [])
                 cr = n.get("custom_role") or ""
-                if cr and "그 외" in parts:
-                    parts = [f"그 외:{cr}" if p == "그 외" else p for p in parts]
+                cr_enc = _encode_custom_role(cr) if cr else ""
+                if cr_enc and "그 외" in parts:
+                    parts = [f"그 외:{cr_enc}" if p == "그 외" else p for p in parts]
                 base_data["role"] = ", ".join(parts) if parts else (n.get("actor") or "")
 
             nodes_out.append({
