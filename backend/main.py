@@ -5659,7 +5659,7 @@ Step 1에서 도출된 기본 설계를 기반으로, 두산에 최적화된 **A
             client = AsyncAnthropic(api_key=anthropic_key)
             response = await client.messages.create(
                 model=settings.anthropic_model or "claude-sonnet-4-6",
-                max_tokens=8192,
+                max_tokens=16384,   # 이전 8192에서 상향 — agents/tasks 많을 때 JSON 잘림 방지
                 system=step2_system,
                 messages=[{"role": "user", "content": "Step 1 결과와 Pain Point를 기반으로 상세 설계를 수행해주세요."}],
             )
@@ -5667,11 +5667,21 @@ Step 1에서 도출된 기본 설계를 기반으로, 두산에 최적화된 **A
                 _add_usage_step2("anthropic",
                                  input_tokens=response.usage.input_tokens,
                                  output_tokens=response.usage.output_tokens)
+            # stop_reason 체크 — max_tokens 초과 시 경고
+            stop_reason = getattr(response, "stop_reason", None)
+            if stop_reason and stop_reason != "end_turn":
+                print(f"[workflow-step2] ⚠️ Anthropic stop_reason={stop_reason} "
+                      f"(max_tokens=16384, output_tokens={response.usage.output_tokens if response.usage else '?'}). "
+                      f"JSON 잘림 가능 — 프롬프트 크기 또는 max_tokens 추가 조정 필요.", flush=True)
             raw = response.content[0].text
             from new_workflow_generator import _extract_json
             result_data = _extract_json(raw)
+            if result_data is None:
+                # JSON 파싱 실패 — 진단 로그
+                print(f"[workflow-step2] ⚠️ JSON 파싱 실패. "
+                      f"output_len={len(raw)}, 마지막 300자: ...{raw[-300:]}", flush=True)
         except Exception as e:
-            print(f"[workflow-step2] Anthropic 실패: {e}")
+            print(f"[workflow-step2] Anthropic 실패: {e}", flush=True)
 
     if not result_data:
         openai_key = os.getenv("OPENAI_API_KEY", "") or settings.api_key
