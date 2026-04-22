@@ -5095,11 +5095,64 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
                     n["data"] = {}
                 n["data"]["id"] = new_l5_id
 
+    # ══════════════════════════════════════════════════════════════════════════
+    # 🔑 hr-workflow-ai 호환 좌표계 정규화
+    # ══════════════════════════════════════════════════════════════════════════
+    # SwimLaneOverlay 는 position.y 만 보고 lane 을 결정하므로, role 이 맞아도
+    # y 좌표가 틀린 lane 범위에 있으면 엉뚱한 lane 에 표시됨.
+    # → actors_used 순서대로 고정 laneHeights 를 설정하고 각 노드의 y 를
+    #   해당 actor lane 범위 안으로 재배치 + laneHeights 를 sheet 에 포함.
+    LANE_HEIGHT = 600.0   # hr-workflow-ai 기본값 (swimHeight=2400 / 4 lanes)
+    NODE_Y_OFFSET = 100.0 # lane 상단에서 노드까지 여백
+    lane_idx_of = {a: i for i, a in enumerate(actors_used)}
+
+    # 같은 lane 안에서 여러 row 가 필요할 때 stacking 용 카운터
+    lane_row_count: dict[int, int] = {}
+
+    for n in all_nodes:
+        actor = n.get("actor", "")
+        lane_i = lane_idx_of.get(actor, len(actors_used) - 1)
+        lane_y_start = lane_i * LANE_HEIGHT
+
+        # 같은 lane 내에서 x 가 가까운 노드들은 자동으로 겹치지 않음 (x_step 보장).
+        # 기본은 lane 상단 여백 + 고정 y. 각 lane 에 노드가 1행만 배치됨.
+        n["position"]["y"] = lane_y_start + NODE_Y_OFFSET
+        lane_row_count[lane_i] = lane_row_count.get(lane_i, 0) + 1
+
+    # 각 lane 의 height 는 LANE_HEIGHT 로 고정 (hr-workflow-ai 기본과 일치)
+    lane_heights = [LANE_HEIGHT] * len(actors_used)
+    swim_height = LANE_HEIGHT * len(actors_used)
+
+    # x 스케일 정규화 — hr-workflow-ai 는 1 PPT 슬라이드(13.33인치≈1280px)에
+    # 맞춘 overflow 경고를 띄움. 현재 x 최대값이 너무 크면 스케일 축소.
+    all_xs = [n["position"]["x"] for n in all_nodes if n.get("position")]
+    if all_xs:
+        cur_min_x = min(all_xs)
+        cur_max_x = max(all_xs)
+        # 전체 노드를 x=60 ~ x=2800 범위로 정규화 (hr-workflow-ai 의 2-슬라이드 폭 허용)
+        target_min_x = 60.0
+        target_max_x = 2800.0
+        cur_span = max(cur_max_x - cur_min_x, 1.0)
+        target_span = target_max_x - target_min_x
+        if cur_span > target_span:
+            scale = target_span / cur_span
+            for n in all_nodes:
+                if n.get("position"):
+                    n["position"]["x"] = target_min_x + (n["position"]["x"] - cur_min_x) * scale
+        else:
+            # 이미 target 범위 안이면 offset 만 적용
+            shift = target_min_x - cur_min_x
+            for n in all_nodes:
+                if n.get("position"):
+                    n["position"]["x"] += shift
+
     return {
         "l4_id": sheet_id,
         "l4_name": sheet_name,
         "actors_used": actors_used,
         "lanes": actors_used,
+        "laneHeights": lane_heights,    # 🔑 명시적 저장 — 앱 기본값 무시
+        "swimHeight": swim_height,
         "nodes": all_nodes,
         "edges": all_edges,
     }
@@ -5277,36 +5330,38 @@ def _tobe_cache_to_hr_json(cache: dict) -> dict:
 
         edges_out: list[dict] = []
         for e in rs.get("edges", []) or []:
-            is_ai = e.get("origin") == "ai"
+            # hr-workflow-ai 표준 edge — 모두 #333333 단색 실선, animated: false
             edge_obj = {
                 "id": e["id"],
                 "source": e["source"],
                 "target": e["target"],
                 "type": "ortho",
-                "animated": is_ai,
-                "style": {
-                    "stroke": "#00827F" if is_ai else "#64748B",
-                    "strokeWidth": 2 if is_ai else 1.5,
-                },
+                "animated": False,
+                "style": {"stroke": "#333333", "strokeWidth": 1.5},
                 "markerEnd": {
-                    "type": "ArrowClosed",
-                    "width": 18,
-                    "height": 18,
-                    "color": "#00827F" if is_ai else "#64748B",
+                    "type": "arrowclosed",
+                    "width": 18, "height": 18, "color": "#333333",
                 },
             }
             if e.get("label"):
                 edge_obj["label"] = e["label"]
             edges_out.append(edge_obj)
 
-        sheets_out.append({
+        # 🔑 laneHeights / swimHeight 포함 — hr-workflow-ai SwimLaneOverlay 가
+        # 이 값으로 각 lane 범위를 결정, 노드 position.y 가 해당 범위에 들어감
+        sheet_out = {
             "id": sheet_id,
             "name": sheet_name,
             "type": "swimlane",
             "lanes": lanes,
             "nodes": nodes_out,
             "edges": edges_out,
-        })
+        }
+        if rs.get("laneHeights"):
+            sheet_out["laneHeights"] = rs["laneHeights"]
+        if rs.get("swimHeight"):
+            sheet_out["swimHeight"] = rs["swimHeight"]
+        sheets_out.append(sheet_out)
 
     return {
         "version": "2.0",

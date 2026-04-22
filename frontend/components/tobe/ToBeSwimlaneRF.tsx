@@ -93,10 +93,15 @@ function ToBeSwimlaneInner({ sheet }: Props) {
     return Array.isArray(l) ? l.filter(Boolean) : [];
   }, [sheet]);
 
-  // 각 lane의 높이는 고정 (L5 노드 1줄 + 여유). x축은 컨테이너 horizontal scroll로 확장.
+  // 🔑 백엔드가 laneHeights 를 명시적으로 보내면 그 값을 그대로 사용
+  // (hr-workflow-ai SwimLaneOverlay 와 동일한 정책 — 앱 기본값 대신 저장된 값 우선)
   const initialLaneHeights = useMemo(
-    () => lanes.map(() => 260),
-    [lanes],
+    () => {
+      const fromBackend = (sheet as { laneHeights?: number[] })?.laneHeights;
+      if (fromBackend && fromBackend.length === lanes.length) return fromBackend;
+      return lanes.map(() => 600);  // hr-workflow-ai 기본값 (swimHeight=2400/4=600)
+    },
+    [lanes, sheet],
   );
 
   const [laneHeights, setLaneHeights] = useState<number[]>(initialLaneHeights);
@@ -148,8 +153,14 @@ function ToBeSwimlaneInner({ sheet }: Props) {
         const lastX = placedXs.length > 0 ? placedXs[placedXs.length - 1] : -Infinity;
         if (x < lastX + 440) x = lastX + 440;
         placedXs.push(x);
-        // y: lane 상단 여백 (고정 높이 260)
-        const y = yStart + 40;
+        // y: backend 가 laneHeights 기반으로 계산한 position.y 를 우선 사용
+        //     (hr-workflow-ai 규격 — 값이 lane 범위 안에 들어오면 그대로)
+        //     값이 없거나 lane 범위 밖이면 fallback 으로 lane 시작 + 여백
+        const backendY = n.position?.y;
+        const laneEndY = yStart + (laneHeights[laneIdx] ?? 600);
+        const y = (
+          typeof backendY === "number" && backendY >= yStart && backendY <= laneEndY
+        ) ? backendY : yStart + 40;
 
         // data: 백엔드가 보낸 풀 data 객체 + LevelNode가 기대하는 필드 매핑
         // 방어: role이 string이 아닐 수 있음 (dict/object/undefined) → 반드시 문자열로 강제
@@ -189,7 +200,7 @@ function ToBeSwimlaneInner({ sheet }: Props) {
       }
     }
     return out;
-  }, [lanes, sheet.nodes, laneYStart]);
+  }, [lanes, sheet.nodes, laneYStart, laneHeights]);
 
   // edges — backend 가 hr-workflow-ai 표준 포맷 (type/animated/style/markerEnd) 을
   // 직접 보내므로 그대로 React Flow 에 전달. 프론트에서 임의로 색/굵기 덮어쓰지 않음.

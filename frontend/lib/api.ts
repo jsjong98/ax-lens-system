@@ -1304,6 +1304,8 @@ export interface TobeSheet {
   l4_name: string;
   actors_used: TobeActor[];
   lanes?: TobeActor[];
+  laneHeights?: number[];   // hr-workflow-ai SwimLaneOverlay 용
+  swimHeight?: number;      // 합계 — 앱 기본값 2400 대체
   nodes: TobeNode[];
   edges?: TobeEdge[];
 }
