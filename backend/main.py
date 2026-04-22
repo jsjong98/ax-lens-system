@@ -4316,32 +4316,39 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
                     return s[:60], s
         return "", ""
 
-    # ── Decision 노드 lane 상속 — 선행 노드의 actor 를 상속해서 같은 레인에 배치 ──
-    def _infer_decision_actor(dec_node_id: str) -> tuple[str, list[str], str]:
-        """Decision 노드의 선행 노드 actor 를 상속. (actor, actors_list, custom_role) 반환."""
-        # 1) 이 decision 으로 들어오는 엣지의 source 노드 탐색
+    # ── 노드 lane 상속 헬퍼 — 선행/후행 노드의 actor 를 상속 ──
+    def _infer_neighbor_actor(node_id: str) -> tuple[str, list[str], str]:
+        """선행 노드(우선) → 후행 노드 actor 를 상속. 못 찾으면 ('','',[]) 반환."""
+        # 1) 이 노드로 들어오는 엣지의 source 노드 탐색
         for e in asis_sheet.edges:
-            if e.target != dec_node_id:
+            if e.target != node_id:
                 continue
             src = asis_sheet.nodes.get(e.source)
             if src is None:
                 continue
             src_role = src.metadata.get("role", "") or src.metadata.get("actors", "")
             src_actors, src_custom = _parse_role_string(src_role)
-            if src_actors:
+            if src_actors and src_actors[0] != "그 외":
                 return src_actors[0], src_actors, src_custom
-        # 2) fallback: 이 decision 에서 나가는 엣지의 target
+        # 2) fallback: 이 노드에서 나가는 엣지의 target
         for e in asis_sheet.edges:
-            if e.source != dec_node_id:
+            if e.source != node_id:
                 continue
             tgt = asis_sheet.nodes.get(e.target)
             if tgt is None:
                 continue
             tgt_role = tgt.metadata.get("role", "") or tgt.metadata.get("actors", "")
             tgt_actors, tgt_custom = _parse_role_string(tgt_role)
-            if tgt_actors:
+            if tgt_actors and tgt_actors[0] != "그 외":
                 return tgt_actors[0], tgt_actors, tgt_custom
-        return "HR 담당자", ["HR 담당자"], ""   # 최종 fallback
+        return "", [], ""
+
+    def _infer_decision_actor(dec_node_id: str) -> tuple[str, list[str], str]:
+        """Decision 노드 — 선행 우선, 없으면 HR 담당자 fallback."""
+        a, al, cr = _infer_neighbor_actor(dec_node_id)
+        if a:
+            return a, al, cr
+        return "HR 담당자", ["HR 담당자"], ""
 
     for n in sorted(asis_sheet.nodes.values(), key=lambda nd: (nd.position_y, nd.position_x)):
         if n.id not in kept_ids:
@@ -4357,25 +4364,58 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
         if cls_label == "AI":
             continue
 
-        # ── Decision 은 role 이 없음 → 선행·후행 actor 상속 (그 외 lane 으로 밀려나는 것 방지) ──
+        # ── Decision 은 role 이 없음 → 선행·후행 actor 상속 ──
         if n.level == "DECISION":
             primary_actor, actors_list, custom_role = _infer_decision_actor(n.id)
         else:
             actor_raw = n.metadata.get("role", "") or n.metadata.get("actors", "")
             actors_list, custom_role = _parse_role_string(actor_raw)
-            primary_actor = actors_list[0] if actors_list else "그 외"
-            # 🔑 '그 외' 로 default 된 경우 — 왜 '그 외' 인지 사유 뱃지 자동 부여
-            if primary_actor == "그 외" and not custom_role:
-                # 원본 role 텍스트가 있으면 그대로 (매핑 실패 사유)
-                raw_text = ""
-                if isinstance(actor_raw, str):
-                    raw_text = actor_raw.strip()
-                elif isinstance(actor_raw, list) and actor_raw:
-                    raw_text = ", ".join(str(x) for x in actor_raw if x).strip()
-                if raw_text:
-                    custom_role = raw_text[:30]   # 매핑 안 된 원본 role
+            primary_actor = actors_list[0] if actors_list else ""
+
+            # 🔑 actor 정보가 정말 없는 경우 (raw role 도 없고 매핑도 안 됨)
+            #    → 1) 연결된 선/후행 노드에서 inheritance 시도
+            #    → 2) 그래도 없으면 분류(AI/Human) 기준 default
+            #    → 3) 그것도 없으면 노드 자체 SKIP (수행주체 정보가 정말로 없으므로
+            #         Swim Lane 에 표시할 의미가 없음 — 사용자 요구)
+            raw_role_text = ""
+            if isinstance(actor_raw, str):
+                raw_role_text = actor_raw.strip()
+            elif isinstance(actor_raw, dict):
+                # actors dict 가 모두 빈 값이면 raw_role_text 는 빈 상태
+                raw_role_text = _actors_dict_to_role(actor_raw)
+            elif isinstance(actor_raw, list) and actor_raw:
+                raw_role_text = ", ".join(str(x) for x in actor_raw if x).strip()
+
+            if not primary_actor:
+                # role 이 명시적으로 "그 외"·"기타" 인 경우는 actors_list 에 들어옴
+                if raw_role_text and ("그 외" in raw_role_text or "기타" in raw_role_text):
+                    primary_actor = "그 외"
                 else:
-                    custom_role = "수행주체 미지정"   # 완전히 빈 경우
+                    # inheritance 시도
+                    inh_actor, inh_list, inh_custom = _infer_neighbor_actor(n.id)
+                    if inh_actor:
+                        primary_actor = inh_actor
+                        actors_list = inh_list
+                        custom_role = inh_custom
+                    else:
+                        # 분류 정보로 fallback (AI/Human 라벨이 있으면 합리적 default)
+                        if cls_label in ("AI", "AI + Human"):
+                            primary_actor = "HR 담당자"
+                            actors_list = ["HR 담당자"]
+                        elif cls_label == "Human":
+                            primary_actor = "HR 담당자"
+                            actors_list = ["HR 담당자"]
+                        else:
+                            # 진짜로 정보 없음 — 노드 SKIP (사용자 요구)
+                            print(f"[TOBE] '{n.label}' 노드 SKIP — 수행주체 정보 없음 "
+                                  f"(role/actors/inheritance/classification 모두 없음)", flush=True)
+                            continue
+
+            # primary_actor 가 결정된 후 — '그 외' 로 끝났는데 custom_role 비어있으면
+            # 원본 raw text 또는 '미지정' 표시 (이미 명시적 그 외인 경우)
+            if primary_actor == "그 외" and not custom_role:
+                if raw_role_text:
+                    custom_role = raw_role_text[:30]
         # 모든 actor를 카운트 (lane 등장 여부 판단용)
         for a in actors_list or [primary_actor]:
             role_counts[a] = role_counts.get(a, 0) + 1
