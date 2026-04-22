@@ -1924,16 +1924,10 @@ export default function WorkflowPage() {
                             borderLeft: "3px solid #2563EB",
                           } : undefined}
                         >
-                          <td className="px-3 py-2 font-medium text-gray-800 whitespace-nowrap">
-                            {row.is_background && (
-                              <span
-                                className="inline-block text-[8.5px] font-bold mr-1.5 px-1.5 py-0.5 rounded align-middle"
-                                style={{ backgroundColor: "#2563EB", color: "#FFFFFF" }}
-                                title={row.benchmark_title ? `Background BM: ${row.benchmark_title}` : "Background BM"}
-                              >
-                                📚 PwC
-                              </span>
-                            )}
+                          <td
+                            className="px-3 py-2 font-medium text-gray-800 whitespace-nowrap"
+                            title={row.is_background && row.benchmark_title ? `Background BM: ${row.benchmark_title}` : undefined}
+                          >
                             {row.source}
                           </td>
                           <td className="px-3 py-2 whitespace-nowrap">
