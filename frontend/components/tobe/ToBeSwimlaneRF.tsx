@@ -196,23 +196,33 @@ function ToBeSwimlaneInner({ sheet }: Props) {
     const edges: Edge[] = [];
     for (const e of sheet.edges ?? []) {
       const isAi = e.origin === "ai";
+      // 반환/피드백(결과 반환 · 확정) 엣지는 연한 회색 실선 — 정방향과 시각적 구분
+      const isReturn = isAi && (
+        e.id.includes("_ret_") ||
+        e.label === "결과 반환" ||
+        e.label === "확정" ||
+        e.label === "반환"
+      );
+      const stroke = isReturn ? "#94A3B8" : (isAi ? "#00827F" : "#64748B");
+      const width = isReturn ? 1.5 : (isAi ? 2 : 1.5);
       edges.push({
         id: e.id,
         source: e.source,
         target: e.target,
         type: "ortho",
         label: e.label,
-        animated: isAi,
+        animated: isAi && !isReturn,   // 반환 엣지는 애니메이션 생략 (정방향만 강조)
         style: {
-          stroke: isAi ? "#00827F" : "#64748B",
-          strokeWidth: isAi ? 2 : 1.5,
-          strokeDasharray: isAi ? "6 4" : undefined,
+          stroke,
+          strokeWidth: width,
+          strokeDasharray: isReturn ? undefined : (isAi ? "6 4" : undefined),
         },
+        labelStyle: isReturn ? { fill: "#64748B", fontSize: 10 } : undefined,
         markerEnd: {
           type: MarkerType.ArrowClosed,
           width: 18,
           height: 18,
-          color: isAi ? "#00827F" : "#64748B",
+          color: stroke,
         },
       });
     }
