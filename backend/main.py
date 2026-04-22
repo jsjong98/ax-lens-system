@@ -4633,14 +4633,13 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
         review_description = llm_action or human_role or f"{clean_task_name} 결과 검토 및 확정"
 
         hr_id = f"human_{jid}"
-        # L5 표시용 ID — Junior 가 기존 As-Is 대체이면 같은 ID, 아니면 다음 순번
-        jnode_display_id = jnode.get("display_id", "") or _next_l5_id()
-        # Human 검토 노드도 별도 L5 seq 할당 (2.1.4.N+1)
-        review_display_id = _next_l5_id()
+        # 🔑 Human 검토 노드는 Junior AI 와 **같은 display_id 공유** (동일 task 의 AI↔Human 쌍)
+        # 별도 번호가 아니라 같은 번호 (예: 2.1.4.7 AI → 2.1.4.7 Human 검토)
+        review_display_id = jnode.get("display_id", "") or ""
 
         human_nodes_out.append({
             "id": hr_id,
-            "label": review_title[:40],   # 짧은 타이틀
+            "label": review_title[:40],
             "level": "L5",
             "actor": actor_lane,
             "type": "task",
@@ -4648,12 +4647,12 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
             "position": {"x": jnode["position"]["x"], "y": hr_lane_y},
             "origin": "ai",
             "display_id": review_display_id,
-            "description": review_description,   # 상세 action 문구
+            "description": review_description,
             "data": {
                 "role": actor_lane,
                 "label": review_title,
                 "level": "L5",
-                "id": review_display_id,    # LevelNode 의 ID 표시용
+                "id": review_display_id,
                 "description": review_description,
             },
             "next": [],
@@ -4739,6 +4738,67 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
 
     all_nodes = asis_nodes_out + ai_nodes_out + human_nodes_out
     all_edges = asis_edges_out + ai_edges_out
+
+    # ── 🔑 L4 별 1부터 sequential 재번호 (display_id) ─────────────────────
+    # 사용자 요구: 같은 task 의 AI/Human 쌍은 같은 번호 + 왼쪽 기준 1부터 시작
+    # pair_key 결정 규칙:
+    #   - As-Is L5: task_id (예: "2.1.4.3")
+    #   - Junior AI: 매칭 As-Is task_id 가 있으면 그것, 없으면 자체 task_id
+    #     → Junior id 패턴 "junior_<aid>_<tid>" 에서 tid 추출
+    #   - Human review: 대응 Junior 의 pair_key (Human 이미 jnode display_id 공유 받음)
+    from collections import defaultdict as _defaultdict
+
+    def _node_pair_key(n: dict) -> str:
+        """노드의 pair_key (같은 task 그룹) 반환."""
+        # As-Is 는 task_id 그대로
+        if n.get("origin") == "asis":
+            return n.get("task_id") or n["id"]
+        # AI 노드 (Junior/Senior) - id 에서 task_id 추출
+        nid = n.get("id", "")
+        # junior_<agent>_<task_id> 패턴
+        for prefix in ("junior_", "senior_", "human_"):
+            if nid.startswith(prefix):
+                rest = nid[len(prefix):]
+                # _<task_id> 끝 부분 — As-Is task_id 와 매칭되는지 시도
+                for tid in asis_by_task_id:
+                    if rest.endswith(f"_{tid}") or rest == tid or rest.endswith(f"_{tid}_AI"):
+                        return tid   # 매칭 As-Is 의 task_id 공유
+                # 매칭 없으면 자체 jid 사용
+                return rest
+        return nid
+
+    # L4_id → {pair_key → list[node]}
+    l4_groups: dict[str, dict[str, list[dict]]] = _defaultdict(lambda: _defaultdict(list))
+    for n in all_nodes:
+        if n.get("level") not in ("L4", "L5"):
+            continue
+        # L4_id 결정
+        n_l4_id = ""
+        n_tid = n.get("task_id") or ""
+        if n_tid:
+            parts = n_tid.split(".")
+            if len(parts) >= 3:
+                n_l4_id = ".".join(parts[:3])
+        if not n_l4_id:
+            n_l4_id = (n.get("data") or {}).get("l4Id") or _primary_l4 or "unknown"
+        pkey = _node_pair_key(n)
+        l4_groups[n_l4_id][pkey].append(n)
+
+    # 각 L4 내에서 pair_key 들을 leftmost x 기준 정렬 후 1부터 번호 부여
+    for l4_id, pair_map in l4_groups.items():
+        # pair 별 leftmost x 계산 → 정렬 키
+        pair_sort = sorted(
+            pair_map.items(),
+            key=lambda kv: min(n.get("position", {}).get("x", 0) for n in kv[1])
+        )
+        for seq, (pkey, nodes) in enumerate(pair_sort, start=1):
+            new_l5_id = f"{l4_id}.{seq}"
+            for n in nodes:
+                n["display_id"] = new_l5_id
+                # data.id 도 갱신 (LevelNode 가 표시)
+                if "data" not in n or not isinstance(n.get("data"), dict):
+                    n["data"] = {}
+                n["data"]["id"] = new_l5_id
 
     return {
         "l4_id": sheet_id,
