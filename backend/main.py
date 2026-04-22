@@ -3751,17 +3751,20 @@ async def generate_workflow_step1(request: Request):
                         f"{bm.get('use_case', '')} → {bm.get('outcome', '')}\n"
                     )
 
-    # 🔑 채용 도메인 큐레이션 레퍼런스 주입 — L2 '채용 기획' / '채용 운영' 에만 매칭
-    # (recruit_benchmarks.py) — 동적 Perplexity 결과 외 정제된 선도사 사례를 LLM 에 함께 제공
+    # 🔑 채용 도메인 큐레이션 레퍼런스 title 주입 — LLM 이 Task 명명 시 참조
+    # (recruit_benchmarks.py) — Step 2 에서 Task 이름 앞에 attribution prefix 부착 시 활용
     try:
-        from recruit_benchmarks import (
-            get_reference_benchmarks_for_tasks,
-            format_references_for_prompt,
-        )
+        from recruit_benchmarks import get_reference_benchmarks_for_tasks
         _refs = get_reference_benchmarks_for_tasks(_wf_excel_tasks)
         if _refs:
-            benchmark_text += "\n" + format_references_for_prompt(_refs)
-            print(f"[STEP1] 레퍼런스 벤치마킹 {len(_refs)}건 주입 (채용 도메인)", flush=True)
+            benchmark_text += (
+                "\n## 📚 레퍼런스 벤치마킹 Title (Doosan HR 큐레이션 - 채용 도메인)\n"
+                "※ 아래 title 은 Task 이름 attribution 용. AI 기능이 해당 벤치마킹과 같으면\n"
+                "   Task 이름 앞에 'title - ' 형태로 prefix 부착됨 (후처리로 자동 적용).\n\n"
+            )
+            for bm in _refs:
+                benchmark_text += f"- [{bm['case_no']}] **{bm['title']}**\n"
+            print(f"[STEP1] 레퍼런스 벤치마킹 title {len(_refs)}건 주입 (채용 도메인)", flush=True)
     except Exception as _re:
         print(f"[STEP1] 레퍼런스 주입 실패 (무시): {_re}", flush=True)
 
@@ -4860,9 +4863,19 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
                     else _next_l5_id()
                 )
 
+                # 🔑 벤치마킹 레퍼런스 attribution — Task 이름이 레퍼런스와 매칭되면
+                # '{벤치마킹 title} - {원본 Task명}' 형태로 prefix 부착 + benchmark_source 저장.
+                # 프론트 LevelNode 에서 prefix 부분을 파란색으로 강조 표시.
+                _orig_task_name = t.get("task_name", "") or tid
+                try:
+                    from recruit_benchmarks import attribute_task_name as _attr_task
+                    _display_label, _bm_source = _attr_task(_orig_task_name)
+                except Exception:
+                    _display_label, _bm_source = _orig_task_name, None
+
                 ai_nodes_out.append({
                     "id": jid,
-                    "label": (t.get("task_name", "") or tid)[:40],
+                    "label": _display_label[:80],
                     "level": "L5",
                     "actor": "Junior AI",
                     "type": "task",
@@ -4876,6 +4889,7 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
                     "input_data": t.get("input_data", []),
                     "output_data": t.get("output_data", []),
                     "agent_name": ag["agent_name"],
+                    "benchmark_source": _bm_source,   # 파란색 attribution 뱃지용 (None 이면 없음)
                     "next": [],
                 })
                 # Junior AI 내부 sequential 엣지
@@ -5406,6 +5420,9 @@ def _tobe_cache_to_hr_json(cache: dict) -> dict:
                 base_data.setdefault("id", n["task_id"])
             if n.get("description"):
                 base_data.setdefault("description", n["description"])
+            # 벤치마킹 attribution — 프론트에서 prefix 부분 파란색 강조
+            if n.get("benchmark_source"):
+                base_data["benchmark_source"] = n["benchmark_source"]
             # AI 노드는 role을 actor로 강제 (Senior/Junior AI 레인 배치)
             if n.get("origin") == "ai" and n.get("actor"):
                 base_data["role"] = n["actor"]

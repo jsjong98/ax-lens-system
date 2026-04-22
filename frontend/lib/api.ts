@@ -1301,6 +1301,7 @@ export interface TobeNode {
   input_data?: string[];
   output_data?: string[];
   agent_name?: string;
+  benchmark_source?: string | null;   // 벤치마킹 title (있으면 label 의 prefix 파트)
 }
 
 export interface TobeEdge {

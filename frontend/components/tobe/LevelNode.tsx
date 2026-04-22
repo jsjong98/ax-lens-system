@@ -83,6 +83,8 @@ interface NodeData {
   inputData?: string;
   outputData?: string;
   system?: string;
+  /* 벤치마킹 attribution — label 의 prefix 파트 (파란색 강조 렌더용) */
+  benchmark_source?: string;
   /* ── CSV-parsed systems (L5) ── */
   systems?: {
     hr: string;
@@ -104,13 +106,16 @@ const SYSTEM_TAGS: { key: keyof NonNullable<NodeData["systems"]>; label: string 
   { key: "etc",       label: "기타툴"   },
 ];
 
-/* helper: 역할 문자열에서 '그 외:xxx' 또는 '기타:xxx' 부분 추출 (콤마 구분 지원) */
+/* helper: 역할 문자열에서 '그 외:xxx' 또는 '기타:xxx' 부분 추출 (콤마 구분 지원)
+   hr-workflow-ai 규약: 값은 encodeURIComponent 로 저장되므로 표시 시 decode.
+   plain 한글 ("지주") 은 그대로, 인코딩된 값 ("%EC%A7%80%EC%A3%BC") 은 디코드. */
 function extractCustomRole(role?: string): string {
   if (!role) return "";
   const parts = role.split(",").map(r => r.trim());
   const custom = parts.find(r => r.startsWith("그 외:") || r.startsWith("기타:"));
   if (!custom) return "";
-  return custom.startsWith("그 외:") ? custom.slice(4).trim() : custom.slice(3).trim();
+  const raw = custom.startsWith("그 외:") ? custom.slice(4).trim() : custom.slice(3).trim();
+  try { return decodeURIComponent(raw); } catch { return raw; }
 }
 
 /** 역할 문자열이 '그 외' 또는 '기타' 본체(텍스트 없음) 또는 '그 외:xxx'를 포함하는지 */
@@ -178,7 +183,22 @@ function L5NodeBase({ data, selected }: { data: NodeData; selected?: boolean }) 
           {data.id || ""}
         </div>
         <div className="text-[13px] font-bold text-black text-center leading-snug mt-0.5">
-          {data.label}
+          {/* 벤치마킹 attribution prefix — 파란색으로 강조, 나머지는 검정
+              label 이 '{title} - {원본 task}' 형태일 때만 split 하여 렌더. */}
+          {(() => {
+            const bm = data.benchmark_source || "";
+            const fullLabel = data.label || "";
+            if (bm && fullLabel.startsWith(bm + " - ")) {
+              const rest = fullLabel.slice(bm.length + 3);
+              return (
+                <>
+                  <span style={{ color: "#2563EB" }}>{bm}</span>
+                  <span className="text-black"> - {rest}</span>
+                </>
+              );
+            }
+            return fullLabel;
+          })()}
         </div>
       </div>
 

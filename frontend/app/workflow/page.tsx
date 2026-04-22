@@ -1840,63 +1840,33 @@ export default function WorkflowPage() {
               </div>
             )}
 
-            {/* 📚 레퍼런스 벤치마킹 (Doosan 채용 도메인 큐레이션) — 파란색 강조 */}
+            {/* 📚 레퍼런스 벤치마킹 Title — Task 이름 attribution 용 (파란색 강조) */}
             {referenceBenchmarks.length > 0 && (
               <div className="mb-4 rounded-lg overflow-hidden" style={{ border: "2px solid #2563EB" }}>
-                <div className="px-3 py-2 flex items-center gap-2" style={{ backgroundColor: "#2563EB", color: "#FFFFFF" }}>
-                  <span className="text-sm font-bold">📚 레퍼런스 벤치마킹</span>
-                  <span className="text-[10px] opacity-90">
-                    채용 도메인 큐레이션 · {referenceBenchmarks.length}건
+                <div className="px-3 py-1.5 flex items-center gap-2" style={{ backgroundColor: "#2563EB", color: "#FFFFFF" }}>
+                  <span className="text-[11px] font-bold">📚 레퍼런스 벤치마킹 Title</span>
+                  <span className="text-[9.5px] opacity-90">
+                    · 채용 도메인 · {referenceBenchmarks.length}건
                   </span>
-                  <span className="ml-auto text-[10px] opacity-80">IBM · GM · Siemens</span>
+                  <span className="ml-auto text-[9.5px] opacity-85 italic">
+                    Task 이름 앞에 이 title 이 prefix 로 붙어 파란색 표시
+                  </span>
                 </div>
-                <div className="p-3 space-y-2" style={{ backgroundColor: "#EFF6FF" }}>
+                <div className="px-3 py-2 flex flex-wrap gap-1.5" style={{ backgroundColor: "#EFF6FF" }}>
                   {referenceBenchmarks.map((ref) => (
-                    <div
+                    <span
                       key={ref.case_no}
-                      className="rounded-lg p-3 bg-white"
-                      style={{ border: "1px solid #93C5FD" }}
+                      className="text-[11px] font-semibold px-2 py-1 rounded inline-flex items-center gap-1.5"
+                      style={{ backgroundColor: "#FFFFFF", color: "#1E40AF", border: "1px solid #93C5FD" }}
                     >
-                      <div className="flex items-start gap-2">
-                        <div
-                          className="flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold"
-                          style={{ backgroundColor: "#2563EB", color: "#FFFFFF" }}
-                        >
-                          {ref.case_no}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="text-[12px] font-bold" style={{ color: "#1E3A8A" }}>
-                            {ref.title}
-                          </div>
-                          <div className="flex flex-wrap items-center gap-1.5 mt-1">
-                            <span className="text-[10px] font-semibold" style={{ color: "#1D4ED8" }}>
-                              적용 Player:
-                            </span>
-                            {ref.companies.map((c) => (
-                              <span
-                                key={c}
-                                className="text-[10px] font-bold px-2 py-0.5 rounded"
-                                style={{
-                                  backgroundColor: "#2563EB",
-                                  color: "#FFFFFF",
-                                  letterSpacing: "0.3px",
-                                }}
-                              >
-                                {c}
-                              </span>
-                            ))}
-                            <span className="text-[10px] text-gray-400 mx-1">·</span>
-                            <span className="text-[10px] font-medium" style={{ color: "#1E40AF" }}>
-                              적용 구간:
-                            </span>
-                            <span className="text-[10px] text-gray-700">{ref.stage}</span>
-                          </div>
-                          <div className="text-[11px] text-gray-700 leading-relaxed mt-1.5">
-                            {ref.description}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
+                      <span
+                        className="text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center"
+                        style={{ backgroundColor: "#2563EB", color: "#FFFFFF" }}
+                      >
+                        {ref.case_no}
+                      </span>
+                      {ref.title}
+                    </span>
                   ))}
                 </div>
               </div>

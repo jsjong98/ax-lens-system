@@ -188,6 +188,8 @@ function ToBeSwimlaneInner({ sheet }: Props) {
           role: roleStr,
           // memo 필드는 원본 As-Is에 memo가 있을 때만 유지 (AI 설명은 노란 스티커로 띄우지 않음)
           memo: memoStr || undefined,
+          // 벤치마킹 attribution — LevelNode 가 prefix 를 파란색으로 강조 표시
+          benchmark_source: n.benchmark_source || undefined,
         };
 
         out.push({
