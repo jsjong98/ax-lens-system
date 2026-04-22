@@ -72,6 +72,9 @@ class WorkflowSheet:
     nodes: dict[str, WorkflowNode] = field(default_factory=dict)
     edges: list[WorkflowEdge] = field(default_factory=list)
     lanes: list[str] = field(default_factory=list)
+    lane_heights: list[float] = field(default_factory=list)   # 사용자가 드래그로 조정한 lane 높이 (없으면 빈 리스트)
+    swim_height: float = 0.0   # 전체 swim 영역 높이 (선택)
+    sheet_type: str = ""    # "swimlane" 등
     execution_order: list[ExecutionStep] = field(default_factory=list)
 
     @property
@@ -144,10 +147,22 @@ def parse_workflow_json(data: dict | str | Path) -> ParsedWorkflow:
 
 def _parse_sheet(raw: dict) -> WorkflowSheet:
     """개별 시트를 파싱합니다."""
+    # laneHeights: [240, 400, 380, ...] — 사용자가 드래그로 조정한 lane 높이
+    raw_lane_heights = raw.get("laneHeights") or raw.get("lane_heights") or []
+    lane_heights: list[float] = []
+    for h in raw_lane_heights:
+        try:
+            lane_heights.append(float(h))
+        except (TypeError, ValueError):
+            continue
+
     sheet = WorkflowSheet(
         sheet_id=raw.get("id", "default"),
         name=raw.get("name", ""),
         lanes=raw.get("lanes", []),
+        lane_heights=lane_heights,
+        swim_height=float(raw.get("swimHeight") or 0),
+        sheet_type=str(raw.get("type") or ""),
     )
 
     for rn in raw.get("nodes", []):

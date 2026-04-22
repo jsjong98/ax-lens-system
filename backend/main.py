@@ -4333,40 +4333,68 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
 
     def _y_to_lane_actor(node_y: float) -> tuple[str, str]:
         """노드 y 좌표 기반 swim lane actor 추론.
-        Returns: (actor, raw_lane_name) — actor 가 표준 8-actor 중 하나면 사용.
+        우선순위:
+          1. sheet.lane_heights (사용자가 드래그로 조정한 누적 높이) → 정확한 lane 매핑
+          2. sheet.swim_height / num_lanes (균등 분할)
+          3. 데이터 y 범위 자동 추정
+        Returns: (actor, raw_lane_name)
         """
         nonlocal _y_to_lane_cache
         if not sheet_lanes_raw or not sheet_lane_actors:
             return "", ""
-        # 캐시: band_height 와 y_origin 계산
+
         if _y_to_lane_cache is None:
-            all_ys = [
-                nd.position_y for nd in asis_sheet.nodes.values()
-                if nd.level not in ("L2", "L3", "MEMO")
-            ]
-            if not all_ys:
-                _y_to_lane_cache = {"valid": False}
-            else:
-                y_min, y_max = min(all_ys), max(all_ys)
-                # hr-workflow-ai default 400/lane 사용 — 절대 y 기준
-                # 단 데이터가 너무 좁으면 (y range < 400 * num_lanes) 비례 분할
-                num_lanes = len(sheet_lanes_raw)
-                expected_height = 400.0 * num_lanes
-                if y_max - y_min < expected_height * 0.5:
-                    # 비례 분할 — y 범위가 좁을 때
-                    band = max(50.0, (y_max - y_min + 1) / num_lanes)
-                    y_origin = y_min
-                else:
-                    # 절대 좌표 기준 (hr-workflow-ai default)
-                    band = 400.0
-                    y_origin = 0.0
+            num_lanes = len(sheet_lanes_raw)
+            lane_heights = list(getattr(asis_sheet, "lane_heights", []) or [])
+            # ① laneHeights 가 있고 길이가 lanes 와 같으면 — 정확한 누적 좌표 사용
+            if lane_heights and len(lane_heights) == num_lanes:
+                # cumulative_y[i] = i 번째 lane 의 시작 y
+                cumulative: list[float] = [0.0]
+                for h in lane_heights:
+                    cumulative.append(cumulative[-1] + h)
                 _y_to_lane_cache = {
-                    "valid": True, "band": band, "y_origin": y_origin,
-                    "num_lanes": num_lanes,
+                    "valid": True, "mode": "cumulative",
+                    "cumulative": cumulative, "num_lanes": num_lanes,
                 }
+            else:
+                # ② swim_height / num_lanes 균등 분할 (또는 ③ 자동 추정)
+                swim_h = float(getattr(asis_sheet, "swim_height", 0) or 0)
+                if swim_h <= 0:
+                    all_ys = [
+                        nd.position_y for nd in asis_sheet.nodes.values()
+                        if nd.level not in ("L2", "L3", "MEMO")
+                    ]
+                    if all_ys:
+                        y_max = max(all_ys)
+                        # hr-workflow-ai default swim_height = 2400 가정,
+                        # 데이터 y_max 가 더 크면 그것 사용
+                        swim_h = max(2400.0, y_max + 100.0)
+                    else:
+                        _y_to_lane_cache = {"valid": False}
+                if (_y_to_lane_cache or {}).get("valid") is None:
+                    band = swim_h / num_lanes
+                    _y_to_lane_cache = {
+                        "valid": True, "mode": "uniform",
+                        "band": band, "y_origin": 0.0, "num_lanes": num_lanes,
+                    }
+
         if not _y_to_lane_cache.get("valid"):
             return "", ""
-        idx = int((node_y - _y_to_lane_cache["y_origin"]) / _y_to_lane_cache["band"])
+
+        if _y_to_lane_cache["mode"] == "cumulative":
+            cumu = _y_to_lane_cache["cumulative"]
+            # node_y 가 어느 누적 구간에 들어가는지 binary search
+            idx = 0
+            for i in range(len(cumu) - 1):
+                if cumu[i] <= node_y < cumu[i + 1]:
+                    idx = i
+                    break
+            else:
+                # 마지막 lane 이후
+                idx = _y_to_lane_cache["num_lanes"] - 1
+        else:
+            idx = int((node_y - _y_to_lane_cache["y_origin"]) / _y_to_lane_cache["band"])
+
         idx = max(0, min(idx, _y_to_lane_cache["num_lanes"] - 1))
         return sheet_lane_actors[idx], sheet_lanes_raw[idx]
 
