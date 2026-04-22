@@ -4158,11 +4158,47 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
             return True
         return tl4 in sheet_name or sheet_name in tl4
 
+    # Step 1 에서 '삭제'/'통합' 처리된 task_id 수집 (Step 2 tasks 에서도 제외)
+    _pre_deprecated_tids: set[str] = set()
+    _pre_deprecated_l4s: set[str] = set()
+    _pre_deprecated_l3s: set[str] = set()
+    for _l3 in (_wf_step1_cache.get("redesigned_process") or []):
+        _l3_ct = str(_l3.get("change_type") or "").strip()
+        _l3_id = str(_l3.get("l3_id") or "").strip()
+        if _l3_ct in ("삭제", "통합") and _l3_id:
+            _pre_deprecated_l3s.add(_l3_id)
+        for _l4 in (_l3.get("l4_list") or []):
+            _l4_ct = str(_l4.get("change_type") or "").strip()
+            _l4_id = str(_l4.get("l4_id") or "").strip()
+            if _l4_ct in ("삭제", "통합") and _l4_id:
+                _pre_deprecated_l4s.add(_l4_id)
+            for _l5 in (_l4.get("l5_list") or []):
+                _ct = str(_l5.get("change_type") or "").strip()
+                _tid = str(_l5.get("task_id") or "").strip()
+                if _ct in ("삭제", "통합") and _tid and not _tid.startswith("NEW"):
+                    _pre_deprecated_tids.add(_tid)
+
+    def _is_deprecated_tid(tid: str) -> bool:
+        tid = (tid or "").strip()
+        if not tid:
+            return False
+        if tid in _pre_deprecated_tids:
+            return True
+        parts = tid.split(".")
+        if len(parts) >= 3 and ".".join(parts[:3]) in _pre_deprecated_l4s:
+            return True
+        if len(parts) >= 2 and ".".join(parts[:2]) in _pre_deprecated_l3s:
+            return True
+        return False
+
     senior_agents: list[dict] = []
     junior_agents: list[dict] = []
     for agent in _wf_step2_cache.get("agents", []):
         atype = agent.get("agent_type", "")
-        matched = [t for t in agent.get("assigned_tasks", []) if _task_matches_sheet(t)]
+        matched = [
+            t for t in agent.get("assigned_tasks", [])
+            if _task_matches_sheet(t) and not _is_deprecated_tid(str(t.get("task_id") or ""))
+        ]
         # Senior AI는 오케스트레이터라 assigned_tasks가 비어있어도 항상 포함
         # (Junior AI는 태스크 없으면 제외)
         if atype == "Senior AI":
@@ -4177,7 +4213,11 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
         if atype != "Junior AI":
             continue
         if not matched and not junior_agents:
-            matched = agent.get("assigned_tasks", [])[:]
+            # 시트 매칭 실패 시 fallback — 단, 폐기/통합 task 는 제외
+            matched = [
+                t for t in agent.get("assigned_tasks", [])
+                if not _is_deprecated_tid(str(t.get("task_id") or ""))
+            ]
         if not matched:
             continue
         junior_agents.append({
@@ -4262,6 +4302,11 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
             continue
         if n.level == "DECISION":
             pending_decisions.append(n)
+            continue
+        # Step 1 에서 '삭제'/'통합' 처리된 Task 는 Swim Lane 에서 완전 제외
+        if _is_deprecated_tid(n.task_id or ""):
+            print(f"[TOBE] '{n.label}' (task_id={n.task_id}) SKIP — "
+                  f"Step 1 에서 폐기/통합 처리됨", flush=True)
             continue
         if _node_in_scope(n):
             kept_ids.add(n.id)
