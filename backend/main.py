@@ -4267,6 +4267,16 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
             "tasks": matched,
         })
 
+    # Junior AI 가 실제로 대체하는 task_id 집합 (As-Is 원본 제거 판정에 사용)
+    # Junior AI 에 할당 안 된 task (change_type=삭제/통합 또는 scope 미 포함) 는
+    # cls_label='AI' 여도 As-Is 에서 제거하면 안 됨 (대체자 없이 사라지는 문제 방지)
+    junior_replaced_tids: set[str] = set()
+    for ag in junior_agents:
+        for t in ag.get("tasks", []):
+            tid = str(t.get("task_id") or "").strip()
+            if tid:
+                junior_replaced_tids.add(tid)
+
     # 타겟 L4 스코프 추출 (task_id 접두사 + l4 이름)
     target_l4_ids: set[str] = set()
     target_l4_names: set[str] = set()
@@ -4527,10 +4537,10 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
             cls_entry = _wf_classification.get(n.task_id, {}) if _wf_classification else {}
             cls_label = str(cls_entry.get("label") or "")
 
-        # AI / AI+Human 분류 L5 는 As-Is 에서 완전 제거 — Junior AI + Human 검토 노드가 대체
-        # (예전엔 AI+Human 원본을 유지했더니 Junior AI + Human 검토 + As-Is 원본 = 3중 표시되어
-        #  HR 담당자 레인에 같은 label 이 중복됨. AI+Human 도 AI 와 동일 취급.)
-        if cls_label in ("AI", "AI + Human"):
+        # AI / AI+Human 분류 L5 는 As-Is 에서 완전 제거 — 단, Junior AI 가 실제로 대체할 때만
+        # (예: '서류 합격자 보고' 같이 LLM 이 잘못 AI 로 분류했지만 Step 2 에선 배정 안 된 task
+        #      → As-Is 에서 지우면 어디에도 안 나타남 → HR 임원 레인 소실. 대체자 있을 때만 제거.)
+        if cls_label in ("AI", "AI + Human") and (n.task_id or "") in junior_replaced_tids:
             continue
 
         # ── Decision 은 role 이 없음 → 선행·후행 actor 상속 ──
