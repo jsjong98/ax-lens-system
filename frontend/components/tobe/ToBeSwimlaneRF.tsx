@@ -167,7 +167,10 @@ function ToBeSwimlaneInner({ sheet }: Props) {
           ...(n.data ?? {}),
           label: n.label,
           level: n.level,
-          id: n.task_id || (n.data as Record<string, unknown> | undefined)?.id,
+          // ID 표시 우선순위: 백엔드 display_id (2.1.4.N 형식) > task_id > data.id
+          id: (n as { display_id?: string }).display_id
+            || n.task_id
+            || (n.data as Record<string, unknown> | undefined)?.id,
           description: n.description
             ?? n.ai_support
             ?? (n.data as { description?: string } | undefined)?.description,

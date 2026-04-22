@@ -4231,6 +4231,31 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
     kept_ids: set[str] = set()    # 스코프 필터 통과한 노드 id
     pending_decisions: list = []   # decision/memo는 연결된 노드 기준으로 2-pass 판단
 
+    # ── L5 ID 순번 할당용: 각 L4 의 max seq 추적 (2.1.4.N 포맷) ──
+    # 새로 생성하는 Junior AI / Human 검토 노드에 일관된 L5 ID 부여
+    l4_max_seq: dict[str, int] = {}
+    for n in asis_sheet.nodes.values():
+        if n.level == "L5" and n.task_id:
+            parts = n.task_id.split(".")
+            if len(parts) >= 4:
+                l4_id = ".".join(parts[:3])
+                try:
+                    seq = int(parts[3])
+                    l4_max_seq[l4_id] = max(l4_max_seq.get(l4_id, 0), seq)
+                except ValueError:
+                    pass
+
+    # 타겟 L4 (스코프의 첫 L4 를 primary 로 — 보통 단일 L4 scope)
+    _primary_l4 = next(iter(target_l4_ids), None) if target_l4_ids else None
+
+    def _next_l5_id(l4_id: str | None = None) -> str:
+        """다음 L5 ID 할당. 예: '2.1.4' → '2.1.4.16' (기존 최대 seq+1)"""
+        lid = l4_id or _primary_l4
+        if not lid:
+            return ""
+        l4_max_seq[lid] = l4_max_seq.get(lid, 0) + 1
+        return f"{lid}.{l4_max_seq[lid]}"
+
     # 스코프 필터 통과 노드 id 먼저 수집
     for n in asis_sheet.nodes.values():
         if n.level in ("L2", "L3", "MEMO"):
@@ -4354,24 +4379,24 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
                 parts = [f"그 외:{custom_role}" if p == "그 외" else p for p in parts]
             full_data["role"] = ", ".join(parts)
 
-        # ── AI + Human: label 을 Human 파트로 교체 ───────────
+        # ── AI + Human: label 은 원본 task 이름 유지, 상세 Human action 은 description ───
+        # (기존엔 Human 파트 60자 문장을 label 로 사용 → 너무 길어서 가독성 저하)
+        # → 원본 짧은 이름 유지 ("서류 합격자 선정") + description 에 전체 Human action
         original_label = n.label or ""
         display_label = original_label
         display_description = n.description or ""
         if cls_label == "AI + Human":
             hp_label, hp_desc = _extract_human_part(n.task_id)
-            if hp_label:
-                display_label = hp_label
-                display_description = hp_desc
-                full_data["label"] = hp_label
-                full_data["description"] = hp_desc
-            else:
-                # Human 파트를 추출 못하면 fallback: 기존 label + "검토/확정"
-                display_label = f"{original_label} 검토·확정"
-                full_data["label"] = display_label
-            # 분류 정보를 data에 기록 (프론트 hover 등에서 활용 가능)
+            # label 은 깔끔하게 — 원본 label 을 기본으로 사용
+            display_label = original_label
+            full_data["label"] = original_label
+            # description 에 Human 파트 상세 action 문구 저장 (툴팁/hover 에서 확인)
+            display_description = hp_desc if hp_desc else n.description or ""
+            full_data["description"] = display_description
+            # 분류 메타 정보
             full_data["_classification"] = "AI + Human"
             full_data["_original_label"] = original_label
+            full_data["_human_action"] = hp_desc or ""   # 필요 시 프론트에서 별도 표시
         elif cls_label == "Human":
             full_data["_classification"] = "Human"
 
@@ -4458,6 +4483,14 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
                 else:
                     x = min_x + x_step * (task_i + 0.5)
                 task_i += 1
+
+                # L5 표시용 ID — 기존 As-Is task_id 와 매칭되면 재사용,
+                # 새 task (NEW_xxx 등) 이면 L4 의 다음 순번 할당 (2.1.4.16 형식)
+                display_l5_id = tid if matched_asis else (
+                    tid if (tid and not tid.startswith("NEW") and tid[0].isdigit())
+                    else _next_l5_id()
+                )
+
                 ai_nodes_out.append({
                     "id": jid,
                     "label": (t.get("task_name", "") or tid)[:40],
@@ -4468,6 +4501,7 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
                     # 교대 y 제거: 같은 lane 내 겹침은 프론트가 stack으로 처리
                     "position": {"x": x, "y": junior_y},
                     "origin": "ai",
+                    "display_id": display_l5_id,   # LevelNode 가 data.id 로 보여줌
                     "automation_level": t.get("automation_level", ""),
                     "human_role": t.get("human_role", ""),
                     "input_data": t.get("input_data", []),
@@ -4566,20 +4600,27 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
         review_description = llm_action or human_role or f"{clean_task_name} 결과 검토 및 확정"
 
         hr_id = f"human_{jid}"
+        # L5 표시용 ID — Junior 가 기존 As-Is 대체이면 같은 ID, 아니면 다음 순번
+        jnode_display_id = jnode.get("display_id", "") or _next_l5_id()
+        # Human 검토 노드도 별도 L5 seq 할당 (2.1.4.N+1)
+        review_display_id = _next_l5_id()
+
         human_nodes_out.append({
             "id": hr_id,
-            "label": review_title[:60],   # 짧은 타이틀
+            "label": review_title[:40],   # 짧은 타이틀
             "level": "L5",
             "actor": actor_lane,
             "type": "task",
             "ai_support": None,
             "position": {"x": jnode["position"]["x"], "y": hr_lane_y},
             "origin": "ai",
+            "display_id": review_display_id,
             "description": review_description,   # 상세 action 문구
             "data": {
                 "role": actor_lane,
                 "label": review_title,
                 "level": "L5",
+                "id": review_display_id,    # LevelNode 의 ID 표시용
                 "description": review_description,
             },
             "next": [],
@@ -5608,6 +5649,31 @@ Step 1에서 도출된 기본 설계를 기반으로, 두산에 최적화된 **A
       ]
     }}
   ],
+
+## ⚠️ task_name 작성 규칙 (매우 중요)
+
+**형식**: 짧은 명사구로 10~20자 이내. 동사+목적어 or 명사구. 마침표/문장 금지.
+
+**✅ 올바른 예시**:
+- `"DBS 점수 추출"` / `"지원자 데이터 정리"` / `"에세이 검토"` / `"발령품의 진행"`
+- `"서류 합격자 확정"` / `"시스템 발령 처리"` / `"Local Job 신설"`
+
+**❌ 금지 예시** (이렇게 쓰지 말 것):
+- `"지주와 직접 협의하여 서류합격자 검토 결과를 조율하고 최종 합·불을 확정·승인한다"` — 이건 문장, task_name 아님
+- `"확정된 조직개편 결과의 시스템 반영은 AI가 처리하되..."` — 문장
+- `"~한다"`, `"~수행한다"`, `"~처리한다"` 로 끝나는 완전 문장 금지
+
+**규칙**:
+- task_name: 10~20자 짧은 명사구 or 동사+목적어
+- 긴 action 문장·방법·결과 설명은 **ai_role / human_role / description 필드**에 넣을 것
+- task_name 은 Swim Lane 뱃지·PPT 상자에 표시되므로 짧고 명확해야 함
+
+## ⚠️ task_id 형식 규칙
+
+- 기존 As-Is L5 를 대체하는 경우: **기존 task_id 그대로 사용** (예: `"2.1.4.3"`)
+- 신규 추가 Task 의 경우: 해당 L4 번호 뒤에 순번 (예: `"2.1.4.16"`, `"2.1.4.17"`)
+  - L4 가 `2.1.4` 이고 기존 최대 L5 가 `2.1.4.15` 이면 신규는 `2.1.4.16` 부터
+- `"NEW_xxx"` 같은 임시 ID 지양 — 가능한 한 실제 L5 숫자 형식으로 작성
 
 ⚠️ **task별 ai_technique 필드 필수 규칙**
 
