@@ -4527,8 +4527,10 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
             cls_entry = _wf_classification.get(n.task_id, {}) if _wf_classification else {}
             cls_label = str(cls_entry.get("label") or "")
 
-        # AI 로 분류된 L5 는 As-Is 에서 완전 제거 (Junior AI 가 대체)
-        if cls_label == "AI":
+        # AI / AI+Human 분류 L5 는 As-Is 에서 완전 제거 — Junior AI + Human 검토 노드가 대체
+        # (예전엔 AI+Human 원본을 유지했더니 Junior AI + Human 검토 + As-Is 원본 = 3중 표시되어
+        #  HR 담당자 레인에 같은 label 이 중복됨. AI+Human 도 AI 와 동일 취급.)
+        if cls_label in ("AI", "AI + Human"):
             continue
 
         # ── Decision 은 role 이 없음 → 선행·후행 actor 상속 ──
@@ -4708,6 +4710,8 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
         MIN_X_STEP = 440.0
         x_step = max(MIN_X_STEP, (max_x - min_x) / max(total_jtasks, 1)) if total_jtasks else MIN_X_STEP
         task_i = 0
+        # Agent 간 연결용 — 직전 agent 마지막 jid 추적
+        prev_agent_last_jid: str | None = None
         for ji, ag in enumerate(junior_agents):
             agent_prefix = f"junior_{ag['agent_id'] or ji}"
             prev_id: str | None = None
@@ -4756,7 +4760,21 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
                         "label": "",
                         "origin": "ai",
                     })
+                elif prev_agent_last_jid:
+                    # 🔑 Agent 간 연결: 직전 agent 의 마지막 task → 현재 agent 의 첫 task
+                    # (As-Is 경유 없이 Junior AI 내에서 pipeline 흐름이 직접 이어지도록)
+                    ai_edges_out.append({
+                        "id": f"aie_cross_{prev_agent_last_jid}_{jid}",
+                        "source": prev_agent_last_jid,
+                        "target": jid,
+                        "label": "",
+                        "origin": "ai",
+                    })
                 prev_id = jid
+
+            # 이번 agent 가 끝난 jid 를 다음 agent 연결용으로 저장
+            if prev_id:
+                prev_agent_last_jid = prev_id
 
             # Senior AI → 첫 Junior task (오케스트레이션) — Senior AI 가 존재할 때만
             if senior_node_ids and ag["tasks"]:
