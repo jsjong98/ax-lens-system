@@ -191,39 +191,38 @@ function ToBeSwimlaneInner({ sheet }: Props) {
     return out;
   }, [lanes, sheet.nodes, laneYStart]);
 
-  // edges
+  // edges — backend 가 hr-workflow-ai 표준 포맷 (type/animated/style/markerEnd) 을
+  // 직접 보내므로 그대로 React Flow 에 전달. 프론트에서 임의로 색/굵기 덮어쓰지 않음.
   const rfEdges: Edge[] = useMemo(() => {
     const edges: Edge[] = [];
     for (const e of sheet.edges ?? []) {
-      const isAi = e.origin === "ai";
-      // 반환/피드백(결과 반환 · 확정) 엣지는 연한 회색 실선 — 정방향과 시각적 구분
-      const isReturn = isAi && (
-        e.id.includes("_ret_") ||
-        e.label === "결과 반환" ||
-        e.label === "확정" ||
-        e.label === "반환"
-      );
-      const stroke = isReturn ? "#94A3B8" : (isAi ? "#00827F" : "#64748B");
-      const width = isReturn ? 1.5 : (isAi ? 2 : 1.5);
+      const raw = e as unknown as {
+        id: string; source: string; target: string; label?: string;
+        type?: string; animated?: boolean;
+        style?: Record<string, unknown>;
+        markerEnd?: { type?: string; width?: number; height?: number; color?: string };
+      };
+      // backend 가 markerEnd.type 를 소문자 "arrowclosed" 문자열로 보내므로
+      // React Flow 의 MarkerType enum 값으로 정규화 (동일 문자열 "arrowclosed")
+      const me = raw.markerEnd
+        ? {
+            type: MarkerType.ArrowClosed,
+            width: raw.markerEnd.width ?? 18,
+            height: raw.markerEnd.height ?? 18,
+            color: raw.markerEnd.color ?? "#333333",
+          }
+        : undefined;
       edges.push({
-        id: e.id,
-        source: e.source,
-        target: e.target,
-        type: "ortho",
-        label: e.label,
-        animated: isAi && !isReturn,   // 반환 엣지는 애니메이션 생략 (정방향만 강조)
-        style: {
-          stroke,
-          strokeWidth: width,
-          strokeDasharray: isReturn ? undefined : (isAi ? "6 4" : undefined),
+        id: raw.id,
+        source: raw.source,
+        target: raw.target,
+        type: raw.type ?? "ortho",
+        label: raw.label,
+        animated: raw.animated ?? false,
+        style: (raw.style as React.CSSProperties | undefined) ?? {
+          stroke: "#333333", strokeWidth: 1.5,
         },
-        labelStyle: isReturn ? { fill: "#64748B", fontSize: 10 } : undefined,
-        markerEnd: {
-          type: MarkerType.ArrowClosed,
-          width: 18,
-          height: 18,
-          color: stroke,
-        },
+        markerEnd: me,
       });
     }
     return edges;

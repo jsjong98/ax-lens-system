@@ -4221,6 +4221,23 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
     sheet_name = (asis_sheet.name or asis_sheet.sheet_id).strip()
     sheet_id = asis_sheet.sheet_id
 
+    # ─ hr-workflow-ai 표준 edge 포맷 (https://github.com/jsjong98/hr-workflow-ai) ─
+    # type: "ortho" / animated: false / 회색 단색 실선 / markerEnd 만
+    # 양방향 흐름은 단방향 edge 를 2개 그려서 표현 (markerStart 미사용).
+    def _std_edge(eid: str, src: str, tgt: str, label: str = "", origin: str = "asis",
+                  stroke_width: float = 1.5) -> dict:
+        return {
+            "id": eid,
+            "source": src,
+            "target": tgt,
+            "label": label,
+            "origin": origin,
+            "type": "ortho",
+            "animated": False,
+            "style": {"stroke": "#333333", "strokeWidth": stroke_width},
+            "markerEnd": {"type": "arrowclosed", "width": 18, "height": 18, "color": "#333333"},
+        }
+
     # 0) Step 2 에이전트 먼저 읽기 → 타겟 L4 스코프 도출
     def _task_matches_sheet(t: dict) -> bool:
         tl4 = (t.get("l4", "") or "").strip()
@@ -4689,13 +4706,10 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
     for e in asis_sheet.edges:
         if e.source in id_set and e.target in id_set:
             next_map[e.source].append(e.target)
-            asis_edges_out.append({
-                "id": e.id,
-                "source": e.source,
-                "target": e.target,
-                "label": e.label or "",
-                "origin": "asis",
-            })
+            asis_edges_out.append(_std_edge(
+                eid=e.id, src=e.source, tgt=e.target,
+                label=e.label or "", origin="asis",
+            ))
     for n in asis_nodes_out:
         n["next"] = next_map.get(n["id"], [])
 
@@ -4777,23 +4791,16 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
                 })
                 # Junior AI 내부 sequential 엣지
                 if prev_id:
-                    ai_edges_out.append({
-                        "id": f"aie_seq_{prev_id}_{jid}",
-                        "source": prev_id,
-                        "target": jid,
-                        "label": "",
-                        "origin": "ai",
-                    })
+                    ai_edges_out.append(_std_edge(
+                        eid=f"aie_seq_{prev_id}_{jid}",
+                        src=prev_id, tgt=jid, label="", origin="ai",
+                    ))
                 elif prev_agent_last_jid:
                     # 🔑 Agent 간 연결: 직전 agent 의 마지막 task → 현재 agent 의 첫 task
-                    # (As-Is 경유 없이 Junior AI 내에서 pipeline 흐름이 직접 이어지도록)
-                    ai_edges_out.append({
-                        "id": f"aie_cross_{prev_agent_last_jid}_{jid}",
-                        "source": prev_agent_last_jid,
-                        "target": jid,
-                        "label": "",
-                        "origin": "ai",
-                    })
+                    ai_edges_out.append(_std_edge(
+                        eid=f"aie_cross_{prev_agent_last_jid}_{jid}",
+                        src=prev_agent_last_jid, tgt=jid, label="", origin="ai",
+                    ))
                 prev_id = jid
 
             # 이번 agent 가 끝난 jid 를 다음 agent 연결용으로 저장
@@ -4806,21 +4813,15 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
                 last_jid = f"{agent_prefix}_{ag['tasks'][-1].get('task_id', 't0')}"
                 senior_first = senior_node_ids[0]
                 # 지시 (Senior → Junior 첫 task)
-                ai_edges_out.append({
-                    "id": f"aie_orc_{senior_first}_{first_jid}",
-                    "source": senior_first,
-                    "target": first_jid,
-                    "label": "기동",
-                    "origin": "ai",
-                })
+                ai_edges_out.append(_std_edge(
+                    eid=f"aie_orc_{senior_first}_{first_jid}",
+                    src=senior_first, tgt=first_jid, label="기동", origin="ai",
+                ))
                 # 결과 반환 (Junior 마지막 task → Senior)
-                ai_edges_out.append({
-                    "id": f"aie_ret_{last_jid}_{senior_first}",
-                    "source": last_jid,
-                    "target": senior_first,
-                    "label": "결과 반환",
-                    "origin": "ai",
-                })
+                ai_edges_out.append(_std_edge(
+                    eid=f"aie_ret_{last_jid}_{senior_first}",
+                    src=last_jid, tgt=senior_first, label="결과 반환", origin="ai",
+                ))
 
     # 3) LLM 지능형 배선 — AI Service Flow + As-Is Process Map 분석
     llm_routing = await _llm_route_tobe_flow(
@@ -4956,20 +4957,14 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
             "next": [],
         })
         # Junior AI ↔ HR 담당자 양방향 (검토 요청 / 결과 반환)
-        ai_edges_out.append({
-            "id": f"aie_hr_{jid}_{hr_id}",
-            "source": jid,
-            "target": hr_id,
-            "label": "검토",
-            "origin": "ai",
-        })
-        ai_edges_out.append({
-            "id": f"aie_hr_ret_{hr_id}_{jid}",
-            "source": hr_id,
-            "target": jid,
-            "label": "확정",
-            "origin": "ai",
-        })
+        ai_edges_out.append(_std_edge(
+            eid=f"aie_hr_{jid}_{hr_id}",
+            src=jid, tgt=hr_id, label="검토", origin="ai",
+        ))
+        ai_edges_out.append(_std_edge(
+            eid=f"aie_hr_ret_{hr_id}_{jid}",
+            src=hr_id, tgt=jid, label="확정", origin="ai",
+        ))
 
     # 3-2) LLM이 제공한 AI ↔ As-Is 엣지 병합
     # jid → 대체하는 As-Is task_id (self-loop 필터링용)
@@ -5002,13 +4997,10 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
         # 같은 task_id 쌍 self-loop 차단
         if _is_self_loop(frm, to):
             return
-        ai_edges_out.append({
-            "id": f"{prefix}_{frm}_{to}",
-            "source": frm,
-            "target": to,
-            "label": str(label or "")[:20],
-            "origin": "ai",
-        })
+        ai_edges_out.append(_std_edge(
+            eid=f"{prefix}_{frm}_{to}",
+            src=frm, tgt=to, label=str(label or "")[:20], origin="ai",
+        ))
 
     # As-Is → AI (트리거)
     for e in llm_routing.get("asis_to_ai_edges", []):
@@ -5026,13 +5018,10 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
         frm = str(e.get("from") or "").strip()
         to = str(e.get("to") or "").strip()
         if frm in senior_ids and to in junior_ids and (frm, to) not in existing_pairs:
-            ai_edges_out.append({
-                "id": f"llm_orc_{frm}_{to}",
-                "source": frm,
-                "target": to,
-                "label": str(e.get("label") or "기동")[:20],
-                "origin": "ai",
-            })
+            ai_edges_out.append(_std_edge(
+                eid=f"llm_orc_{frm}_{to}",
+                src=frm, tgt=to, label=str(e.get("label") or "기동")[:20], origin="ai",
+            ))
             existing_pairs.add((frm, to))
 
     # 4) lanes — 표준 순서대로, 실제 등장한 것만 (As-Is에서 내용 있는 레인 + AI 레인 + 새 Human 레인)

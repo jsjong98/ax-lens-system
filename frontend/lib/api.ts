@@ -1292,6 +1292,11 @@ export interface TobeEdge {
   target: string;
   label?: string;
   origin?: "asis" | "ai";
+  // hr-workflow-ai 호환 — React Flow 표준 필드
+  type?: string;
+  animated?: boolean;
+  style?: { stroke?: string; strokeWidth?: number; [k: string]: unknown };
+  markerEnd?: { type?: string; width?: number; height?: number; color?: string };
 }
 
 export interface TobeSheet {
