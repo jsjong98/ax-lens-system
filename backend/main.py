@@ -1317,12 +1317,15 @@ async def upload_workflow(request: Request, file: UploadFile = File(...)):
     parsed = parse_workflow_json(data)
     summary = get_workflow_summary(parsed)
 
-    # 세션 ID = JSON 파일명 stem (e.g. "발령관리.json" → "발령관리")
-
+    # 🔑 session_id 결정 — 기존 세션이 있으면 그대로 유지 (Excel + JSON = 한 project)
+    # 기존 동작 (JSON 파일명으로 새 session 생성) 은 Excel-session 과 JSON-session 이
+    # 쪼개져서 Step 1/2 결과가 Excel 세션에서 보이지 않던 문제의 원인.
     raw_fname = file.filename or "workflow.json"
-    sid = Path(raw_fname).stem or "default"
-
     global _workflow_cache, _current_session_id
+    if _current_session_id:
+        sid = _current_session_id   # 현재 project 에 JSON 추가
+    else:
+        sid = Path(raw_fname).stem or "default"   # 빈 상태에서 JSON 먼저 올린 경우
     _workflow_cache = {
         "filename": raw_fname,
         "parsed": parsed,
@@ -1351,6 +1354,8 @@ async def upload_workflow(request: Request, file: UploadFile = File(...)):
     })
     _sessions_manifest["_current"] = sid
     _save_sessions_manifest()
+    # Step 1/2 를 포함한 현재 메모리 state 가 있으면 즉시 동기화 저장 (이전 세션에서 이어오는 경우 대비)
+    _save_session_data(sid)
 
     return {
         "ok": True,
@@ -5734,20 +5739,53 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
             asis_n["position"]["x"] = jx
 
     # 🔑 To-Be Only 정책 — As-Is L5 노드를 캔버스에서 모두 제거.
-    # 보존되어야 할 Human task (보고/결재/외부 업체 등) 는 Step 2 LLM 이 explicit 으로
-    # agent_type='Human' (사람 task 그룹) 로 설계해야 함 (아래 human_task_groups 처리에서 노드 생성).
+    # 단, **backend safety net**: Junior AI 가 흡수 안 했고 LLM 이 human_tasks 에도
+    # 안 넣은 As-Is L5 (특히 외부 업체 / Human 분류) 는 자동 human_tasks 에 추가 →
+    # DDI 같은 외부 업체 노드가 의도치 않게 사라지는 일 방지.
     # 상위 컨텍스트 노드 (L2/L3/L4) 는 그대로 유지 — swim lane 구조 / 헤더 역할.
+    _llm_human_task_ids = {
+        str(ht.get("task_id") or "") for ht in human_tasks if ht.get("task_id")
+    }
+    _auto_preserved: list[dict] = []
     _removed_l5_ids: set[str] = set()
     _kept_asis = []
     for n in asis_nodes_out:
-        if (n.get("level") or "").upper() == "L5":
+        n_lvl = (n.get("level") or "").upper()
+        if n_lvl != "L5":
+            _kept_asis.append(n)
+            continue
+        n_tid = str(n.get("task_id") or "")
+        # L5 는 원칙적 제거 대상이지만 —
+        #   (a) Junior AI 가 흡수했으면 이미 Junior 가 대체 → 그냥 제거
+        #   (b) LLM 이 human_tasks 에 명시적으로 포함했으면 이미 human_tasks 로 렌더됨 → 제거
+        #   (c) 둘 다 아니면 safety net 으로 human_tasks 에 자동 추가 (performer = actor)
+        absorbed_by_junior = n_tid in junior_absorbed_task_ids
+        covered_by_human = n_tid in _llm_human_task_ids
+        if absorbed_by_junior or covered_by_human:
             _removed_l5_ids.add(n["id"])
             continue
-        _kept_asis.append(n)
+        # safety net — 누락된 사람 task 자동 보존
+        _role_raw = n.get("data", {}).get("role") or n.get("actor") or ""
+        _auto_preserved.append({
+            "task_id": n_tid,
+            "task_name": n.get("label") or "",
+            "l4": "",
+            "l3": "",
+            "ai_role": "",
+            "human_role": n.get("description") or "",
+            "input_data": [],
+            "output_data": [],
+            "performer": _role_raw if isinstance(_role_raw, str) else "HR 담당자",
+            # safety 플래그 — 디버깅 시 LLM 미설계임을 확인하기 위함
+            "_auto_preserved": True,
+        })
+        _removed_l5_ids.add(n["id"])
     if _removed_l5_ids:
-        print(f"[TOBE] To-Be Only — As-Is L5 제거: {len(_removed_l5_ids)}개 / "
-              f"잔존 (L2/L3/L4 헤더): {len(_kept_asis)}개", flush=True)
+        print(f"[TOBE] To-Be Only — As-Is L5 제거 {len(_removed_l5_ids)}개 "
+              f"(Junior 흡수/human_tasks 명시 제외), 자동 human_tasks 보존 {len(_auto_preserved)}개", flush=True)
     asis_nodes_out = _kept_asis
+    # human_tasks 에 safety net 추가
+    human_tasks.extend(_auto_preserved)
     # 제거된 L5 referencing 엣지 정리
     asis_edges_out = [
         e for e in asis_edges_out
