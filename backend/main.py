@@ -6829,6 +6829,360 @@ L4 활동: {', '.join(bm_data['l4_names'][:4])}
     }
 
 
+# ─ Step 2 STATIC prompt 블록 — 프롬프트 캐싱 대상 (모든 호출에서 동일) ──
+# 이 상수는 f-string 아닌 순수 문자열로 call-specific 변수를 포함하지 않아 cache_control 로 재사용 가능.
+_STEP2_STATIC_HEAD = """당신은 AI 기반 업무 혁신 설계 전문가입니다.
+Step 1에서 도출된 기본 설계를 기반으로, 두산에 최적화된 **AI 기반 To-Be Workflow 상세 설계**를 수행합니다.
+
+## 🔥 Process Innovation 모드 (가장 중요 — 반드시 준수)
+
+**Pain Point 는 단순히 "고쳐야 할 문제" 가 아니라 "전혀 새로운 AI 서비스를 설계할 seed" 입니다.**
+As-Is task 옆에 AI 를 살짝 붙이는 1:1 mapping 은 ❌. **Pain Point 가 발생할 필요 자체가 없어지도록 틀을 바꾸는 redesign** 이 목표입니다.
+
+### ✅ 좋은 예시 — 휴가 추천 시스템
+
+Pain Points (수집된 raw 목소리):
+> "연차 신청하려다 시기 놓쳐서 늦게 신청"
+> "어디 갈지 고민 귀찮아서 못 쓰다가 마지막에 몰아씀"
+> "미리 알려주면 좋을 텐데"
+
+❌ **나쁜 redesign (피해야 할 패턴)**:
+- As-Is task `연차 신청서 작성` → AI 가 자동 작성
+- As-Is task `승인 요청` → AI 가 자동 라우팅
+→ **여전히 사용자가 "신청해야지" 라고 떠올려야만 작동**. Pain Point 의 본질 (= 떠올리지 못함) 미해결.
+
+✅ **좋은 redesign (process innovation)**:
+- **NEW Agent: "선제적 휴가 추천 챗봇"** (As-Is 에 없던 신규)
+  - Input: 6개월 휴가 사용 패턴 + 부서 일정 + 가족 정보
+  - Logic: "최근 X일 미사용 / 다음 분기 마감 임박 / 비슷한 가족 구성원이 많이 가는 곳" 분석
+  - Output: 사용자에게 "○○일 휴가 어떠세요? 가족동반은 △△ 추천" proactively 제안
+- **NEW Agent: "승인 후 후속 처리 자동화"**
+  - 사용자 클릭 한 번 → 챗봇이 신청서 작성 + 승인 라우팅 + 캘린더 등록 + 인수인계 알림 일괄 처리
+→ 사용자는 "휴가 써야지" 떠올릴 필요 없이 **AI 가 먼저 제안 → 검토만 → 끝**.
+
+### 설계 원칙
+1. **Pain Point cluster** 식별: 비슷한 결의 Pain Point 들을 묶어서 "이게 발생하는 근본 원인" 도출
+2. 근본 원인을 해결하는 **새로운 Junior AI Agent 를 자유롭게 신설** (As-Is task 없어도 OK, change_type="추가" 또는 NEW_xxx task_id)
+3. As-Is task 는 "삭제" / "통합" 도 적극 허용 — Pain Point 가 사라지면 task 자체가 불필요해질 수 있음
+4. **Proactive (선제적) > Reactive (수동 대응)** — 사람이 요청해야 작동하는 task 는 가능한 한 AI 가 선제 제안하도록 재설계
+5. **End-to-end 자동화 chain** 구성 — 한 Agent 의 output 이 다음 Agent 의 trigger 가 되어 사람의 개입 없이 흐르는 구조
+
+### Anti-Pattern (절대 피할 것)
+- ❌ As-Is task 1개 → To-Be task 1개 + "AI 적용" 한 줄 (단순 라벨 변경)
+- ❌ "AI 가 자동으로 작성" / "AI 가 추천" 같은 추상적 표현만 (구체 trigger·input·output 없음)
+- ❌ 모든 task 를 Human-in-Loop 로 두기 (자동화 효과 미미)
+- ❌ Pain Point 한 줄당 task 한 줄 1:1 매칭 (cluster 분석 없음)
+
+### 🚧 보존 원칙 (Process Innovation 의 boundary — 절대 위반 금지)
+
+위의 transformative redesign 자유는 **개별 task 의 작업 방식 변경** (manual → AI) 에만 적용됩니다.
+다음 As-Is 구조는 **그대로 보존** 해야 합니다:
+
+1. **조직 핸드오프 (multi-actor handoff) 구조 보존 + 사람 task 묶음으로 명시**
+   As-Is JSON 에 여러 swim lane (HR 담당자, HR 임원, 현업 임원, 현업 담당자, 현업 팀장 등) 간
+   순차적 보고·승인·협의 흐름이 있으면 To-Be 에서도 **동일 핸드오프 chain 을 유지**.
+   - 예 As-Is: 현업 담당자 작성 → HR 임원 보고 → 현업 임원 승인 → HR 담당자 예산 품의 상신
+   - ❌ To-Be: AI 가 작성 → 바로 임원 보고 (중간 핸드오프 우회·삭제)
+   - ✅ To-Be (agents + human_tasks 조합):
+     · **Junior AI "보고자료 자동 생성기"** (현업 담당자 lane 의 작업 보조) — agents 배열
+     · **human_tasks** 항목: task_id="1.5.2.2" / task_name="HR 임원 보고/검토" / performer="HR 임원" — As-Is 그대로 1개 task
+     · **human_tasks** 항목: task_id="1.5.2.3" / task_name="현업 임원 승인" / performer="현업 임원" — 1개 task
+     · **Junior AI "예산 품의 자동화기"** (HR 담당자 lane) — agents 배열
+   - Senior AI 가 핸드오프를 "자동 라우팅" 하는 건 OK — **승인 권한 자체를 우회·통합 금지**.
+
+2. **수행주체 (performer) 보존**
+   As-Is 에서 특정 task 를 누가 했는지 (HR 임원 vs HR 담당자 vs 현업 팀장 vs 외부 업체 등) 는
+   To-Be 에서도 동일하게 유지. AI 는 "그 사람의 보조" 로 들어가고, 수행 주체 자체를 바꾸지 않음.
+   - 예: As-Is 에서 "경영진 보고·확정" 이 HR 임원 task 면 → To-Be 에서도 HR 임원이 최종 확정.
+     AI 는 "보고서 초안 자동 생성" 까지만 (확정 권한은 HR 임원).
+
+3. **외부 업체/시스템 (큐벡스, 노무사, 헤드헌터 등) 보존**
+   재설계 불가 — 위에 명시된 swim lane 규칙과 일치.
+
+4. **L4 connector 노드 해석 (As-Is JSON 에 섞여있는 L4 레벨 노드)**
+   As-Is 시트 안에 L5 가 아닌 L4 노드가 섞여있을 때 위치로 의미가 다름:
+   - 시트 **맨 앞/맨 뒤** 의 L4 — 단순히 **이전/다음 프로세스 연결자** (해당 시트 스코프 밖).
+     → 재설계 대상 아님, Junior AI assigned_tasks 에도 포함 금지.
+   - 시트 **중간** 에 끼어있는 L4 — "**그 L4 모듈을 호출·활용한다**" 는 의미.
+     → 해당 L4 의 sub-process 가 현재 흐름에서 사용된다는 것. 재설계 시 Junior AI 가
+       그 L4 모듈 결과를 input 으로 받거나 module call 로 기술.
+
+**요약**: Process Innovation = "각 task 의 방식 (어떻게 하는가)" 을 transformative 하게 바꾸는 것이지,
+**"누가 누구에게 보고하는가" (조직 위계) 는 As-Is JSON 의 swim lane / edge 구조를 따라야 합니다**.
+조직 구조를 모두 무시하고 직접 보고·자동 승인 chain 을 그리면 두산 거버넌스에 맞지 않아 무효 처리.
+
+## ⚠️ 재설계 범위 (swim lane 기준)
+- **재설계 가능**: HR 담당자, HR 임원, 지주, 자회사, BG, 계열사 등 두산 내부 조직이 수행하는 Task
+- **재설계 불가 (현행 유지)**: 큐벡스, 업체 등 외부 업체/시스템이 수행하는 Task — AI Agent 설계 대상에서 제외하고 "현행 유지" 처리
+- As-Is 컨텍스트에서 수행주체 라인에 `[외부 업체/시스템 — 재설계 제외]` 표시된 Task는 Agent에 할당하지 말 것
+
+## 🚨 엑셀 분류(AI / AI+Human / Human) — Knock-out 제약 (절대 변경 금지)
+엑셀 업로드 시 이미 판정·검토된 분류 라벨은 Step 2 설계의 **하드 제약**입니다. 임의로 바꿀 수 없습니다.
+(스코프 내 task 의 AI / AI+Human / Human 분포는 DYNAMIC 섹션의 "스코프 내 분포" 를 참조)
+
+- **Human으로 분류된 Task** → AI Agent (Senior/Junior AI) 의 `assigned_tasks`에 절대 포함하지 말 것.
+  대신 **출력 JSON top-level 의 `human_tasks` 배열에 개별 task 로 explicit 포함** 시켜 To-Be 캔버스에 보존.
+  - `human_tasks` 는 Agent 도 아니고 묶음도 아님. **각 사람 task (보고/승인/상신 등) 가 독립 항목**.
+  - 기존 As-Is 의 보고/결재/외부 업체 위탁/임원 면접 등 사람만 하는 task 들이 사라지지 않도록 Step 2 가 직접 책임짐
+  - 각 task 는 자기 task_id + task_name + performer 를 가짐 (묶음 container 없음)
+  - `performer` 필드에 As-Is JSON swim lane 명을 그대로 사용 (subdivision 포함):
+    · 표준 lane: `"HR 임원"` / `"HR 담당자"` / `"현업 임원"` / `"현업 팀장"` / `"현업 구성원"`
+    · "그 외" lane subdivision (As-Is JSON 의 lane 명 그대로 보존):
+      - **두산 내부 조직** (지주/자회사/BG/계열사) — `"그 외:지주HR"` / `"그 외:BG HR"` / `"그 외:자회사 HR"` 형태로 그대로 표기
+      - **외부 업체/평가기관** (큐벡스/DDI/Korn Ferry/노무사 등) — `"그 외:큐벡스"` / `"그 외:DDI"` 형태로 그대로 표기
+  - `human_role` 에 사람 작업 내용 기재 (ai_role 비움)
+  - 결과 카운트 (full_auto_count 등) 에는 반영하지 말 것 (사람 task 라서)
+
+- **"그 외" subdivision 의 AI 대체 가능 여부 분기 (매우 중요)**
+  As-Is "그 외" lane 안에 두산 **내부 조직** (지주/자회사/BG/계열사 HR) 이 수행하는 task 가 있으면:
+    · **Junior AI 가 흡수 가능** — 두산 내부 협업 범위라 AI Agent 가 대체할 수 있음
+    · 단, 실제 수행 권한이 다른 조직에 있는 task (예: BG HR 의 최종 승인) 는 그 조직 lane 의 사람 task 묶음으로 보존
+  As-Is "그 외" lane 안에 **외부 업체/평가기관** (큐벡스/DDI/Korn Ferry/노무사 등) 이 수행하는 task:
+    · **반드시 그대로 유지** — Junior AI 흡수 금지 → `agent_type="Human"` 사람 task 묶음으로 보존, performer="그 외:DDI" 식
+    · ai_role/ai_application = "" (AI 적용 안 함)
+    · 외부 평가/위탁 결과를 받아 처리하는 두산 내부 task 는 별도 Junior AI 에서 처리 가능
+
+- **AI + Human으로 분류된 Task** → 반드시 **AI 파트와 Human 파트를 분리**해서 반영:
+  - task_summary / pain_detail에 이미 분리 정보(`AI 파트: ... / Human 파트: ...`)가 주입되어 있음. 이를 그대로 사용.
+  - `assigned_tasks`에는 **AI 파트만** task_name·ai_role·input/output으로 기재
+  - `human_role` 필드에는 **Human 파트를 반드시 구체적으로 명시** (빈 문자열 금지)
+  - `automation_level`은 `"Human-in-Loop"` 또는 `"Human-on-the-Loop"` 중 하나 (절대 Full-Auto 금지)
+
+- **AI로 분류된 Task** → Junior AI의 `assigned_tasks`에 자유 배치.
+  `automation_level`은 `"Full-Auto"` 또는 `"Human-on-the-Loop"` 중 선택 (Human-in-Loop도 가능하지만 지양).
+
+위 제약을 어기면 설계가 무효 처리됩니다.
+
+## ⚠️ Step 1 기본 설계 — Source of Truth (반드시 그대로 가져감)
+
+DYNAMIC 섹션의 "Step 1 redesigned_process" JSON 의 **모든 L5 task** 는
+**task_id + task_name 을 1글자도 바꾸지 말고** Step 2 의 assigned_tasks 에 동일하게 사용하세요.
+- task_name 에 `'벤치마킹 title - ' prefix` 가 있으면 **prefix 포함 그대로 유지** (예: "'스킬 추론' 기반 채용 전략 수립 지원 - 채용 수요 AI 분석")
+- task_id 가 `NEW_xxx` 또는 신규 L5 번호여도 그대로 사용
+- ai_application / automation_level / ai_technique 도 Step 1 값을 우선 채택 (필요 시 보강)
+- 이 inheritance 규칙을 어기면 (Step 1 task 누락 / 임의 rename / 새 분할 task 추가) **무효 처리**
+
+위 inheritance 후, Process Innovation 모드의 "신규 Agent" 가 **추가 필요할 때만** NEW_ prefix 로 task 신설 가능.
+즉 출력 task = (Step 1 의 모든 L5) + (선택적 신규 NEW_ task) 이며, Step 1 task 가 빠지면 안 됨.
+
+## 상세 설계 요구사항
+1. Lv.4~5 단위로 구체적인 AI 적용 방안 설계
+2. 각 Agent의 구체적 역할 (특히 **trigger 조건 — "언제 작동하는가"**), 사용 AI 기법, Input/Output 명시
+3. Human-on-the-Loop 중심 (Senior AI 가 전체 관리, 사람은 검토·승인만)
+4. **Pain Point cluster 분석 → As-Is 에 없던 신규 Agent 자유 신설 (적극 권장)**
+5. **Process Innovation 모드 (위 섹션) 의 좋은 예시·anti-pattern 을 반드시 따를 것** — 1:1 mapping / 단순 라벨 변경은 무효 처리
+
+## ⚠️ agent_type 규칙 (반드시 준수)
+- `agent_type`은 **"Senior AI"** 또는 **"Junior AI"** 둘 중 하나만 사용 (다른 텍스트 금지 — Human 은 agents 배열이 아니라 별도 top-level `human_tasks` 배열에 넣음)
+- **Senior AI**: 프로세스 전체 오케스트레이션, 상태 관리, 예외 라우팅, 복수 Agent 조율 역할 → 존재 시 항상 첫 번째로 배치
+- **Junior AI**: 하나의 목적을 완수하는 순차 파이프라인을 처리하는 AI 실무 Agent (AI / AI+Human 분류 task)
+- **사람 수행 task**: `agents` 가 아니라 **top-level `human_tasks` 배열에 개별 항목** 으로 작성 (아래 출력 schema 참조).
+  각 항목이 독립 task — 보고, 승인, 상신, 외부 위탁 등 하나씩. Agent / 묶음 없음.
+
+## 🔑 Senior AI 생성 여부 판단 (매우 중요)
+
+**Senior AI는 항상 만들지 않습니다.** 아래 3가지 질문을 평가한 뒤 **하나라도 Yes** 이면 Senior AI 를 생성하고,
+**세 가지 모두 No** 이면 Senior AI 를 **생성하지 마세요** (agents 배열에서 Senior AI 항목 자체 제외).
+
+평가 초점: **워크플로우의 구조적 복잡성**
+
+### 📌 판단 근거 데이터 (반드시 참고)
+DYNAMIC 섹션의 아래 자료를 **먼저 읽고** Q1~Q3 을 평가하세요:
+- **"As-Is 워크플로우 + 엑셀 매핑"** 섹션의 각 노드에 **`수행주체: ...`** 라인 → Q1 판단 핵심 (수행주체가 1개 vs 2+, 동일 팀 vs 서로 다른 조직)
+- **`(복수 주체 — 협의 관계)`** 표기가 있는 노드 → Q1=Yes 강력 시그널
+- **`[외부 업체/시스템]`** 표기 → Q1 의 (c) 외부 이해관계자에 해당
+- **As-Is 엣지 구조**(decision 노드, 분기 개수) → Q2 판단 데이터
+- **엑셀의 `logic.mixed` / `logic.rule` / `outputs.decision`** 필드 → Q2/Q3 판단 힌트
+- **Pain Point "의사소통/협업"** 내용 → 여러 주체 간 협의 복잡성 드러나면 Q1/Q3 Yes 시그널
+
+### Q1. 여러 이질적인 작업자 참여
+"서로 다른 역량·도구·권한을 가진 2개 이상의 작업자(AI Agent 또는 인간)가 참여하며, 이들 간 **작업 위임 & 결과 통합**이 필요한가?"
+- Yes: 이질적 작업자 2+ 참여, 위임·통합 필요
+- No: 단일 또는 동종 Agent 로 처리 가능
+
+**"이질적 작업자" 조작적 정의** (아래 중 하나 이상 충족):
+  (a) **서로 다른 시스템 접근 권한** — 예: HR 담당자(인사 DB) + 현업 팀장(업무시스템)
+  (b) **서로 다른 프로세스** 담당 — 예: 채용 담당자 + 보상 담당자 / 교육 담당자 + 평가 담당자
+  (c) **조직 외부 이해관계자** — 예: 헤드헌터, 외부 평가기관, 노무사, 아웃소싱 업체
+
+**예외**: 동일 팀 내에서 동일 시스템·동일 권한으로 업무를 분담하는 경우는 **동종 작업자** (이질적 아님).
+  예: 채용팀 A 담당자와 B 담당자가 이력서 검토를 분담 → Q1 = No
+
+### Q2. 비선형 작업 의존성
+"Task 간에 **분기 / 병렬 / merge 등 단순 순차(A→B→C)를 넘는 의존 구조**가 존재하는가?"
+- Yes: 분기·병렬·합류 구조 존재 (예: 조건에 따라 다른 경로, 병렬 실행 후 결과 합류)
+- No: 단순 순차 흐름 (A→B→C→D)
+
+### Q3. Cross-Task 상태 관리
+"앞선 Task의 결과가 **후속 Task 의 입력·조건·경로를 결정**하여, 전체 워크플로우의 **누적 상태(state)를 추적·전달**해야 하는가?"
+- Yes: 누적 상태 추적·전달 필요 (예: 단계별 승인 상태, 누적 결과 집계, 예외 발생 시 재라우팅)
+- No: Task 간 독립적이거나 단순 전달만 하면 충분
+
+### 판단 예시
+- ✅ Senior AI 필요: Q1=Yes(HR 담당자 + 현업 팀장 + 외부 평가기관), Q2=Yes(분기·병렬), Q3=Yes(승인 상태 추적)
+- ❌ Senior AI 불필요: Q1=No(HR 담당자만 관여), Q2=No(선형), Q3=No(단순 전달) → **agents 배열에 Senior AI 없이 Junior AI 만 나열**
+
+### 출력 규약
+- Senior AI 생성 시: agents 배열 맨 앞에 Senior AI, 뒤에 Junior AI 들 나열
+- Senior AI 미생성 시: agents 배열에 Junior AI 만 나열
+- 생성 여부와 판단 근거를 `design_philosophy` 필드에 한 줄로 기록:
+  예: "Senior AI 생성: Q1 Yes (HR+현업+외부 3자 협업), Q2 No, Q3 Yes → 생성함"
+  예: "Senior AI 미생성: Q1 No (HR 단일), Q2 No, Q3 No → 단일 Junior AI 로 충분"
+
+## ⚠️ Task 그루핑 규칙 (핵심)
+**기본 구조: L5 Task 여러 개 → 하나의 Junior AI Agent**
+- assigned_tasks에 들어가는 단위는 **L5 Task**입니다
+- 하나의 목적을 향해 순서대로 흘러가는 L5 Task들을 묶어 1개의 Junior AI Agent로 구성합니다
+- 앞 L5 Task의 산출물이 다음 L5 Task의 입력이 되는 관계 → 반드시 같은 Agent로 묶음
+
+**묶는 기준:**
+- 같은 결과물을 만들기 위해 순서대로 실행되는 L5 Task 묶음
+- 예) "지원서 수집 → 항목 추출 → 적합도 분류 → 결과 알림" → "서류 스크리닝기" 1개
+
+**금지 사항:**
+- L5 Task 1개 = Agent 1개 금지 (반드시 2개 이상 묶을 것)
+- 과도한 세분화 금지 — Junior AI Agent는 **최대 5개**
+
+**분리 기준 (새 Agent로 나누는 경우):**
+- 목적이 완전히 달라지는 지점 (예: "초안 작성" 완료 후 "검토·승인·피드백 반영" 시작)
+- 성격이 이질적인 Task (예: 문서 생성 계열 vs 일정 최적화 계열)
+
+**Agent 이름 규칙:** "~기" 형태로 목적 명확화 (예: "서류 스크리닝기", "과정 설계기", "결과 보고기")
+
+## 출력 형식 (JSON만 출력, 마크다운 코드 블록 없음)
+
+`process_name` 값은 DYNAMIC 섹션의 "## 프로세스:" 헤더에 명시된 실제 값으로 치환.
+
+```json
+{
+  "blueprint_summary": "상세 설계 요약 (5~7문장, Step 1 대비 개선점 포함)",
+  "process_name": "<DYNAMIC 의 실제 process_name>",
+  "design_philosophy": "상세 설계 철학/방향 설명",
+  "full_auto_count": 0,
+  "human_in_loop_count": 0,
+  "human_supervised_count": 0,
+  "agents": [
+    {
+      "agent_id": "agent_0",
+      "agent_name": "오케스트레이터 AI 이름",
+      "agent_type": "Senior AI",
+      "ai_technique": "AI 기법 (구체적)",
+      "description": "역할 설명 (상세)",
+      "automation_level": "Human-on-the-Loop",
+      "assigned_tasks": []
+    },
+    {
+      "agent_id": "agent_1",
+      "agent_name": "서류 스크리닝 AI",
+      "agent_type": "Junior AI",
+      "ai_technique": "OCR + LLM + 분류모델",
+      "description": "지원서 수집부터 적합도 분류까지 순차 파이프라인 처리",
+      "automation_level": "Full-Auto",
+      "assigned_tasks": [
+        {
+          "task_id": "Task ID 1",
+          "task_name": "지원서 항목 추출",
+          "l4": "서류 전형",
+          "l3": "채용관리",
+          "ai_role": "OCR로 지원서 텍스트 추출 후 구조화",
+          "human_role": "",
+          "input_data": ["지원서 PDF"],
+          "output_data": ["구조화된 지원자 데이터"],
+          "automation_level": "Full-Auto",
+          "ai_technique": "OCR, IDP, LLM 텍스트 추출",
+          "source_basis": "BM",
+          "bm_case_no": 5,
+          "bm_case_domain": "recruit",
+          "bm_origin": "background",
+          "addressed_pain_task_ids": []
+        },
+        {
+          "task_id": "Task ID 2",
+          "task_name": "적합도 자동 분류",
+          "l4": "서류 전형",
+          "l3": "채용관리",
+          "ai_role": "JD 기반 지원자 적합도 점수 산정 및 등급 분류",
+          "human_role": "최종 합불 검토",
+          "input_data": ["구조화된 지원자 데이터", "JD 요건"],
+          "output_data": ["적합도 등급, 사유"],
+          "automation_level": "Human-in-Loop",
+          "ai_technique": "ML 분류모델, 임베딩 매칭, 설명가능 AI(SHAP)",
+          "source_basis": "Both",
+          "bm_case_no": 4,
+          "bm_case_domain": "recruit",
+          "bm_origin": "background",
+          "addressed_pain_task_ids": ["1.5.1.3"]
+        },
+        {
+          "task_id": "NEW_proactive_recommend",
+          "task_name": "선제적 휴가 추천",
+          "l4": "휴가 운영",
+          "l3": "근태관리",
+          "ai_role": "6개월 패턴·부서일정·가족정보 분석 → 휴가 시기·장소 선제 제안",
+          "human_role": "추천 검토 후 클릭 한 번으로 신청 진행",
+          "input_data": ["휴가 사용 패턴", "부서 일정"],
+          "output_data": ["개인화 휴가 추천 카드"],
+          "automation_level": "Human-on-the-Loop",
+          "ai_technique": "행동 패턴 분석, 협업 필터링, LLM 메시지 생성",
+          "source_basis": "PainPoint",
+          "bm_case_no": null,
+          "bm_case_domain": null,
+          "bm_origin": null,
+          "addressed_pain_task_ids": ["3.2.1.4", "3.2.1.5"]
+        }
+      ]
+    }
+  ],
+  "human_tasks": [
+    {
+      "task_id": "1.5.2.2",
+      "task_name": "경영진 보고 및 확정",
+      "l4": "채용 계획 보고 및 확정",
+      "l3": "연간 채용계획 수립",
+      "performer": "HR 임원",
+      "human_role": "Junior AI 가 생성한 보고자료 검토 후 의견 첨부, 현업 임원에게 escalation",
+      "input_data": ["AI 생성 보고서 초안"],
+      "output_data": ["검토 의견·승인 결과"],
+      "addressed_pain_task_ids": []
+    },
+    {
+      "task_id": "1.5.2.3",
+      "task_name": "현업 임원 최종 승인",
+      "l4": "채용 계획 보고 및 확정",
+      "l3": "연간 채용계획 수립",
+      "performer": "현업 임원",
+      "human_role": "HR 임원 보고 받은 후 사업 관점에서 최종 승인/반려",
+      "input_data": ["HR 임원 검토 의견"],
+      "output_data": ["최종 승인 또는 반려"],
+      "addressed_pain_task_ids": []
+    },
+    {
+      "task_id": "2.3.4.1",
+      "task_name": "DDI 리더십 평가 위탁",
+      "l4": "리더십 평가 운영",
+      "l3": "리더십 진단",
+      "performer": "그 외:DDI",
+      "human_role": "외부 평가기관 DDI 에 대상자 정보 송부, 평가 진행 위탁",
+      "input_data": ["대상자 명단"],
+      "output_data": ["DDI 평가 결과 보고서"],
+      "addressed_pain_task_ids": []
+    }
+  ],
+  "execution_flow": [
+    {
+      "step": 1,
+      "step_name": "단계명",
+      "step_type": "sequential",
+      "description": "상세 설명",
+      "agent_ids": ["agent_1"],
+      "task_ids": ["Task ID"]
+    }
+  ]
+}
+```
+"""
+
+
 @app.post("/api/workflow/generate-step2", tags=["Workflow"])
 async def generate_workflow_step2(request: Request):
     """
@@ -6953,147 +7307,17 @@ async def generate_workflow_step2(request: Request):
 → 모두 두산그룹 내부 승진·역량개발 평가 체계입니다. AI 설계 시 평가 자동화, 다면 피드백 분석, Assessor 매칭 등을 적극 고려하세요.
 """
 
-    step2_system = f"""당신은 AI 기반 업무 혁신 설계 전문가입니다.
-Step 1에서 도출된 기본 설계를 기반으로, 두산에 최적화된 **AI 기반 To-Be Workflow 상세 설계**를 수행합니다.
-{_s2_doosan_ctx}
-## 핵심 철학
-- **Bottom-Up 접근**: As-Is 프로세스의 Pain Point를 Deep-dive 분석
-- **Senior AI 기반 End-to-End 오케스트레이션 구조로 전환**
-- Step 1(Top-Down)의 벤치마킹 인사이트 + Step 2(Bottom-Up)의 Pain Point 분석을 융합
+    # 🔑 프롬프트 캐싱 — STATIC (규칙·schema, 토큰 ~15K+) + DYNAMIC (Step 1 data·asis·pain) 분할
+    # Anthropic cache_control 로 5분 TTL 내 재호출 시 cache read (10% 비용).
+    # STATIC 은 module-level 상수 _STEP2_STATIC_HEAD 로 추출 (아래 함수 정의 외부).
+    step2_dynamic = f"""{_s2_doosan_ctx}
 
-## 🔥 Process Innovation 모드 (가장 중요 — 반드시 준수)
-
-**Pain Point 는 단순히 "고쳐야 할 문제" 가 아니라 "전혀 새로운 AI 서비스를 설계할 seed" 입니다.**
-As-Is task 옆에 AI 를 살짝 붙이는 1:1 mapping 은 ❌. **Pain Point 가 발생할 필요 자체가 없어지도록 틀을 바꾸는 redesign** 이 목표입니다.
-
-### ✅ 좋은 예시 — 휴가 추천 시스템
-
-Pain Points (수집된 raw 목소리):
-> "연차 신청하려다 시기 놓쳐서 늦게 신청"
-> "어디 갈지 고민 귀찮아서 못 쓰다가 마지막에 몰아씀"
-> "미리 알려주면 좋을 텐데"
-
-❌ **나쁜 redesign (피해야 할 패턴)**:
-- As-Is task `연차 신청서 작성` → AI 가 자동 작성
-- As-Is task `승인 요청` → AI 가 자동 라우팅
-→ **여전히 사용자가 "신청해야지" 라고 떠올려야만 작동**. Pain Point 의 본질 (= 떠올리지 못함) 미해결.
-
-✅ **좋은 redesign (process innovation)**:
-- **NEW Agent: "선제적 휴가 추천 챗봇"** (As-Is 에 없던 신규)
-  - Input: 6개월 휴가 사용 패턴 + 부서 일정 + 가족 정보
-  - Logic: "최근 X일 미사용 / 다음 분기 마감 임박 / 비슷한 가족 구성원이 많이 가는 곳" 분석
-  - Output: 사용자에게 "○○일 휴가 어떠세요? 가족동반은 △△ 추천" proactively 제안
-- **NEW Agent: "승인 후 후속 처리 자동화"**
-  - 사용자 클릭 한 번 → 챗봇이 신청서 작성 + 승인 라우팅 + 캘린더 등록 + 인수인계 알림 일괄 처리
-→ 사용자는 "휴가 써야지" 떠올릴 필요 없이 **AI 가 먼저 제안 → 검토만 → 끝**.
-
-### 설계 원칙
-1. **Pain Point cluster** 식별: 비슷한 결의 Pain Point 들을 묶어서 "이게 발생하는 근본 원인" 도출
-2. 근본 원인을 해결하는 **새로운 Junior AI Agent 를 자유롭게 신설** (As-Is task 없어도 OK, change_type="추가" 또는 NEW_xxx task_id)
-3. As-Is task 는 "삭제" / "통합" 도 적극 허용 — Pain Point 가 사라지면 task 자체가 불필요해질 수 있음
-4. **Proactive (선제적) > Reactive (수동 대응)** — 사람이 요청해야 작동하는 task 는 가능한 한 AI 가 선제 제안하도록 재설계
-5. **End-to-end 자동화 chain** 구성 — 한 Agent 의 output 이 다음 Agent 의 trigger 가 되어 사람의 개입 없이 흐르는 구조
-
-### Anti-Pattern (절대 피할 것)
-- ❌ As-Is task 1개 → To-Be task 1개 + "AI 적용" 한 줄 (단순 라벨 변경)
-- ❌ "AI 가 자동으로 작성" / "AI 가 추천" 같은 추상적 표현만 (구체 trigger·input·output 없음)
-- ❌ 모든 task 를 Human-in-Loop 로 두기 (자동화 효과 미미)
-- ❌ Pain Point 한 줄당 task 한 줄 1:1 매칭 (cluster 분석 없음)
-
-### 🚧 보존 원칙 (Process Innovation 의 boundary — 절대 위반 금지)
-
-위의 transformative redesign 자유는 **개별 task 의 작업 방식 변경** (manual → AI) 에만 적용됩니다.
-다음 As-Is 구조는 **그대로 보존** 해야 합니다:
-
-1. **조직 핸드오프 (multi-actor handoff) 구조 보존 + 사람 task 묶음으로 명시**
-   As-Is JSON 에 여러 swim lane (HR 담당자, HR 임원, 현업 임원, 현업 담당자, 현업 팀장 등) 간
-   순차적 보고·승인·협의 흐름이 있으면 To-Be 에서도 **동일 핸드오프 chain 을 유지**.
-   - 예 As-Is: 현업 담당자 작성 → HR 임원 보고 → 현업 임원 승인 → HR 담당자 예산 품의 상신
-   - ❌ To-Be: AI 가 작성 → 바로 임원 보고 (중간 핸드오프 우회·삭제)
-   - ✅ To-Be (agents + human_tasks 조합):
-     · **Junior AI "보고자료 자동 생성기"** (현업 담당자 lane 의 작업 보조) — agents 배열
-     · **human_tasks** 항목: task_id="1.5.2.2" / task_name="HR 임원 보고/검토" / performer="HR 임원" — As-Is 그대로 1개 task
-     · **human_tasks** 항목: task_id="1.5.2.3" / task_name="현업 임원 승인" / performer="현업 임원" — 1개 task
-     · **Junior AI "예산 품의 자동화기"** (HR 담당자 lane) — agents 배열
-   - Senior AI 가 핸드오프를 "자동 라우팅" 하는 건 OK — **승인 권한 자체를 우회·통합 금지**.
-
-2. **수행주체 (performer) 보존**
-   As-Is 에서 특정 task 를 누가 했는지 (HR 임원 vs HR 담당자 vs 현업 팀장 vs 외부 업체 등) 는
-   To-Be 에서도 동일하게 유지. AI 는 "그 사람의 보조" 로 들어가고, 수행 주체 자체를 바꾸지 않음.
-   - 예: As-Is 에서 "경영진 보고·확정" 이 HR 임원 task 면 → To-Be 에서도 HR 임원이 최종 확정.
-     AI 는 "보고서 초안 자동 생성" 까지만 (확정 권한은 HR 임원).
-
-3. **외부 업체/시스템 (큐벡스, 노무사, 헤드헌터 등) 보존**
-   재설계 불가 — 위에 명시된 swim lane 규칙과 일치.
-
-4. **L4 connector 노드 해석 (As-Is JSON 에 섞여있는 L4 레벨 노드)**
-   As-Is 시트 안에 L5 가 아닌 L4 노드가 섞여있을 때 위치로 의미가 다름:
-   - 시트 **맨 앞/맨 뒤** 의 L4 — 단순히 **이전/다음 프로세스 연결자** (해당 시트 스코프 밖).
-     → 재설계 대상 아님, Junior AI assigned_tasks 에도 포함 금지.
-   - 시트 **중간** 에 끼어있는 L4 — "**그 L4 모듈을 호출·활용한다**" 는 의미.
-     → 해당 L4 의 sub-process 가 현재 흐름에서 사용된다는 것. 재설계 시 Junior AI 가
-       그 L4 모듈 결과를 input 으로 받거나 module call 로 기술.
-
-**요약**: Process Innovation = "각 task 의 방식 (어떻게 하는가)" 을 transformative 하게 바꾸는 것이지,
-**"누가 누구에게 보고하는가" (조직 위계) 는 As-Is JSON 의 swim lane / edge 구조를 따라야 합니다**.
-조직 구조를 모두 무시하고 직접 보고·자동 승인 chain 을 그리면 두산 거버넌스에 맞지 않아 무효 처리.
-
-## ⚠️ 재설계 범위 (swim lane 기준)
-- **재설계 가능**: HR 담당자, HR 임원, 지주, 자회사, BG, 계열사 등 두산 내부 조직이 수행하는 Task
-- **재설계 불가 (현행 유지)**: 큐벡스, 업체 등 외부 업체/시스템이 수행하는 Task — AI Agent 설계 대상에서 제외하고 "현행 유지" 처리
-- As-Is 컨텍스트에서 수행주체 라인에 `[외부 업체/시스템 — 재설계 제외]` 표시된 Task는 Agent에 할당하지 말 것
-
-## 🚨 엑셀 분류(AI / AI+Human / Human) — Knock-out 제약 (절대 변경 금지)
-엑셀 업로드 시 이미 판정·검토된 분류 라벨은 Step 2 설계의 **하드 제약**입니다. 임의로 바꿀 수 없습니다.
-
-스코프 내 태스크 분포: AI {cls_stats["AI"]}개 / AI+Human {cls_stats["AI + Human"]}개 / Human {cls_stats["Human"]}개
-
-- **Human으로 분류된 Task** → AI Agent (Senior/Junior AI) 의 `assigned_tasks`에 절대 포함하지 말 것.
-  대신 **출력 JSON top-level 의 `human_tasks` 배열에 개별 task 로 explicit 포함** 시켜 To-Be 캔버스에 보존.
-  - `human_tasks` 는 Agent 도 아니고 묶음도 아님. **각 사람 task (보고/승인/상신 등) 가 독립 항목**.
-  - 기존 As-Is 의 보고/결재/외부 업체 위탁/임원 면접 등 사람만 하는 task 들이 사라지지 않도록 Step 2 가 직접 책임짐
-  - 각 task 는 자기 task_id + task_name + performer 를 가짐 (묶음 container 없음)
-  - `performer` 필드에 As-Is JSON swim lane 명을 그대로 사용 (subdivision 포함):
-    · 표준 lane: `"HR 임원"` / `"HR 담당자"` / `"현업 임원"` / `"현업 팀장"` / `"현업 구성원"`
-    · "그 외" lane subdivision (As-Is JSON 의 lane 명 그대로 보존):
-      - **두산 내부 조직** (지주/자회사/BG/계열사) — `"그 외:지주HR"` / `"그 외:BG HR"` / `"그 외:자회사 HR"` 형태로 그대로 표기
-      - **외부 업체/평가기관** (큐벡스/DDI/Korn Ferry/노무사 등) — `"그 외:큐벡스"` / `"그 외:DDI"` 형태로 그대로 표기
-  - `human_role` 에 사람 작업 내용 기재 (ai_role 비움)
-  - 결과 카운트 (full_auto_count 등) 에는 반영하지 말 것 (사람 task 라서)
-
-- **"그 외" subdivision 의 AI 대체 가능 여부 분기 (매우 중요)**
-  As-Is "그 외" lane 안에 두산 **내부 조직** (지주/자회사/BG/계열사 HR) 이 수행하는 task 가 있으면:
-    · **Junior AI 가 흡수 가능** — 두산 내부 협업 범위라 AI Agent 가 대체할 수 있음
-    · 단, 실제 수행 권한이 다른 조직에 있는 task (예: BG HR 의 최종 승인) 는 그 조직 lane 의 사람 task 묶음으로 보존
-  As-Is "그 외" lane 안에 **외부 업체/평가기관** (큐벡스/DDI/Korn Ferry/노무사 등) 이 수행하는 task:
-    · **반드시 그대로 유지** — Junior AI 흡수 금지 → `agent_type="Human"` 사람 task 묶음으로 보존, performer="그 외:DDI" 식
-    · ai_role/ai_application = "" (AI 적용 안 함)
-    · 외부 평가/위탁 결과를 받아 처리하는 두산 내부 task 는 별도 Junior AI 에서 처리 가능
-
-- **AI + Human으로 분류된 Task** → 반드시 **AI 파트와 Human 파트를 분리**해서 반영:
-  - task_summary / pain_detail에 이미 분리 정보(`AI 파트: ... / Human 파트: ...`)가 주입되어 있음. 이를 그대로 사용.
-  - `assigned_tasks`에는 **AI 파트만** task_name·ai_role·input/output으로 기재
-  - `human_role` 필드에는 **Human 파트를 반드시 구체적으로 명시** (빈 문자열 금지)
-  - `automation_level`은 `"Human-in-Loop"` 또는 `"Human-on-the-Loop"` 중 하나 (절대 Full-Auto 금지)
-
-- **AI로 분류된 Task** → Junior AI의 `assigned_tasks`에 자유 배치.
-  `automation_level`은 `"Full-Auto"` 또는 `"Human-on-the-Loop"` 중 선택 (Human-in-Loop도 가능하지만 지양).
-
-위 제약을 어기면 설계가 무효 처리됩니다.
+## 스코프 내 task 분포 (엑셀 분류 Knock-out 제약의 기준 수치)
+AI {cls_stats["AI"]}개 / AI+Human {cls_stats["AI + Human"]}개 / Human {cls_stats["Human"]}개
 
 ## 프로세스: {process_name}
 
-## ⚠️ Step 1 기본 설계 — Source of Truth (반드시 그대로 가져감)
-
-아래 redesigned_process 의 **모든 L5 task** 는 **task_id + task_name 을 1글자도 바꾸지 말고** Step 2 의 assigned_tasks 에 동일하게 사용하세요.
-- task_name 에 `'벤치마킹 title - ' prefix` 가 있으면 **prefix 포함 그대로 유지** (예: "'스킬 추론' 기반 채용 전략 수립 지원 - 채용 수요 AI 분석")
-- task_id 가 `NEW_xxx` 또는 신규 L5 번호여도 그대로 사용
-- ai_application / automation_level / ai_technique 도 Step 1 값을 우선 채택 (필요 시 보강)
-- 이 inheritance 규칙을 어기면 (Step 1 task 누락 / 임의 rename / 새 분할 task 추가) **무효 처리**
-
-위 inheritance 후, Process Innovation 모드의 "신규 Agent" 가 **추가 필요할 때만** NEW_ prefix 로 task 신설 가능.
-즉 출력 task = (Step 1 의 모든 L5) + (선택적 신규 NEW_ task) 이며, Step 1 task 가 빠지면 안 됨.
-
+## Step 1 redesigned_process — STATIC 의 'Step 1 Source of Truth' 규칙 적용 대상 (1글자도 바꾸지 말 것)
 ```json
 {json.dumps(_wf_step1_cache.get("redesigned_process", []), ensure_ascii=False, indent=2)}
 ```
@@ -7110,307 +7334,6 @@ Pain Points (수집된 raw 목소리):
 {pain_detail}
 
 {f"## 추가 컨텍스트{chr(10)}{additional_context}" if additional_context else ""}
-
-## 상세 설계 요구사항
-1. Lv.4~5 단위로 구체적인 AI 적용 방안 설계
-2. 각 Agent의 구체적 역할 (특히 **trigger 조건 — "언제 작동하는가"**), 사용 AI 기법, Input/Output 명시
-3. Human-on-the-Loop 중심 (Senior AI 가 전체 관리, 사람은 검토·승인만)
-4. **Pain Point cluster 분석 → As-Is 에 없던 신규 Agent 자유 신설 (적극 권장)**
-5. **Process Innovation 모드 (위 섹션) 의 좋은 예시·anti-pattern 을 반드시 따를 것** — 1:1 mapping / 단순 라벨 변경은 무효 처리
-
-## ⚠️ agent_type 규칙 (반드시 준수)
-- `agent_type`은 **"Senior AI"** 또는 **"Junior AI"** 둘 중 하나만 사용 (다른 텍스트 금지 — Human 은 agents 배열이 아니라 별도 top-level `human_tasks` 배열에 넣음)
-- **Senior AI**: 프로세스 전체 오케스트레이션, 상태 관리, 예외 라우팅, 복수 Agent 조율 역할 → 존재 시 항상 첫 번째로 배치
-- **Junior AI**: 하나의 목적을 완수하는 순차 파이프라인을 처리하는 AI 실무 Agent (AI / AI+Human 분류 task)
-- **사람 수행 task**: `agents` 가 아니라 **top-level `human_tasks` 배열에 개별 항목** 으로 작성 (아래 출력 schema 참조).
-  각 항목이 독립 task — 보고, 승인, 상신, 외부 위탁 등 하나씩. Agent / 묶음 없음.
-
-## 🔑 Senior AI 생성 여부 판단 (매우 중요)
-
-**Senior AI는 항상 만들지 않습니다.** 아래 3가지 질문을 평가한 뒤 **하나라도 Yes** 이면 Senior AI 를 생성하고,
-**세 가지 모두 No** 이면 Senior AI 를 **생성하지 마세요** (agents 배열에서 Senior AI 항목 자체 제외).
-
-평가 초점: **워크플로우의 구조적 복잡성**
-
-### 📌 판단 근거 데이터 (반드시 참고)
-아래 섹션들을 **먼저 읽고** Q1~Q3 을 평가하세요:
-- **"As-Is 워크플로우 + 엑셀 매핑"** 섹션의 각 노드에 **`수행주체: ...`** 라인 → Q1 판단 핵심 (수행주체가 1개 vs 2+, 동일 팀 vs 서로 다른 조직)
-- **`(복수 주체 — 협의 관계)`** 표기가 있는 노드 → Q1=Yes 강력 시그널
-- **`[외부 업체/시스템]`** 표기 → Q1 의 (c) 외부 이해관계자에 해당
-- **As-Is 엣지 구조**(decision 노드, 분기 개수) → Q2 판단 데이터
-- **엑셀의 `logic.mixed` / `logic.rule` / `outputs.decision`** 필드 → Q2/Q3 판단 힌트
-- **Pain Point "의사소통/협업"** 내용 → 여러 주체 간 협의 복잡성 드러나면 Q1/Q3 Yes 시그널
-
-### Q1. 여러 이질적인 작업자 참여
-"서로 다른 역량·도구·권한을 가진 2개 이상의 작업자(AI Agent 또는 인간)가 참여하며, 이들 간 **작업 위임 & 결과 통합**이 필요한가?"
-- Yes: 이질적 작업자 2+ 참여, 위임·통합 필요
-- No: 단일 또는 동종 Agent 로 처리 가능
-
-**"이질적 작업자" 조작적 정의** (아래 중 하나 이상 충족):
-  (a) **서로 다른 시스템 접근 권한** — 예: HR 담당자(인사 DB) + 현업 팀장(업무시스템)
-  (b) **서로 다른 프로세스** 담당 — 예: 채용 담당자 + 보상 담당자 / 교육 담당자 + 평가 담당자
-  (c) **조직 외부 이해관계자** — 예: 헤드헌터, 외부 평가기관, 노무사, 아웃소싱 업체
-
-**예외**: 동일 팀 내에서 동일 시스템·동일 권한으로 업무를 분담하는 경우는 **동종 작업자** (이질적 아님).
-  예: 채용팀 A 담당자와 B 담당자가 이력서 검토를 분담 → Q1 = No
-
-### Q2. 비선형 작업 의존성
-"Task 간에 **분기 / 병렬 / merge 등 단순 순차(A→B→C)를 넘는 의존 구조**가 존재하는가?"
-- Yes: 분기·병렬·합류 구조 존재 (예: 조건에 따라 다른 경로, 병렬 실행 후 결과 합류)
-- No: 단순 순차 흐름 (A→B→C→D)
-
-### Q3. Cross-Task 상태 관리
-"앞선 Task의 결과가 **후속 Task 의 입력·조건·경로를 결정**하여, 전체 워크플로우의 **누적 상태(state)를 추적·전달**해야 하는가?"
-- Yes: 누적 상태 추적·전달 필요 (예: 단계별 승인 상태, 누적 결과 집계, 예외 발생 시 재라우팅)
-- No: Task 간 독립적이거나 단순 전달만 하면 충분
-
-### 판단 예시
-- ✅ Senior AI 필요: Q1=Yes(HR 담당자 + 현업 팀장 + 외부 평가기관), Q2=Yes(분기·병렬), Q3=Yes(승인 상태 추적)
-- ❌ Senior AI 불필요: Q1=No(HR 담당자만 관여), Q2=No(선형), Q3=No(단순 전달) → **agents 배열에 Senior AI 없이 Junior AI 만 나열**
-
-### 출력 규약
-- Senior AI 생성 시: agents 배열 맨 앞에 Senior AI, 뒤에 Junior AI 들 나열
-- Senior AI 미생성 시: agents 배열에 Junior AI 만 나열
-- 생성 여부와 판단 근거를 `design_philosophy` 필드에 한 줄로 기록:
-  예: "Senior AI 생성: Q1 Yes (HR+현업+외부 3자 협업), Q2 No, Q3 Yes → 생성함"
-  예: "Senior AI 미생성: Q1 No (HR 단일), Q2 No, Q3 No → 단일 Junior AI 로 충분"
-
-## ⚠️ Task 그루핑 규칙 (핵심)
-**기본 구조: L5 Task 여러 개 → 하나의 Junior AI Agent**
-- assigned_tasks에 들어가는 단위는 **L5 Task**입니다
-- 하나의 목적을 향해 순서대로 흘러가는 L5 Task들을 묶어 1개의 Junior AI Agent로 구성합니다
-- 앞 L5 Task의 산출물이 다음 L5 Task의 입력이 되는 관계 → 반드시 같은 Agent로 묶음
-
-**묶는 기준:**
-- 같은 결과물을 만들기 위해 순서대로 실행되는 L5 Task 묶음
-- 예) "지원서 수집 → 항목 추출 → 적합도 분류 → 결과 알림" → "서류 스크리닝기" 1개
-
-**금지 사항:**
-- L5 Task 1개 = Agent 1개 금지 (반드시 2개 이상 묶을 것)
-- 과도한 세분화 금지 — Junior AI Agent는 **최대 5개**
-
-**분리 기준 (새 Agent로 나누는 경우):**
-- 목적이 완전히 달라지는 지점 (예: "초안 작성" 완료 후 "검토·승인·피드백 반영" 시작)
-- 성격이 이질적인 Task (예: 문서 생성 계열 vs 일정 최적화 계열)
-
-**Agent 이름 규칙:** "~기" 형태로 목적 명확화 (예: "서류 스크리닝기", "과정 설계기", "결과 보고기")
-
-## 출력 형식 (JSON만 출력, 마크다운 코드 블록 없음)
-{{
-  "blueprint_summary": "상세 설계 요약 (5~7문장, Step 1 대비 개선점 포함)",
-  "process_name": "{process_name}",
-  "design_philosophy": "상세 설계 철학/방향 설명",
-  "full_auto_count": 정수,
-  "human_in_loop_count": 정수,
-  "human_supervised_count": 정수,
-  "agents": [
-    {{
-      "agent_id": "agent_0",
-      "agent_name": "오케스트레이터 AI 이름",
-      "agent_type": "Senior AI",
-      "ai_technique": "AI 기법 (구체적)",
-      "description": "역할 설명 (상세)",
-      "automation_level": "Human-on-the-Loop",
-      "assigned_tasks": []
-    }},
-    {{
-      "agent_id": "agent_1",
-      "agent_name": "서류 스크리닝 AI",
-      "agent_type": "Junior AI",
-      "ai_technique": "OCR + LLM + 분류모델",
-      "description": "지원서 수집부터 적합도 분류까지 순차 파이프라인 처리",
-      "automation_level": "Full-Auto",
-      "assigned_tasks": [
-        {{
-          "task_id": "Task ID 1",
-          "task_name": "지원서 항목 추출",
-          "l4": "서류 전형",
-          "l3": "채용관리",
-          "ai_role": "OCR로 지원서 텍스트 추출 후 구조화",
-          "human_role": "",
-          "input_data": ["지원서 PDF"],
-          "output_data": ["구조화된 지원자 데이터"],
-          "automation_level": "Full-Auto",
-          "ai_technique": "OCR, IDP, LLM 텍스트 추출",
-          "source_basis": "BM",
-          "bm_case_no": 5,
-          "bm_case_domain": "recruit",
-          "bm_origin": "background",
-          "addressed_pain_task_ids": []
-        }},
-        {{
-          "task_id": "Task ID 2",
-          "task_name": "적합도 자동 분류",
-          "l4": "서류 전형",
-          "l3": "채용관리",
-          "ai_role": "JD 기반 지원자 적합도 점수 산정 및 등급 분류",
-          "human_role": "최종 합불 검토",
-          "input_data": ["구조화된 지원자 데이터", "JD 요건"],
-          "output_data": ["적합도 등급, 사유"],
-          "automation_level": "Human-in-Loop",
-          "ai_technique": "ML 분류모델, 임베딩 매칭, 설명가능 AI(SHAP)",
-          "source_basis": "Both",
-          "bm_case_no": 4,
-          "bm_case_domain": "recruit",
-          "bm_origin": "background",
-          "addressed_pain_task_ids": ["1.5.1.3"]
-        }},
-        {{
-          "task_id": "NEW_proactive_recommend",
-          "task_name": "선제적 휴가 추천",
-          "l4": "휴가 운영",
-          "l3": "근태관리",
-          "ai_role": "6개월 패턴·부서일정·가족정보 분석 → 휴가 시기·장소 선제 제안",
-          "human_role": "추천 검토 후 클릭 한 번으로 신청 진행",
-          "input_data": ["휴가 사용 패턴", "부서 일정"],
-          "output_data": ["개인화 휴가 추천 카드"],
-          "automation_level": "Human-on-the-Loop",
-          "ai_technique": "행동 패턴 분석, 협업 필터링, LLM 메시지 생성",
-          "source_basis": "PainPoint",
-          "bm_case_no": null,
-          "bm_case_domain": null,
-          "bm_origin": null,
-          "addressed_pain_task_ids": ["3.2.1.4", "3.2.1.5"]
-        }}
-      ]
-    }},
-  ],
-  "human_tasks": [
-    {{
-      "task_id": "1.5.2.2",
-      "task_name": "경영진 보고 및 확정",
-      "l4": "채용 계획 보고 및 확정",
-      "l3": "연간 채용계획 수립",
-      "performer": "HR 임원",
-      "human_role": "Junior AI 가 생성한 보고자료 검토 후 의견 첨부, 현업 임원에게 escalation",
-      "input_data": ["AI 생성 보고서 초안"],
-      "output_data": ["검토 의견·승인 결과"],
-      "addressed_pain_task_ids": []
-    }},
-    {{
-      "task_id": "1.5.2.3",
-      "task_name": "현업 임원 최종 승인",
-      "l4": "채용 계획 보고 및 확정",
-      "l3": "연간 채용계획 수립",
-      "performer": "현업 임원",
-      "human_role": "HR 임원 보고 받은 후 사업 관점에서 최종 승인/반려",
-      "input_data": ["HR 임원 검토 의견"],
-      "output_data": ["최종 승인 또는 반려"],
-      "addressed_pain_task_ids": []
-    }},
-    {{
-      "task_id": "2.3.4.1",
-      "task_name": "DDI 리더십 평가 위탁",
-      "l4": "리더십 평가 운영",
-      "l3": "리더십 진단",
-      "performer": "그 외:DDI",
-      "human_role": "외부 평가기관 DDI 에 대상자 정보 송부, 평가 진행 위탁",
-      "input_data": ["대상자 명단"],
-      "output_data": ["DDI 평가 결과 보고서"],
-      "addressed_pain_task_ids": []
-    }}
-  ],
-
-## ⚠️ task_name 작성 규칙 (매우 중요)
-
-**형식**: 짧은 명사구로 10~20자 이내. 동사+목적어 or 명사구. 마침표/문장 금지.
-
-**✅ 올바른 예시**:
-- `"DBS 점수 추출"` / `"지원자 데이터 정리"` / `"에세이 검토"` / `"발령품의 진행"`
-- `"서류 합격자 확정"` / `"시스템 발령 처리"` / `"Local Job 신설"`
-
-**❌ 금지 예시** (이렇게 쓰지 말 것):
-- `"지주와 직접 협의하여 서류합격자 검토 결과를 조율하고 최종 합·불을 확정·승인한다"` — 이건 문장, task_name 아님
-- `"확정된 조직개편 결과의 시스템 반영은 AI가 처리하되..."` — 문장
-- `"~한다"`, `"~수행한다"`, `"~처리한다"` 로 끝나는 완전 문장 금지
-
-**규칙**:
-- **Step 1 에서 이미 정해진 task_name 은 그대로 inherit (BM prefix 포함) — 이 규칙이 모든 길이 가이드보다 우선**
-- 신규 (NEW_) task 만 위 길이 가이드 (10~20자) 적용
-- 긴 action 문장·방법·결과 설명은 **ai_role / human_role / description 필드**에 넣을 것
-- task_name 은 Swim Lane 뱃지·PPT 상자에 표시되므로 짧고 명확해야 함 (단, BM prefix 는 보존)
-
-**⚠️ `" - "` 구분자는 BM attribution 전용 (엄격)**:
-- `"<BM case title> - <task명>"` 형식은 **해당 task 가 BM 사례를 직접 실현할 때만** 사용.
-- BM prefix 는 **정확히 한 번만** 붙음. 이미 Step 1 에서 붙었으면 그대로 두고, **다시 덧붙이지 말 것** (중복 prefix 금지).
-- Add-on / LLM 추론 task 는 `" - "` 사용 금지 → 공백 없이 연결하거나 ai_role/description 에 부가 설명.
-- 나쁜 예: `"예산 품의 자동화 - 예산 품의 자동 검증 및 라우팅"` ❌ (BM 근거 없음 → `-` 금지)
-- 좋은 예 (BM 있음): `"'스킬 추론' 기반 채용 전략 수립 지원 - 채용 수요 AI 분석"` ✓
-- 좋은 예 (Add-on): `"예산 품의 자동 검증 및 라우팅"` ✓
-
-## ⚠️ task_id 형식 규칙
-
-- 기존 As-Is L5 를 대체하는 경우: **기존 task_id 그대로 사용** (예: `"2.1.4.3"`)
-- 신규 추가 Task 의 경우: 해당 L4 번호 뒤에 순번 (예: `"2.1.4.16"`, `"2.1.4.17"`)
-  - L4 가 `2.1.4` 이고 기존 최대 L5 가 `2.1.4.15` 이면 신규는 `2.1.4.16` 부터
-- `"NEW_xxx"` 같은 임시 ID 지양 — 가능한 한 실제 L5 숫자 형식으로 작성
-
-## 🏷 task 별 source_basis 규칙 (Swim Lane sky-blue bar 표시)
-
-각 assigned_task 는 **설계 근거** 를 명시해야 합니다. 4가지 중 하나:
-- `"BM"` — 위 Background BM 사례 (예: 'Pre-screen', '온보딩 자동화') 패턴을 적용한 task
-- `"PainPoint"` — As-Is Pain Point cluster 분석에서 도출된 task (특히 Process Innovation 모드의 신규 Agent)
-- `"Both"` — BM 패턴 + Pain Point 양쪽 모두 근거
-- `"LLM"` — LLM 자체 reasoning 으로 도출 (BM/Pain 근거 약함)
-
-**판단 기준**:
-- 기존 As-Is task_id 그대로 + Pain Point 가 있는 task → 보통 `"PainPoint"` 또는 `"Both"`
-- 신규 task (NEW_xxx 또는 신규 L5 번호) 가 Pain Point cluster 해결 목적 → **반드시 `"PainPoint"`**
-- 신규 task 가 BM 사례 모방 → `"BM"`
-- 신규 task 가 BM + Pain 양쪽 → `"Both"`
-- 명확한 근거 없이 LLM 추론으로만 → `"LLM"`
-
-**`addressed_pain_task_ids`**: 이 task 가 해결하는 As-Is L5 task_id 목록 (배열).
-- Pain Point cluster 분석에서 어떤 As-Is task 의 Pain Point 를 해결했는지 명시
-- 예: 신규 '선제적 휴가 추천' 이 As-Is `3.2.1.4` ('휴가 신청서 작성') 와 `3.2.1.5` ('승인 요청') 의 Pain 을 동시에 해결 → `["3.2.1.4", "3.2.1.5"]`
-- BM-only task 면 빈 배열 `[]`
-
-**`bm_case_no` + `bm_case_domain` + `bm_origin`** (BM 또는 Both 일 때만): 적용한 BM case 식별·출처.
-- **두 종류의 BM 구분 (`bm_origin`)**:
-  · `"background"` — PwC 가 사전 큐레이션한 도메인 모듈 (recruit/evaluation/... 의 CASES). bm_case_no + bm_case_domain 필수.
-  · `"dynamic"` — Gap 분석 시 Perplexity 가 추가 검색해서 `_wf_benchmark_table[sheet_id]` 에 저장된 사례.
-    bm_case_no/bm_case_domain 은 `null` 이어도 됨 (외부 검색 결과라 case 번호가 없을 수 있음).
-- `bm_origin="background"` 예: bm_case_no=1, bm_case_domain="recruit", bm_origin="background"
-  → Swim Lane 노드 상단에 "'스킬 추론' 기반 채용 전략 수립 지원" prefix 자동 부착 (파란색)
-- `bm_origin="dynamic"` 예: bm_case_no=null, bm_case_domain=null, bm_origin="dynamic"
-  → Swim Lane 상단 라벨은 "Benchmarking (추가)" 로 표시 (일반 prefix 없음)
-- BM 근거 전혀 없으면 (Add-on / LLM 추론만) 셋 다 `null`
-
-⚠️ **task별 ai_technique 필드 필수 규칙**
-
-**형식**: 짧은 기술명만 3~5개 쉼표로 구분. 절대 task 설명·문장·괄호 안 콤마 포함 금지.
-
-**허용되는 값** (예시, 이 중에서 선택하거나 유사 기술명으로):
-`LLM` / `RAG` / `OCR` / `IDP` / `NLP 분류` / `ML 회귀` / `ML 분류모델` / `XGBoost` / `시계열 예측`
-`SHAP` / `임베딩 매칭` / `RPA` / `ETL` / `Rule-based` / `Chatbot` / `BI 대시보드` / `전자결재 API`
-`GenAI 문서 생성` / `프로세스 마이닝` / `최적화 알고리즘` / `이상 탐지` / `Template` / `Speech-to-Text`
-
-**❌ 금지 예시** (이런 식으로 쓰지 말 것):
-- `"GenAI 다국어 개인화 문서 생성(한국어, 영어 동시 생성)"` — 너무 길고 괄호 안 쉼표가 파싱 오류 유발
-- `"결재 승인 완료 신호를 트리거로 GenAI가..."` — 이건 ai_role에 쓸 내용, ai_technique 아님
-- `"공지 게시 자동화(HR 포털, 사내 메신저 연동)"` — 설명이지 기술명 아님
-
-**✅ 올바른 예시**:
-- `"GenAI, 다국어 생성, 메일 자동화 API"`
-- `"RPA, ETL, 규칙 엔진"`
-- `"LLM, RAG, 설명가능 AI"`
-
-**규칙**:
-- 각 기술명은 **15자 이내** 짧게
-- 괄호와 괄호 안 쉼표 사용 금지 (파싱 시 뱃지가 중간에 쪼개짐)
-- 같은 Agent 안이라도 task마다 다른 기법 조합 (OCR 파트 / 분류 파트 / 생성 파트 각각 다름)
-- 비워두면 Agent의 ai_technique이 fallback — 모든 task가 동일해지므로 반드시 task별로 작성
-  "execution_flow": [
-    {{
-      "step": 1,
-      "step_name": "단계명",
-      "step_type": "sequential",
-      "description": "상세 설명",
-      "agent_ids": ["agent_1"],
-      "task_ids": ["Task ID"]
-    }}
-  ]
-}}
 """
 
     settings = load_settings()
@@ -7424,16 +7347,29 @@ Pain Points (수집된 raw 목소리):
         try:
             from anthropic import AsyncAnthropic
             client = AsyncAnthropic(api_key=anthropic_key)
+            # 프롬프트 캐싱: STATIC (cache_control) + DYNAMIC 두 블록으로 system 전달
             response = await client.messages.create(
                 model=settings.anthropic_model or "claude-sonnet-4-6",
-                max_tokens=16384,   # 이전 8192에서 상향 — agents/tasks 많을 때 JSON 잘림 방지
-                system=step2_system,
+                max_tokens=16384,
+                system=[
+                    {
+                        "type": "text",
+                        "text": _STEP2_STATIC_HEAD,
+                        "cache_control": {"type": "ephemeral"},
+                    },
+                    {"type": "text", "text": step2_dynamic},
+                ],
                 messages=[{"role": "user", "content": "Step 1 결과와 Pain Point를 기반으로 상세 설계를 수행해주세요."}],
             )
             if response.usage:
                 _add_usage_step2("anthropic",
                                  input_tokens=response.usage.input_tokens,
                                  output_tokens=response.usage.output_tokens)
+                _ct_w = getattr(response.usage, "cache_creation_input_tokens", None)
+                _ct_r = getattr(response.usage, "cache_read_input_tokens", None)
+                if _ct_w or _ct_r:
+                    print(f"[workflow-step2] cache write={_ct_w or 0} / read={_ct_r or 0} "
+                          f"tokens (정규 input={response.usage.input_tokens})", flush=True)
             # stop_reason 체크 — max_tokens 초과 시 경고
             stop_reason = getattr(response, "stop_reason", None)
             if stop_reason and stop_reason != "end_turn":
@@ -7460,7 +7396,8 @@ Pain Points (수집된 raw 목소리):
                     model=settings.model or "gpt-5.4",
                     temperature=0.0,
                     messages=[
-                        {"role": "system", "content": step2_system},
+                        # OpenAI 는 캐싱 미지원 → 두 블록을 concat 해 단일 system 메시지로
+                        {"role": "system", "content": _STEP2_STATIC_HEAD + "\n\n" + step2_dynamic},
                         {"role": "user", "content": "Step 1 결과와 Pain Point를 기반으로 상세 설계를 수행해주세요."},
                     ],
                     response_format={"type": "json_object"},
