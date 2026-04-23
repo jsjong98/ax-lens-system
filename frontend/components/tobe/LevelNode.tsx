@@ -85,6 +85,10 @@ interface NodeData {
   system?: string;
   /* 벤치마킹 attribution — label 의 prefix 파트 (파란색 강조 렌더용) */
   benchmark_source?: string;
+  /* Junior AI source_basis — sky-blue bar 텍스트 ("BM"/"PainPoint"/"Both"/"LLM") */
+  source_basis?: string;
+  bm_reference?: { case_no?: number; title?: string; domain?: string; companies?: string[] };
+  pain_point_reference?: { task_id?: string; task_name?: string; pain_categories?: string[] };
   /* ── CSV-parsed systems (L5) ── */
   systems?: {
     hr: string;
@@ -166,6 +170,27 @@ function L5NodeBase({ data, selected }: { data: NodeData; selected?: boolean }) 
       <Handle type="source" position={Position.Bottom} id="bottom" className={`!w-5 !h-5 ${s.handleSource} !border-2 !border-white !-bottom-2.5 !z-10`} />
       <Handle type="source" position={Position.Left} id="left" className={`!w-5 !h-5 ${s.handleSource} !border-2 !border-white !-left-2.5 !z-10`} />
       <Handle type="source" position={Position.Right} id="right" className={`!w-5 !h-5 ${s.handleSource} !border-2 !border-white !-right-2.5 !z-10`} />
+
+      {/* ── source_basis bar (Junior AI 전용) — 위에 얹기, 노드 출처 표시 ── */}
+      {data.source_basis && data.source_basis !== "LLM" && (
+        <div
+          className="bg-sky-100 border border-sky-300 flex items-center justify-center"
+          style={{ height: 24, fontSize: 9, fontWeight: 700, color: '#1D4ED8' }}
+          title={(() => {
+            const bm = data.bm_reference;
+            const pp = data.pain_point_reference;
+            const parts: string[] = [];
+            if (bm?.title) parts.push(`Benchmarking: ${bm.companies?.join(' · ') ?? ''} — ${bm.title}`);
+            if (pp?.pain_categories?.length) parts.push(`Pain Point: ${pp.pain_categories.join(', ')}${pp.task_name ? ` (${pp.task_name})` : ''}`);
+            return parts.join('\n');
+          })()}
+        >
+          {data.source_basis === "BM" ? "Benchmarking"
+            : data.source_basis === "PainPoint" ? "Pain Point"
+            : data.source_basis === "Both" ? "Benchmarking · Pain Point"
+            : ""}
+        </div>
+      )}
 
       {/* ── Custom role bar (그 외:value) — 위에 얹기 (0.36cm × 3.15cm) ── */}
       {extractCustomRole(data.role) && (

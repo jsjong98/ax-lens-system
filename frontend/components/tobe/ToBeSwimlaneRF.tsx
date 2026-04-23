@@ -190,6 +190,10 @@ function ToBeSwimlaneInner({ sheet }: Props) {
           memo: memoStr || undefined,
           // 벤치마킹 attribution — LevelNode 가 prefix 를 파란색으로 강조 표시
           benchmark_source: n.benchmark_source || undefined,
+          // source_basis (Junior AI 전용 sky-blue bar) — Benchmarking / Pain Point / Both / LLM
+          source_basis: (n as { source_basis?: string }).source_basis,
+          bm_reference: (n as { bm_reference?: unknown }).bm_reference,
+          pain_point_reference: (n as { pain_point_reference?: unknown }).pain_point_reference,
         };
 
         out.push({

@@ -1707,6 +1707,61 @@ def _filter_step2_deprecated(step2: dict) -> dict:
     return cleaned
 
 
+def _attribute_task_basis(task_name: str, task_id: str, pain_index: dict) -> tuple[str, dict | None, dict | None]:
+    """Junior AI task 의 설계 근거 (BM/PainPoint/Both/LLM) 분류.
+
+    매칭 절차:
+    1) 6 도메인 Background BM (recruit/evaluation/compensation/learning/bp/er) 의
+       match_benchmark_for_task() 순회 — 첫 매칭이 BM 출처
+    2) Pain Point 인덱스 (task_id → pain_context) 조회 — 매칭되면 Pain 출처
+    3) 두 출처 모두 / BM 만 / Pain 만 / 둘 다 없음 → "Both" / "BM" / "PainPoint" / "LLM"
+
+    Returns:
+        (source_basis, bm_ref, pain_ref)
+        - source_basis: "BM" | "PainPoint" | "Both" | "LLM"
+        - bm_ref: {case_no, title, domain, companies} | None
+        - pain_ref: {task_id, task_name, pain_categories} | None
+    """
+    bm_ref = None
+    pain_ref = None
+
+    # 1) BM 매칭 — 6 도메인 순회
+    for domain in ("recruit", "evaluation", "compensation", "learning", "bp", "er"):
+        try:
+            mod = __import__(f"{domain}_benchmarks")
+            case = mod.match_benchmark_for_task(task_name)
+            if case:
+                bm_ref = {
+                    "case_no": case["case_no"],
+                    "title": case["title"],
+                    "domain": domain,
+                    "companies": case["companies"],
+                }
+                break
+        except Exception:
+            continue
+
+    # 2) Pain Point 매칭 (task_id 기반)
+    if task_id and task_id in pain_index:
+        ctx = pain_index[task_id]
+        pain_points = ctx.get("pain_points") or []
+        if pain_points:
+            pain_ref = {
+                "task_id": task_id,
+                "task_name": ctx.get("task_name", ""),
+                "pain_categories": [p.get("type", "") for p in pain_points if p.get("type")],
+            }
+
+    # 3) 통합 라벨
+    if bm_ref and pain_ref:
+        return "Both", bm_ref, pain_ref
+    if bm_ref:
+        return "BM", bm_ref, None
+    if pain_ref:
+        return "PainPoint", None, pain_ref
+    return "LLM", None, None
+
+
 def _manual_matches_path() -> Path:
     """현재 세션의 manual_matches.json 경로. 세션 없으면 _WF_DIR 루트 (하위 호환)."""
     if _current_session_id:
@@ -4559,6 +4614,14 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
     sheet_name = (asis_sheet.name or asis_sheet.sheet_id).strip()
     sheet_id = asis_sheet.sheet_id
 
+    # Pain Point 인덱스 — Junior AI 노드 source_basis 분류용
+    # _wf_step2_cache["pain_context"] 는 Step 2 결과 저장 시 채워진 task_id 별 pain 정보
+    _pain_index = {
+        p.get("task_id", ""): p
+        for p in (_wf_step2_cache.get("pain_context") or [])
+        if p.get("task_id")
+    }
+
     # ─ hr-workflow-ai 표준 edge 포맷 (https://github.com/jsjong98/hr-workflow-ai) ─
     # type: "ortho" / animated: false / 회색 단색 실선 / markerEnd 만
     # 양방향 흐름은 단방향 edge 를 2개 그려서 표현 (markerStart 미사용).
@@ -5171,6 +5234,12 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
                     except Exception:
                         continue
 
+                # 🔑 source_basis 분류 — BM/PainPoint/Both/LLM (Junior AI 전용)
+                # LevelNode 가 sky-blue bar 로 표시 (Benchmarking / Pain Point / Benchmarking · Pain Point)
+                _source_basis, _bm_ref, _pain_ref = _attribute_task_basis(
+                    _orig_task_name, tid, _pain_index,
+                )
+
                 ai_nodes_out.append({
                     "id": jid,
                     "label": _display_label[:80],
@@ -5188,6 +5257,9 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
                     "output_data": t.get("output_data", []),
                     "agent_name": ag["agent_name"],
                     "benchmark_source": _bm_source,   # 파란색 attribution 뱃지용 (None 이면 없음)
+                    "source_basis": _source_basis,    # "BM"/"PainPoint"/"Both"/"LLM"
+                    "bm_reference": _bm_ref,           # {case_no, title, domain, companies} | None
+                    "pain_point_reference": _pain_ref, # {task_id, task_name, pain_categories} | None
                     "next": [],
                 })
                 # Junior AI 내부 sequential 엣지
@@ -5721,6 +5793,13 @@ def _tobe_cache_to_hr_json(cache: dict) -> dict:
             # 벤치마킹 attribution — 프론트에서 prefix 부분 파란색 강조
             if n.get("benchmark_source"):
                 base_data["benchmark_source"] = n["benchmark_source"]
+            # source_basis (BM/PainPoint/Both/LLM) — Junior AI 노드에 sky-blue bar 표시용
+            if n.get("source_basis"):
+                base_data["source_basis"] = n["source_basis"]
+            if n.get("bm_reference"):
+                base_data["bm_reference"] = n["bm_reference"]
+            if n.get("pain_point_reference"):
+                base_data["pain_point_reference"] = n["pain_point_reference"]
             # AI 노드는 role을 actor로 강제 (Senior/Junior AI 레인 배치)
             if n.get("origin") == "ai" and n.get("actor"):
                 base_data["role"] = n["actor"]

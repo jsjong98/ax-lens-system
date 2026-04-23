@@ -1310,6 +1310,10 @@ export interface TobeNode {
   output_data?: string[];
   agent_name?: string;
   benchmark_source?: string | null;   // 벤치마킹 title (있으면 label 의 prefix 파트)
+  // 출처 분류 (Junior AI 전용 sky-blue bar 표시용)
+  source_basis?: "BM" | "PainPoint" | "Both" | "LLM";
+  bm_reference?: { case_no?: number; title?: string; domain?: string; companies?: string[] } | null;
+  pain_point_reference?: { task_id?: string; task_name?: string; pain_categories?: string[] } | null;
 }
 
 export interface TobeEdge {
