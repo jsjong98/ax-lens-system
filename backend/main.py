@@ -5160,6 +5160,9 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
     # → 엣지에 sourceHandle/targetHandle 로 column 지정하면 정확한 column 위로 연결
     senior_node_ids: list[str] = []
     SENIOR_SINGLE_ID = "senior_orchestrator"
+    # Option B: colSpan = total_jtasks (Junior task 총합) — column handle 이 각 Junior task
+    # 위에 정확히 정렬됨. Junior agent 수가 아닌 task 수 기준이므로 추후 task_i 인덱싱.
+    _total_jtasks_for_span = sum(len(ag["tasks"]) for ag in junior_agents) if junior_agents else 0
     if senior_agents and junior_agents:
         senior_template = senior_agents[0]   # 보통 1개. 여러 개여도 첫 번째 기반
         senior_name = senior_template.get("agent_name") or "Senior AI Orchestrator"
@@ -5180,7 +5183,7 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
                 "label": senior_name,
                 "level": "L5",
                 "description": senior_template.get("description", ""),
-                "colSpan": len(junior_agents),  # ← Junior agent 수만큼 가로 확장
+                "colSpan": max(_total_jtasks_for_span, 1),  # ← Junior task 총합만큼 확장 (Option B)
             },
             "next": [],
         })
@@ -5212,10 +5215,16 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
         task_i = 0
         # Agent 간 연결용 — 직전 agent 마지막 jid 추적
         prev_agent_last_jid: str | None = None
+        # Option B: agent 별 첫/마지막 task 의 절대 column index 추적
+        # → Senior column handle 이 각 Junior task 와 1:1 정렬되도록 함
+        agent_first_task_i: dict[int, int] = {}
+        agent_last_task_i: dict[int, int] = {}
         for ji, ag in enumerate(junior_agents):
             agent_prefix = f"junior_{ag['agent_id'] or ji}"
             prev_id: str | None = None
             for ti, t in enumerate(ag["tasks"]):
+                if ti == 0:
+                    agent_first_task_i[ji] = task_i
                 tid = t.get("task_id", f"t{ti}")
                 jid = f"{agent_prefix}_{tid}"
                 # 🔑 Junior AI x 는 항상 pipeline 순서대로 sequential (좌→우 흐름 보장)
@@ -5302,25 +5311,31 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
             # 이번 agent 가 끝난 jid 를 다음 agent 연결용으로 저장
             if prev_id:
                 prev_agent_last_jid = prev_id
+            # Option B: 이 agent 의 마지막 task 의 절대 column index 기록
+            if ag["tasks"]:
+                agent_last_task_i[ji] = task_i - 1
 
             # 🔑 Senior AI 체크포인트 배치: 이 agent 전용 체크포인트를 agent 첫 task x 위에 정렬
             # 🔑 단일 가변폭 Senior AI ↔ Junior 첫/마지막 task — column handle 사용
-            # Senior AI 1 노드가 모든 Junior 위를 덮으므로 colSpan 의 ji 번째 column 에서 분기
+            # Option B: colSpan = total_jtasks 이므로 column index 가 Junior task 와 1:1
+            # → 기동은 agent 첫 task column 으로, 결과 반환은 agent 마지막 task column 으로
             if senior_node_ids and ag["tasks"]:
                 first_jid = f"{agent_prefix}_{ag['tasks'][0].get('task_id', 't0')}"
                 last_jid = f"{agent_prefix}_{ag['tasks'][-1].get('task_id', 't0')}"
                 senior_id = senior_node_ids[0]
-                # 기동: Senior 의 ji 번째 column bottom → Junior 첫 task top
+                first_col = agent_first_task_i.get(ji, 0)
+                last_col = agent_last_task_i.get(ji, 0)
+                # 기동: Senior 의 첫 task column bottom → Junior 첫 task top
                 ai_edges_out.append(_std_edge(
                     eid=f"aie_orc_{senior_id}_{first_jid}",
                     src=senior_id, tgt=first_jid, label="기동", origin="ai",
-                    source_handle=f"bottom-c{ji}", target_handle="t-top",
+                    source_handle=f"bottom-c{first_col}", target_handle="t-top",
                 ))
-                # 결과 반환: Junior 마지막 task top → Senior 의 ji 번째 column bottom (target)
+                # 결과 반환: Junior 마지막 task top → Senior 의 마지막 task column bottom (target)
                 ai_edges_out.append(_std_edge(
                     eid=f"aie_ret_{last_jid}_{senior_id}",
                     src=last_jid, tgt=senior_id, label="결과 반환", origin="ai",
-                    source_handle="top", target_handle=f"t-bottom-c{ji}",
+                    source_handle="top", target_handle=f"t-bottom-c{last_col}",
                 ))
 
         # 🔑 단일 Senior AI 노드의 x 를 첫 Junior agent 첫 task x 에 정렬 (왼쪽 시작)
