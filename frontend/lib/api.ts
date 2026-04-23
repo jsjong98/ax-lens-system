@@ -1327,6 +1327,9 @@ export interface TobeEdge {
   animated?: boolean;
   style?: { stroke?: string; strokeWidth?: number; [k: string]: unknown };
   markerEnd?: { type?: string; width?: number; height?: number; color?: string };
+  // colSpan>1 노드 column 별 handle (예: 'bottom-c0', 't-bottom-c2')
+  sourceHandle?: string;
+  targetHandle?: string;
 }
 
 export interface TobeSheet {

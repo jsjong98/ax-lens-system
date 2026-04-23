@@ -4625,9 +4625,11 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
     # ─ hr-workflow-ai 표준 edge 포맷 (https://github.com/jsjong98/hr-workflow-ai) ─
     # type: "ortho" / animated: false / 회색 단색 실선 / markerEnd 만
     # 양방향 흐름은 단방향 edge 를 2개 그려서 표현 (markerStart 미사용).
+    # source_handle/target_handle: colSpan>1 노드의 column-별 handle id (예: 'bottom-c0')
     def _std_edge(eid: str, src: str, tgt: str, label: str = "", origin: str = "asis",
-                  stroke_width: float = 1.5) -> dict:
-        return {
+                  stroke_width: float = 1.5,
+                  source_handle: str | None = None, target_handle: str | None = None) -> dict:
+        e = {
             "id": eid,
             "source": src,
             "target": tgt,
@@ -4638,6 +4640,11 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
             "style": {"stroke": "#333333", "strokeWidth": stroke_width},
             "markerEnd": {"type": "arrowclosed", "width": 18, "height": 18, "color": "#333333"},
         }
+        if source_handle:
+            e["sourceHandle"] = source_handle
+        if target_handle:
+            e["targetHandle"] = target_handle
+        return e
 
     # 0) Step 2 에이전트 먼저 읽기 → 타겟 L4 스코프 도출
     def _task_matches_sheet(t: dict) -> bool:
@@ -5125,42 +5132,36 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
     junior_y = senior_y + 300.0 if senior_agents else max_y + 220.0   # Senior 없으면 바로 Junior 부터
 
     # ── Senior AI 체크포인트 배치 ──
-    # LLM 은 보통 Senior 1개만 생성하지만, Swim Lane 에서는 "연속 오케스트레이션"을
-    # 시각화하기 위해 Junior agent 수만큼 체크포인트 노드를 생성한다.
-    # 각 체크포인트는 대응하는 Junior agent 바로 위에 배치 (x 는 Junior 배치 후 동기화).
-    # - ①→②→③→④ sequential 연결 = 오케스트레이션 연속성
-    # - 각 체크포인트 → Junior agent 첫 task = "기동"
-    # - Junior agent 마지막 task → 체크포인트 = "결과 반환"
-    # 이렇게 해야 기동 엣지가 수직으로 깔끔하게 떨어져 overlap 없이 모두 보임.
+    # 🔑 Senior AI 단일 가변 폭 노드 — 모든 Junior agent 위를 가로로 덮어
+    # Junior 별 양방향 연결 (기동 ↓ / 결과 반환 ↑) 이 column handle 로 분기
+    # LevelNode 의 colSpan>1 분기가 column 별 top/bottom handle 자동 생성
+    # → 엣지에 sourceHandle/targetHandle 로 column 지정하면 정확한 column 위로 연결
     senior_node_ids: list[str] = []
-    _ORDINAL = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮"
+    SENIOR_SINGLE_ID = "senior_orchestrator"
     if senior_agents and junior_agents:
         senior_template = senior_agents[0]   # 보통 1개. 여러 개여도 첫 번째 기반
         senior_name = senior_template.get("agent_name") or "Senior AI Orchestrator"
-        for ji, _ag in enumerate(junior_agents):
-            cp_id = f"senior_cp_{ji}"
-            senior_node_ids.append(cp_id)
-            ord_mark = _ORDINAL[ji] if ji < len(_ORDINAL) else f"({ji+1})"
-            cp_label = f"{ord_mark} {senior_name}"[:40]
-            ai_nodes_out.append({
-                "id": cp_id,
-                "label": cp_label,
+        senior_node_ids.append(SENIOR_SINGLE_ID)
+        ai_nodes_out.append({
+            "id": SENIOR_SINGLE_ID,
+            "label": senior_name[:80],
+            "level": "L5",
+            "actor": "Senior AI",
+            "type": "task",
+            "ai_support": senior_template.get("ai_technique", ""),
+            # x 는 placeholder. Junior 배치 후 첫 Junior 의 x 로 정렬 (왼쪽 시작)
+            "position": {"x": min_x, "y": senior_y},
+            "origin": "ai",
+            "description": senior_template.get("description", ""),
+            "data": {
+                "role": "Senior AI",
+                "label": senior_name,
                 "level": "L5",
-                "actor": "Senior AI",
-                "type": "task",
-                "ai_support": senior_template.get("ai_technique", ""),
-                # x 는 placeholder. Junior 배치 후 각 agent 첫 task x 로 재조정됨
-                "position": {"x": min_x, "y": senior_y},
-                "origin": "ai",
                 "description": senior_template.get("description", ""),
-                "data": {
-                    "role": "Senior AI",
-                    "label": cp_label,
-                    "level": "L5",
-                    "description": senior_template.get("description", ""),
-                },
-                "next": [],
-            })
+                "colSpan": len(junior_agents),  # ← Junior agent 수만큼 가로 확장
+            },
+            "next": [],
+        })
     elif senior_agents and not junior_agents:
         # Junior 없는 희귀 케이스 — 체크포인트 1개만 생성 (기존 동작 유지)
         for si, ag in enumerate(senior_agents):
@@ -5281,42 +5282,42 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
                 prev_agent_last_jid = prev_id
 
             # 🔑 Senior AI 체크포인트 배치: 이 agent 전용 체크포인트를 agent 첫 task x 위에 정렬
-            # + 기동/결과 반환 엣지를 해당 체크포인트와만 연결 (overlap 없음)
-            if senior_node_ids and ag["tasks"] and ji < len(senior_node_ids):
+            # 🔑 단일 가변폭 Senior AI ↔ Junior 첫/마지막 task — column handle 사용
+            # Senior AI 1 노드가 모든 Junior 위를 덮으므로 colSpan 의 ji 번째 column 에서 분기
+            if senior_node_ids and ag["tasks"]:
                 first_jid = f"{agent_prefix}_{ag['tasks'][0].get('task_id', 't0')}"
                 last_jid = f"{agent_prefix}_{ag['tasks'][-1].get('task_id', 't0')}"
-                senior_cp = senior_node_ids[ji]   # agent 별 전용 체크포인트
+                senior_id = senior_node_ids[0]
+                # 기동: Senior 의 ji 번째 column bottom → Junior 첫 task top
+                ai_edges_out.append(_std_edge(
+                    eid=f"aie_orc_{senior_id}_{first_jid}",
+                    src=senior_id, tgt=first_jid, label="기동", origin="ai",
+                    source_handle=f"bottom-c{ji}", target_handle="t-top",
+                ))
+                # 결과 반환: Junior 마지막 task top → Senior 의 ji 번째 column bottom (target)
+                ai_edges_out.append(_std_edge(
+                    eid=f"aie_ret_{last_jid}_{senior_id}",
+                    src=last_jid, tgt=senior_id, label="결과 반환", origin="ai",
+                    source_handle="top", target_handle=f"t-bottom-c{ji}",
+                ))
 
-                # 체크포인트 x 를 이 agent 의 첫 task x 에 맞춤 (수직 정렬)
-                # first task 의 x 는 min_x + x_step * (ji 시작 task_i + 0.5)
-                # 이미 ai_nodes_out 에 해당 Junior 가 있으므로 검색
+        # 🔑 단일 Senior AI 노드의 x 를 첫 Junior agent 첫 task x 에 정렬 (왼쪽 시작)
+        # colSpan 으로 자동 가로 확장되므로 시작점만 맞추면 모든 Junior 위를 덮음
+        if senior_node_ids and junior_agents:
+            first_agent = junior_agents[0]
+            if first_agent["tasks"]:
+                first_first_jid = (
+                    f"junior_{first_agent['agent_id'] or 0}"
+                    f"_{first_agent['tasks'][0].get('task_id', 't0')}"
+                )
                 for jn in ai_nodes_out:
-                    if jn["id"] == first_jid:
+                    if jn["id"] == first_first_jid:
+                        first_x = jn["position"]["x"]
                         for sn in ai_nodes_out:
-                            if sn["id"] == senior_cp:
-                                sn["position"]["x"] = jn["position"]["x"]
+                            if sn["id"] == senior_node_ids[0]:
+                                sn["position"]["x"] = first_x
                                 break
                         break
-
-                # 기동 (Senior cp → Junior 첫 task) — 수직 arrow
-                ai_edges_out.append(_std_edge(
-                    eid=f"aie_orc_{senior_cp}_{first_jid}",
-                    src=senior_cp, tgt=first_jid, label="기동", origin="ai",
-                ))
-                # 결과 반환 (Junior 마지막 task → Senior cp) — 수직 arrow
-                ai_edges_out.append(_std_edge(
-                    eid=f"aie_ret_{last_jid}_{senior_cp}",
-                    src=last_jid, tgt=senior_cp, label="결과 반환", origin="ai",
-                ))
-
-        # 🔑 Senior AI 체크포인트 간 sequential 연결 (오케스트레이션 연속성)
-        # ① → ② → ③ → ④  (Senior 레인 안에서 좌→우 흐름)
-        for i in range(len(senior_node_ids) - 1):
-            ai_edges_out.append(_std_edge(
-                eid=f"aie_senior_seq_{i}",
-                src=senior_node_ids[i], tgt=senior_node_ids[i+1],
-                label="", origin="ai",
-            ))
 
     # 3) LLM 지능형 배선 — AI Service Flow + As-Is Process Map 분석
     llm_routing = await _llm_route_tobe_flow(
@@ -5840,6 +5841,11 @@ def _tobe_cache_to_hr_json(cache: dict) -> dict:
             }
             if e.get("label"):
                 edge_obj["label"] = e["label"]
+            # colSpan>1 노드의 column 별 handle (Senior AI 가변 폭 등) — 보존
+            if e.get("sourceHandle"):
+                edge_obj["sourceHandle"] = e["sourceHandle"]
+            if e.get("targetHandle"):
+                edge_obj["targetHandle"] = e["targetHandle"]
             edges_out.append(edge_obj)
 
         # 🔑 laneHeights / swimHeight 포함 — hr-workflow-ai SwimLaneOverlay 가

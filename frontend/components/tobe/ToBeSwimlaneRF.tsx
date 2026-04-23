@@ -218,6 +218,8 @@ function ToBeSwimlaneInner({ sheet }: Props) {
         type?: string; animated?: boolean;
         style?: Record<string, unknown>;
         markerEnd?: { type?: string; width?: number; height?: number; color?: string };
+        sourceHandle?: string;
+        targetHandle?: string;
       };
       // backend 가 markerEnd.type 를 소문자 "arrowclosed" 문자열로 보내므로
       // React Flow 의 MarkerType enum 값으로 정규화 (동일 문자열 "arrowclosed")
@@ -233,6 +235,10 @@ function ToBeSwimlaneInner({ sheet }: Props) {
         id: raw.id,
         source: raw.source,
         target: raw.target,
+        // colSpan>1 노드의 column 별 handle (예: 'bottom-c0', 't-bottom-c2') —
+        // backend 가 양방향 엣지에 명시한 경우 그대로 전달
+        sourceHandle: raw.sourceHandle,
+        targetHandle: raw.targetHandle,
         type: raw.type ?? "ortho",
         label: raw.label,
         animated: raw.animated ?? false,
