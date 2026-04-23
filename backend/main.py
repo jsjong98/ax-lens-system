@@ -4730,7 +4730,9 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
 
     senior_agents: list[dict] = []
     junior_agents: list[dict] = []
-    human_agents: list[dict] = []   # agent_type='Human' — As-Is 인계 받아 explicit 으로 표시할 사람 task
+    # 사람이 직접 수행하는 개별 task — Agent 도 아니고 묶음도 아님. 각 task 가 독립.
+    # (Step 2 schema 의 top-level 'human_tasks' 배열에서 직접 읽음)
+    human_tasks: list[dict] = []
     for agent in _wf_step2_cache.get("agents", []):
         atype = agent.get("agent_type", "")
         matched = [
@@ -4748,17 +4750,14 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
                 "tasks": matched,
             })
             continue
-        # Human Agent — performer (HR 임원 / 현업 임원 / 외부 업체 등) lane 에 배치
+        # 레거시 fallback — agent_type='Human' 으로 들어왔으면 펼쳐서 human_tasks 로 변환
+        # (신규 schema 에서는 top-level human_tasks 사용 — 아래 별도 처리)
         if atype == "Human":
-            if not matched:
-                continue
-            human_agents.append({
-                "agent_id": agent.get("agent_id", ""),
-                "agent_name": agent.get("agent_name", "") or "Human Task",
-                "performer": (agent.get("performer") or "HR 담당자").strip() or "HR 담당자",
-                "description": agent.get("description", ""),
-                "tasks": matched,
-            })
+            _legacy_perf = (agent.get("performer") or "HR 담당자").strip() or "HR 담당자"
+            for _t in matched:
+                _t_copy = dict(_t)
+                _t_copy.setdefault("performer", _legacy_perf)
+                human_tasks.append(_t_copy)
             continue
         if atype != "Junior AI":
             continue
@@ -4776,6 +4775,15 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
             "ai_technique": agent.get("ai_technique", ""),
             "tasks": matched,
         })
+
+    # 🔑 Step 2 schema 의 top-level 'human_tasks' 배열 — 사람이 개별로 수행하는 task 들
+    # (묶음 X, 각 항목이 독립 task. 예: 보고, 승인, 상신, 외부 위탁 각각)
+    for ht in (_wf_step2_cache.get("human_tasks") or []):
+        if not _task_matches_sheet(ht):
+            continue
+        if _is_deprecated_tid(str(ht.get("task_id") or "")):
+            continue
+        human_tasks.append(ht)
 
     # Junior AI 가 실제로 대체하는 task_id 집합 (As-Is 원본 제거 판정에 사용)
     # Junior AI 에 할당 안 된 task (change_type=삭제/통합 또는 scope 미 포함) 는
@@ -5518,7 +5526,7 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
 
     # 🔑 To-Be Only 정책 — As-Is L5 노드를 캔버스에서 모두 제거.
     # 보존되어야 할 Human task (보고/결재/외부 업체 등) 는 Step 2 LLM 이 explicit 으로
-    # agent_type='Human' agent 로 설계해야 함 (아래 human_agents 처리에서 노드 생성).
+    # agent_type='Human' (사람 task 그룹) 로 설계해야 함 (아래 human_task_groups 처리에서 노드 생성).
     # 상위 컨텍스트 노드 (L2/L3/L4) 는 그대로 유지 — swim lane 구조 / 헤더 역할.
     _removed_l5_ids: set[str] = set()
     _kept_asis = []
@@ -5624,60 +5632,44 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
             src=hr_id, tgt=jid, label="확정", origin="ai",
         ))
 
-    # 3-1.5) Human Agent 노드 생성 — Step 2 LLM 이 agent_type='Human' 으로 explicit 설계한 task
-    # As-Is 의 보고/결재/외부 업체 작업을 To-Be 캔버스에 그대로 보존 (1:1 = task 1개당 노드 1개)
-    # 각 Human Agent 의 task 들을 그 performer swim lane (HR 임원/현업 임원/외부 업체 등) 에 배치
-    if human_agents:
-        # x-step: Junior AI x_step 와 동일하게 (시각 정렬)
+    # 3-1.5) 사람이 개별 수행하는 task 노드 생성 — Step 2 LLM 이 human_tasks 배열로 explicit 설계한 것
+    # 각 task 가 독립 (묶음 X). performer 별로 그 swim lane (HR 임원/현업 임원/외부 업체 등) 에 배치.
+    # 'Agent' 가 아니라 그냥 사람이 하는 task (보고, 승인, 상신 등) 각각.
+    if human_tasks:
         _h_x_step = MIN_X_STEP if junior_agents else 440.0
-        _human_task_i = 0
-        _h_min_x = min_x if junior_agents else min_x
-        # 각 performer 별 실제 사용된 lane y 는 frontend swim lane 자동 정렬에 맡김 — 여기선 actor 만 정확히
-        for ag in human_agents:
-            performer = ag.get("performer") or "HR 담당자"
+        _h_min_x = min_x
+        for _hi, t in enumerate(human_tasks):
+            performer = (t.get("performer") or "HR 담당자").strip() or "HR 담당자"
             # "그 외:XXX" subdivision 은 그대로 유지 (frontend roleDisplay 가 처리)
-            # 표준 lane 이 아니고 "그 외:" 도 아닌 경우만 fallback
             if performer not in _TOBE_ACTOR_ORDER and not performer.startswith("그 외:"):
                 performer = "HR 담당자"
-            agent_prefix = f"human_{ag['agent_id'] or _human_task_i}"
-            prev_hid: str | None = None
-            for ti, t in enumerate(ag["tasks"]):
-                tid = t.get("task_id", f"ht{ti}")
-                hid = f"{agent_prefix}_{tid}"
-                hx = _h_min_x + _h_x_step * (_human_task_i + 0.5)
-                _human_task_i += 1
-                _orig_name = t.get("task_name", "") or tid
-                ai_nodes_out.append({
-                    "id": hid,
-                    "label": _orig_name[:80],
+            tid = t.get("task_id", f"ht{_hi}")
+            hid = f"htask_{_hi}_{tid}"
+            hx = _h_min_x + _h_x_step * (_hi + 0.5)
+            _orig_name = t.get("task_name", "") or tid
+            ai_nodes_out.append({
+                "id": hid,
+                "label": _orig_name[:80],
+                "level": "L5",
+                "actor": performer,
+                "type": "task",
+                "ai_support": None,
+                "position": {"x": hx, "y": 100.0},   # y 는 swim lane 자동 정렬용 placeholder
+                "origin": "human",   # AI 가 아닌 사람 수행 표시
+                "display_id": tid,
+                "automation_level": "Human",
+                "human_role": t.get("human_role", "") or "",
+                "input_data": t.get("input_data", []),
+                "output_data": t.get("output_data", []),
+                "data": {
+                    "role": performer,
+                    "label": _orig_name,
                     "level": "L5",
-                    "actor": performer,
-                    "type": "task",
-                    "ai_support": None,
-                    "position": {"x": hx, "y": 100.0},   # y 는 swim lane 자동 정렬용 placeholder
-                    "origin": "ai",
-                    "display_id": tid,
-                    "automation_level": "Human",
-                    "human_role": t.get("human_role", "") or t.get("ai_role", ""),
-                    "input_data": t.get("input_data", []),
-                    "output_data": t.get("output_data", []),
-                    "agent_name": ag["agent_name"],
-                    "data": {
-                        "role": performer,
-                        "label": _orig_name,
-                        "level": "L5",
-                        "id": tid,
-                        "description": t.get("ai_role", "") or t.get("human_role", ""),
-                    },
-                    "next": [],
-                })
-                # Human agent 내부 sequential
-                if prev_hid:
-                    ai_edges_out.append(_std_edge(
-                        eid=f"hue_seq_{prev_hid}_{hid}",
-                        src=prev_hid, tgt=hid, label="", origin="ai",
-                    ))
-                prev_hid = hid
+                    "id": tid,
+                    "description": t.get("human_role", "") or t.get("description", ""),
+                },
+                "next": [],
+            })
 
     # 3-2) LLM이 제공한 AI ↔ As-Is 엣지 병합
     # jid → 대체하는 As-Is task_id (self-loop 필터링용)
@@ -6756,16 +6748,16 @@ Pain Points (수집된 raw 목소리):
 위의 transformative redesign 자유는 **개별 task 의 작업 방식 변경** (manual → AI) 에만 적용됩니다.
 다음 As-Is 구조는 **그대로 보존** 해야 합니다:
 
-1. **조직 핸드오프 (multi-actor handoff) 구조 보존 + Human Agent 로 명시**
+1. **조직 핸드오프 (multi-actor handoff) 구조 보존 + 사람 task 묶음으로 명시**
    As-Is JSON 에 여러 swim lane (HR 담당자, HR 임원, 현업 임원, 현업 담당자, 현업 팀장 등) 간
    순차적 보고·승인·협의 흐름이 있으면 To-Be 에서도 **동일 핸드오프 chain 을 유지**.
    - 예 As-Is: 현업 담당자 작성 → HR 임원 보고 → 현업 임원 승인 → HR 담당자 예산 품의 상신
    - ❌ To-Be: AI 가 작성 → 바로 임원 보고 (중간 핸드오프 우회·삭제)
-   - ✅ To-Be:
-     · Junior AI "보고자료 자동 생성기" (현업 담당자 lane 의 작업 보조)
-     · **Human Agent "HR 임원 보고기" (agent_type="Human", performer="HR 임원")** — As-Is 의 "HR 임원 보고/검토" task 를 explicit 으로 보존
-     · **Human Agent "현업 임원 승인기" (agent_type="Human", performer="현업 임원")** — explicit 보존
-     · Junior AI "예산 품의 자동화기" (HR 담당자 lane)
+   - ✅ To-Be (agents + human_tasks 조합):
+     · **Junior AI "보고자료 자동 생성기"** (현업 담당자 lane 의 작업 보조) — agents 배열
+     · **human_tasks**: `{task_id: "1.5.2.2", task_name: "HR 임원 보고/검토", performer: "HR 임원", ...}` — As-Is 그대로 1개 task
+     · **human_tasks**: `{task_id: "1.5.2.3", task_name: "현업 임원 승인", performer: "현업 임원", ...}` — 1개 task
+     · **Junior AI "예산 품의 자동화기"** (HR 담당자 lane) — agents 배열
    - Senior AI 가 핸드오프를 "자동 라우팅" 하는 건 OK — **승인 권한 자체를 우회·통합 금지**.
 
 2. **수행주체 (performer) 보존**
@@ -6792,23 +6784,24 @@ Pain Points (수집된 raw 목소리):
 스코프 내 태스크 분포: AI {cls_stats["AI"]}개 / AI+Human {cls_stats["AI + Human"]}개 / Human {cls_stats["Human"]}개
 
 - **Human으로 분류된 Task** → AI Agent (Senior/Junior AI) 의 `assigned_tasks`에 절대 포함하지 말 것.
-  대신 **반드시 `agent_type="Human"` agent 의 assigned_tasks 에 explicit 으로 포함** 시켜 To-Be 캔버스에 보존.
+  대신 **출력 JSON top-level 의 `human_tasks` 배열에 개별 task 로 explicit 포함** 시켜 To-Be 캔버스에 보존.
+  - `human_tasks` 는 Agent 도 아니고 묶음도 아님. **각 사람 task (보고/승인/상신 등) 가 독립 항목**.
   - 기존 As-Is 의 보고/결재/외부 업체 위탁/임원 면접 등 사람만 하는 task 들이 사라지지 않도록 Step 2 가 직접 책임짐
+  - 각 task 는 자기 task_id + task_name + performer 를 가짐 (묶음 container 없음)
   - `performer` 필드에 As-Is JSON swim lane 명을 그대로 사용 (subdivision 포함):
     · 표준 lane: `"HR 임원"` / `"HR 담당자"` / `"현업 임원"` / `"현업 팀장"` / `"현업 구성원"`
     · "그 외" lane subdivision (As-Is JSON 의 lane 명 그대로 보존):
       - **두산 내부 조직** (지주/자회사/BG/계열사) — `"그 외:지주HR"` / `"그 외:BG HR"` / `"그 외:자회사 HR"` 형태로 그대로 표기
       - **외부 업체/평가기관** (큐벡스/DDI/Korn Ferry/노무사 등) — `"그 외:큐벡스"` / `"그 외:DDI"` 형태로 그대로 표기
-  - `automation_level`: `"Human"` (AI 미적용)
-  - `ai_role` 비움 / `human_role` 에 사람 작업 내용 기재
+  - `human_role` 에 사람 작업 내용 기재 (ai_role 비움)
   - 결과 카운트 (full_auto_count 등) 에는 반영하지 말 것 (사람 task 라서)
 
 - **"그 외" subdivision 의 AI 대체 가능 여부 분기 (매우 중요)**
   As-Is "그 외" lane 안에 두산 **내부 조직** (지주/자회사/BG/계열사 HR) 이 수행하는 task 가 있으면:
     · **Junior AI 가 흡수 가능** — 두산 내부 협업 범위라 AI Agent 가 대체할 수 있음
-    · 단, 실제 수행 권한이 다른 조직에 있는 task (예: BG HR 의 최종 승인) 는 그 조직 lane 의 Human Agent 로 보존
+    · 단, 실제 수행 권한이 다른 조직에 있는 task (예: BG HR 의 최종 승인) 는 그 조직 lane 의 사람 task 묶음으로 보존
   As-Is "그 외" lane 안에 **외부 업체/평가기관** (큐벡스/DDI/Korn Ferry/노무사 등) 이 수행하는 task:
-    · **반드시 그대로 유지** — Junior AI 흡수 금지 → `agent_type="Human"` agent 로 보존, performer="그 외:DDI" 식
+    · **반드시 그대로 유지** — Junior AI 흡수 금지 → `agent_type="Human"` 사람 task 묶음으로 보존, performer="그 외:DDI" 식
     · ai_role/ai_application = "" (AI 적용 안 함)
     · 외부 평가/위탁 결과를 받아 처리하는 두산 내부 task 는 별도 Junior AI 에서 처리 가능
 
@@ -6861,13 +6854,11 @@ Pain Points (수집된 raw 목소리):
 5. **Process Innovation 모드 (위 섹션) 의 좋은 예시·anti-pattern 을 반드시 따를 것** — 1:1 mapping / 단순 라벨 변경은 무효 처리
 
 ## ⚠️ agent_type 규칙 (반드시 준수)
-- `agent_type`은 **"Senior AI"** / **"Junior AI"** / **"Human"** 셋 중 하나만 사용 (다른 텍스트 금지)
+- `agent_type`은 **"Senior AI"** 또는 **"Junior AI"** 둘 중 하나만 사용 (다른 텍스트 금지 — Human 은 agents 배열이 아니라 별도 top-level `human_tasks` 배열에 넣음)
 - **Senior AI**: 프로세스 전체 오케스트레이션, 상태 관리, 예외 라우팅, 복수 Agent 조율 역할 → 존재 시 항상 첫 번째로 배치
 - **Junior AI**: 하나의 목적을 완수하는 순차 파이프라인을 처리하는 AI 실무 Agent (AI / AI+Human 분류 task)
-- **Human**: 사람만 수행하는 task 묶음 — 보고/결재/외부 업체 위탁/임원 면접 등 (Human 분류 task)
-  - `performer` 필드 필수 (HR 임원 / HR 담당자 / 현업 임원 / 현업 팀장 / 현업 구성원 / 외부 업체)
-  - 한 Human Agent 안에 같은 performer 의 task 들 묶기 (예: "HR 임원 보고/결재기" 안에 보고·승인·확정 task)
-  - 각 task 의 `automation_level="Human"`
+- **사람 수행 task**: `agents` 가 아니라 **top-level `human_tasks` 배열에 개별 항목** 으로 작성 (아래 출력 schema 참조).
+  각 항목이 독립 task — 보고, 승인, 상신, 외부 위탁 등 하나씩. Agent / 묶음 없음.
 
 ## 🔑 Senior AI 생성 여부 판단 (매우 중요)
 
@@ -7015,57 +7006,40 @@ Pain Points (수집된 raw 목소리):
         }}
       ]
     }},
+  ],
+  "human_tasks": [
     {{
-      "agent_id": "agent_2",
-      "agent_name": "HR 임원 보고기",
-      "agent_type": "Human",
+      "task_id": "1.5.2.2",
+      "task_name": "경영진 보고 및 확정",
+      "l4": "채용 계획 보고 및 확정",
+      "l3": "연간 채용계획 수립",
       "performer": "HR 임원",
-      "description": "As-Is 의 HR 임원 보고/검토 단계 — AI 가 생성한 보고자료를 검토 후 승인",
-      "automation_level": "Human",
-      "assigned_tasks": [
-        {{
-          "task_id": "1.5.2.2",
-          "task_name": "경영진 보고 및 확정",
-          "l4": "채용 계획 보고 및 확정",
-          "l3": "연간 채용계획 수립",
-          "ai_role": "",
-          "human_role": "Junior AI 가 생성한 보고자료를 검토 후 의견 첨부, 현업 임원에게 escalation",
-          "input_data": ["AI 생성 보고서 초안"],
-          "output_data": ["검토 의견·승인 결과"],
-          "automation_level": "Human",
-          "ai_technique": "",
-          "source_basis": "PainPoint",
-          "bm_case_no": null,
-          "bm_case_domain": null,
-          "addressed_pain_task_ids": []
-        }}
-      ]
+      "human_role": "Junior AI 가 생성한 보고자료 검토 후 의견 첨부, 현업 임원에게 escalation",
+      "input_data": ["AI 생성 보고서 초안"],
+      "output_data": ["검토 의견·승인 결과"],
+      "addressed_pain_task_ids": []
     }},
     {{
-      "agent_id": "agent_3",
-      "agent_name": "DDI 외부 평가 위탁",
-      "agent_type": "Human",
+      "task_id": "1.5.2.3",
+      "task_name": "현업 임원 최종 승인",
+      "l4": "채용 계획 보고 및 확정",
+      "l3": "연간 채용계획 수립",
+      "performer": "현업 임원",
+      "human_role": "HR 임원 보고 받은 후 사업 관점에서 최종 승인/반려",
+      "input_data": ["HR 임원 검토 의견"],
+      "output_data": ["최종 승인 또는 반려"],
+      "addressed_pain_task_ids": []
+    }},
+    {{
+      "task_id": "2.3.4.1",
+      "task_name": "DDI 리더십 평가 위탁",
+      "l4": "리더십 평가 운영",
+      "l3": "리더십 진단",
       "performer": "그 외:DDI",
-      "description": "As-Is 의 외부 평가기관(DDI) 위탁 단계 — AI 적용 불가, 그대로 보존",
-      "automation_level": "Human",
-      "assigned_tasks": [
-        {{
-          "task_id": "2.3.4.1",
-          "task_name": "DDI 리더십 평가 위탁",
-          "l4": "리더십 평가 운영",
-          "l3": "리더십 진단",
-          "ai_role": "",
-          "human_role": "외부 평가기관 DDI 에 대상자 정보 송부, 평가 진행 위탁",
-          "input_data": ["대상자 명단"],
-          "output_data": ["DDI 평가 결과 보고서"],
-          "automation_level": "Human",
-          "ai_technique": "",
-          "source_basis": "LLM",
-          "bm_case_no": null,
-          "bm_case_domain": null,
-          "addressed_pain_task_ids": []
-        }}
-      ]
+      "human_role": "외부 평가기관 DDI 에 대상자 정보 송부, 평가 진행 위탁",
+      "input_data": ["대상자 명단"],
+      "output_data": ["DDI 평가 결과 보고서"],
+      "addressed_pain_task_ids": []
     }}
   ],
 
