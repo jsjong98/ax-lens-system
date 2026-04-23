@@ -5287,29 +5287,54 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
                     else _next_l5_id()
                 )
 
-                # 🔑 벤치마킹 레퍼런스 attribution — Task 이름이 레퍼런스와 매칭되면
-                # '{벤치마킹 title} - {원본 Task명}' 형태로 prefix 부착 + benchmark_source 저장.
-                # 프론트 LevelNode 에서 prefix 부분을 파란색으로 강조 표시.
+                # 🔑 벤치마킹 레퍼런스 attribution — '{벤치마킹 title} - {원본 Task명}' prefix 부착.
+                # 프론트 LevelNode 가 prefix 부분을 파란색으로 강조 표시.
                 _orig_task_name = t.get("task_name", "") or tid
-                # 도메인별 attribution 시도 — 먼저 매칭되는 쪽이 prefix
-                # 순서: recruit → evaluation → compensation → learning → bp → er (6 도메인 전체)
                 _display_label, _bm_source = _orig_task_name, None
-                for _dom_mod in (
-                    "recruit_benchmarks",
-                    "evaluation_benchmarks",
-                    "compensation_benchmarks",
-                    "learning_benchmarks",
-                    "bp_benchmarks",
-                    "er_benchmarks",
-                ):
+                # 0순위: LLM 이 명시한 bm_case_no + bm_case_domain — 가장 신뢰
+                # (Step 2 LLM 이 task_name 을 짧게 줄이면서 prefix 떼는 문제 해결용)
+                _llm_bm_case_no = t.get("bm_case_no")
+                _llm_bm_domain = (t.get("bm_case_domain") or "").strip().lower()
+                if _llm_bm_case_no and _llm_bm_domain:
                     try:
-                        _mod = __import__(_dom_mod)
-                        _lbl, _src = _mod.attribute_task_name(_orig_task_name)
-                        if _src:
-                            _display_label, _bm_source = _lbl, _src
-                            break
+                        _mod = __import__(f"{_llm_bm_domain}_benchmarks")
+                        # 도메인 모듈의 CASES 리스트 attribute 자동 탐색
+                        _all_cases = (
+                            getattr(_mod, "RECRUIT_CASES", None)
+                            or getattr(_mod, "EVALUATION_CASES", None)
+                            or getattr(_mod, "COMPENSATION_CASES", None)
+                            or getattr(_mod, "LEARNING_CASES", None)
+                            or getattr(_mod, "BP_CASES", None)
+                            or getattr(_mod, "ER_CASES", None)
+                            or []
+                        )
+                        _matched_case = next(
+                            (c for c in _all_cases if c.get("case_no") == _llm_bm_case_no),
+                            None,
+                        )
+                        if _matched_case:
+                            _bm_source = _matched_case["title"]
+                            _display_label = f"{_bm_source} - {_orig_task_name}"
                     except Exception:
-                        continue
+                        pass
+                # 1순위: keyword 매칭 fallback (LLM 이 bm_case_no 안 적었을 때)
+                if not _bm_source:
+                    for _dom_mod in (
+                        "recruit_benchmarks",
+                        "evaluation_benchmarks",
+                        "compensation_benchmarks",
+                        "learning_benchmarks",
+                        "bp_benchmarks",
+                        "er_benchmarks",
+                    ):
+                        try:
+                            _mod = __import__(_dom_mod)
+                            _lbl, _src = _mod.attribute_task_name(_orig_task_name)
+                            if _src:
+                                _display_label, _bm_source = _lbl, _src
+                                break
+                        except Exception:
+                            continue
 
                 # 🔑 source_basis 분류 — BM/PainPoint/Both/LLM (Junior AI 전용)
                 # LevelNode 가 sky-blue bar 로 표시 (Benchmarking / Pain Point / Benchmarking · Pain Point)
@@ -6637,6 +6662,33 @@ Pain Points (수집된 raw 목소리):
 - ❌ 모든 task 를 Human-in-Loop 로 두기 (자동화 효과 미미)
 - ❌ Pain Point 한 줄당 task 한 줄 1:1 매칭 (cluster 분석 없음)
 
+### 🚧 보존 원칙 (Process Innovation 의 boundary — 절대 위반 금지)
+
+위의 transformative redesign 자유는 **개별 task 의 작업 방식 변경** (manual → AI) 에만 적용됩니다.
+다음 As-Is 구조는 **그대로 보존** 해야 합니다:
+
+1. **조직 핸드오프 (multi-actor handoff) 구조 보존**
+   As-Is JSON 에 여러 swim lane (HR 담당자, HR 임원, 현업 임원, 현업 담당자, 현업 팀장 등) 간
+   순차적 보고·승인·협의 흐름이 있으면 To-Be 에서도 **동일 핸드오프 chain 을 유지**.
+   - 예 As-Is: 현업 담당자 작성 → HR 임원 보고 → 현업 임원 승인 → HR 담당자 예산 품의 상신
+   - ❌ To-Be: AI 가 작성 → 바로 임원 보고 (중간 핸드오프 우회·삭제)
+   - ✅ To-Be: AI 가 작성 보조 → 현업 담당자 검토·전달 → HR 임원 검토 → 현업 임원 승인 → HR 담당자 예산 품의 진행
+     (AI 는 각 단계의 "자료 작성·정리" 만 자동화하고, **사람 간 위계·승인 chain 은 As-Is 그대로**)
+   - Senior AI 가 핸드오프를 "자동 라우팅" 하는 건 OK — **승인 권한 자체를 우회·통합 금지**.
+
+2. **수행주체 (performer) 보존**
+   As-Is 에서 특정 task 를 누가 했는지 (HR 임원 vs HR 담당자 vs 현업 팀장 vs 외부 업체 등) 는
+   To-Be 에서도 동일하게 유지. AI 는 "그 사람의 보조" 로 들어가고, 수행 주체 자체를 바꾸지 않음.
+   - 예: As-Is 에서 "경영진 보고·확정" 이 HR 임원 task 면 → To-Be 에서도 HR 임원이 최종 확정.
+     AI 는 "보고서 초안 자동 생성" 까지만 (확정 권한은 HR 임원).
+
+3. **외부 업체/시스템 (큐벡스, 노무사, 헤드헌터 등) 보존**
+   재설계 불가 — 위에 명시된 swim lane 규칙과 일치.
+
+**요약**: Process Innovation = "각 task 의 방식 (어떻게 하는가)" 을 transformative 하게 바꾸는 것이지,
+**"누가 누구에게 보고하는가" (조직 위계) 는 As-Is JSON 의 swim lane / edge 구조를 따라야 합니다**.
+조직 구조를 모두 무시하고 직접 보고·자동 승인 chain 을 그리면 두산 거버넌스에 맞지 않아 무효 처리.
+
 ## ⚠️ 재설계 범위 (swim lane 기준)
 - **재설계 가능**: HR 담당자, HR 임원, 지주, 자회사, BG, 계열사 등 두산 내부 조직이 수행하는 Task
 - **재설계 불가 (현행 유지)**: 큐벡스, 업체 등 외부 업체/시스템이 수행하는 Task — AI Agent 설계 대상에서 제외하고 "현행 유지" 처리
@@ -6794,6 +6846,8 @@ Pain Points (수집된 raw 목소리):
           "automation_level": "Full-Auto",
           "ai_technique": "OCR, IDP, LLM 텍스트 추출",
           "source_basis": "BM",
+          "bm_case_no": 5,
+          "bm_case_domain": "recruit",
           "addressed_pain_task_ids": []
         }},
         {{
@@ -6808,6 +6862,8 @@ Pain Points (수집된 raw 목소리):
           "automation_level": "Human-in-Loop",
           "ai_technique": "ML 분류모델, 임베딩 매칭, 설명가능 AI(SHAP)",
           "source_basis": "Both",
+          "bm_case_no": 4,
+          "bm_case_domain": "recruit",
           "addressed_pain_task_ids": ["1.5.1.3"]
         }},
         {{
@@ -6822,6 +6878,8 @@ Pain Points (수집된 raw 목소리):
           "automation_level": "Human-on-the-Loop",
           "ai_technique": "행동 패턴 분석, 협업 필터링, LLM 메시지 생성",
           "source_basis": "PainPoint",
+          "bm_case_no": null,
+          "bm_case_domain": null,
           "addressed_pain_task_ids": ["3.2.1.4", "3.2.1.5"]
         }}
       ]
@@ -6872,6 +6930,13 @@ Pain Points (수집된 raw 목소리):
 - Pain Point cluster 분석에서 어떤 As-Is task 의 Pain Point 를 해결했는지 명시
 - 예: 신규 '선제적 휴가 추천' 이 As-Is `3.2.1.4` ('휴가 신청서 작성') 와 `3.2.1.5` ('승인 요청') 의 Pain 을 동시에 해결 → `["3.2.1.4", "3.2.1.5"]`
 - BM-only task 면 빈 배열 `[]`
+
+**`bm_case_no` + `bm_case_domain`** (BM 또는 Both 일 때만): 적용한 Background BM case 번호 + 도메인.
+- task_name 은 짧게 (10~20자) 유지하되, 어떤 BM case 를 적용한 건지 명시 → Swim Lane 이 자동으로 case title 을 파란색 prefix 로 표시
+- 예: `bm_case_no: 1, bm_case_domain: "recruit"` → Swim Lane 노드 상단에 "'스킬 추론' 기반 채용 전략 수립 지원" prefix 자동 부착
+- domain 값: `"recruit"` / `"evaluation"` / `"compensation"` / `"learning"` / `"bp"` / `"er"`
+- 둘 중 하나만 있고 매칭 안 되면 prefix 안 붙음 (LLM 라벨만)
+- BM 근거 없으면 `null`
 
 ⚠️ **task별 ai_technique 필드 필수 규칙**
 
