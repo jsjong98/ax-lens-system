@@ -269,15 +269,24 @@ function L5NodeBase({ data, selected }: { data: NodeData; selected?: boolean }) 
         );
       })()}
 
-      {/* ── Custom role bar (그 외:value) — 위에 얹기 (0.36cm × 3.15cm) ── */}
-      {extractCustomRole(data.role) && (
-        <div
-          className="bg-sky-100 border border-sky-300 flex items-center justify-center"
-          style={{ height: 24, fontSize: 9, fontWeight: 700, color: '#1D4ED8' }}
-        >
-          {extractCustomRole(data.role)}
-        </div>
-      )}
+      {/* ── Custom role bar (그 외:value) — 위에 얹기 (0.36cm × 3.15cm) ──
+          source_basis 바가 이미 같은 정보(Benchmarking/Pain Point)를 렌더했으면 중복 방지.
+          단, "그 외:BG HR" 같은 organization custom role 은 계속 표시. */}
+      {extractCustomRole(data.role) && (() => {
+        const custom = extractCustomRole(data.role);
+        const isSourceBasisLabel = /^(Benchmarking|Pain Point)/i.test(custom);
+        if (isSourceBasisLabel && data.source_basis && data.source_basis !== "LLM") {
+          return null;   // source_basis 바가 이미 표시 — 중복 숨김
+        }
+        return (
+          <div
+            className="bg-sky-100 border border-sky-300 flex items-center justify-center"
+            style={{ height: 24, fontSize: 9, fontWeight: 700, color: '#1D4ED8' }}
+          >
+            {custom}
+          </div>
+        );
+      })()}
 
       {/* ── 위쪽 박스: ID + 레이블 (lane accent 배경, 0.25pt 테두리) ── */}
       <div className="px-4 py-3 flex flex-col items-center justify-center" style={{ minHeight: 110, ...upperStyle }}>

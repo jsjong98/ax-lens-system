@@ -5572,13 +5572,33 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
                 _final_bm_origin: str | None = None
                 if _source_basis in ("BM", "Both"):
                     _final_bm_origin = _llm_bm_origin or (_bm_ref or {}).get("origin") or "background"
-                # bm_ref 에 origin 필드 보강 (LLM 경로에선 비어있을 수 있음)
                 if _bm_ref and _final_bm_origin and not _bm_ref.get("origin"):
                     _bm_ref = {**_bm_ref, "origin": _final_bm_origin}
 
+                # 🔑 source_basis 라벨을 role 필드의 '그 외:<label>' 로도 인코딩
+                # → 외부 hr-workflow-ai 는 role 만 해석하므로 source_basis 전용 field 를 몰라
+                #   custom role 방식으로 넣어줘야 sky-blue 바 렌더됨.
+                _bm_suffix = " (추가)" if _final_bm_origin == "dynamic" else ""
+                _basis_label = ""
+                if _source_basis == "BM":
+                    _basis_label = f"Benchmarking{_bm_suffix}"
+                elif _source_basis == "PainPoint":
+                    _basis_label = "Pain Point"
+                elif _source_basis == "Both":
+                    _basis_label = f"Benchmarking{_bm_suffix} · Pain Point"
+                # role: "Junior AI" 가 lane 배치용 primary. custom 은 comma 로 뒤에.
+                _role_encoded = "Junior AI"
+                if _basis_label:
+                    from urllib.parse import quote as _q
+                    _role_encoded = f"Junior AI, 그 외:{_q(_basis_label, safe='')}"
+
+                # 🔑 Agent 번호 suffix — '(Agent N)' 로 각 Junior AI 소속 agent 구분
+                _agent_num_suffix = f" (Agent {ji + 1})"
+                _label_with_agent = _display_label[:70 - len(_agent_num_suffix)] + _agent_num_suffix
+
                 ai_nodes_out.append({
                     "id": jid,
-                    "label": _display_label[:80],
+                    "label": _label_with_agent,
                     "level": "L5",
                     "actor": "Junior AI",
                     "type": "task",
@@ -5586,14 +5606,16 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
                     "position": {"x": x, "y": junior_y},
                     "origin": "ai",
                     "display_id": display_l5_id,
+                    "role_encoded": _role_encoded,       # serialize 시 data.role 에 사용
                     "automation_level": t.get("automation_level", ""),
                     "human_role": t.get("human_role", ""),
                     "input_data": t.get("input_data", []),
                     "output_data": t.get("output_data", []),
                     "agent_name": ag["agent_name"],
+                    "agent_number": ji + 1,              # 1-indexed (UI 표시용)
                     "benchmark_source": _bm_source,
-                    "source_basis": _source_basis,      # "BM"/"PainPoint"/"Both"/"LLM"
-                    "bm_origin": _final_bm_origin,      # "background"/"dynamic"/None — BM 출처 구분
+                    "source_basis": _source_basis,
+                    "bm_origin": _final_bm_origin,
                     "bm_reference": _bm_ref,
                     "pain_point_reference": _pain_ref,
                     "next": [],
@@ -6201,11 +6223,18 @@ def _tobe_cache_to_hr_json(cache: dict) -> dict:
             if n.get("pain_point_reference"):
                 base_data["pain_point_reference"] = n["pain_point_reference"]
             # AI 노드는 role을 actor로 강제 (Senior/Junior AI 레인 배치)
+            # Junior AI 는 role_encoded 가 있으면 그걸 우선 (source_basis 를 '그 외:<라벨>' 로 포함)
             if n.get("origin") == "ai" and n.get("actor"):
-                base_data["role"] = n["actor"]
+                if n.get("role_encoded"):
+                    base_data["role"] = n["role_encoded"]   # "Junior AI, 그 외:Benchmarking" 등
+                else:
+                    base_data["role"] = n["actor"]
                 # ai_support는 description에 저장 (memo로 두면 hr-workflow-ai에서 노란 스티커로 뜸)
                 if n.get("ai_support"):
                     base_data.setdefault("description", n["ai_support"])
+            # Agent 번호 (1-indexed) — UI 에 'Agent N' 표시용
+            if n.get("agent_number"):
+                base_data["agent_number"] = n["agent_number"]
             # role이 여전히 문자열이 아니면 actors_all + custom_role로 재구성
             # 커스텀 값은 hr-workflow-ai 규약에 맞춰 URI 인코딩 (split/trim 구분자 충돌 방지)
             if not isinstance(base_data.get("role"), str):
@@ -7303,9 +7332,9 @@ Pain Points (수집된 raw 목소리):
   · `"background"` — PwC 가 사전 큐레이션한 도메인 모듈 (recruit/evaluation/... 의 CASES). bm_case_no + bm_case_domain 필수.
   · `"dynamic"` — Gap 분석 시 Perplexity 가 추가 검색해서 `_wf_benchmark_table[sheet_id]` 에 저장된 사례.
     bm_case_no/bm_case_domain 은 `null` 이어도 됨 (외부 검색 결과라 case 번호가 없을 수 있음).
-- `bm_origin="background"` 예: `{bm_case_no: 1, bm_case_domain: "recruit", bm_origin: "background"}`
+- `bm_origin="background"` 예: bm_case_no=1, bm_case_domain="recruit", bm_origin="background"
   → Swim Lane 노드 상단에 "'스킬 추론' 기반 채용 전략 수립 지원" prefix 자동 부착 (파란색)
-- `bm_origin="dynamic"` 예: `{bm_case_no: null, bm_case_domain: null, bm_origin: "dynamic"}`
+- `bm_origin="dynamic"` 예: bm_case_no=null, bm_case_domain=null, bm_origin="dynamic"
   → Swim Lane 상단 라벨은 "Benchmarking (추가)" 로 표시 (일반 prefix 없음)
 - BM 근거 전혀 없으면 (Add-on / LLM 추론만) 셋 다 `null`
 
