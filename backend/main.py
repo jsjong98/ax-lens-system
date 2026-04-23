@@ -4725,6 +4725,7 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
 
     senior_agents: list[dict] = []
     junior_agents: list[dict] = []
+    human_agents: list[dict] = []   # agent_type='Human' — As-Is 인계 받아 explicit 으로 표시할 사람 task
     for agent in _wf_step2_cache.get("agents", []):
         atype = agent.get("agent_type", "")
         matched = [
@@ -4739,7 +4740,19 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
                 "agent_name": agent.get("agent_name", "") or "Senior AI Orchestrator",
                 "ai_technique": agent.get("ai_technique", ""),
                 "description": agent.get("description", ""),
-                "tasks": matched,  # 비어있을 수 있음
+                "tasks": matched,
+            })
+            continue
+        # Human Agent — performer (HR 임원 / 현업 임원 / 외부 업체 등) lane 에 배치
+        if atype == "Human":
+            if not matched:
+                continue
+            human_agents.append({
+                "agent_id": agent.get("agent_id", ""),
+                "agent_name": agent.get("agent_name", "") or "Human Task",
+                "performer": (agent.get("performer") or "HR 담당자").strip() or "HR 담당자",
+                "description": agent.get("description", ""),
+                "tasks": matched,
             })
             continue
         if atype != "Junior AI":
@@ -5498,42 +5511,27 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
             jx = junior_by_taskid[tid]["position"]["x"]
             asis_n["position"]["x"] = jx
 
-    # 🔑 Junior AI 가 흡수한 As-Is L5 노드는 ToBe 캔버스에서 제거 — As-Is/AI 중복 표시 방지
-    # 단, L5 가 아닌 상위 노드 (L2/L3/L4) 는 swim lane 컨텍스트로 유지
-    _absorbed_node_ids: set[str] = set()
-    if junior_absorbed_task_ids:
-        _kept = []
-        for n in asis_nodes_out:
-            n_tid = n.get("task_id")
-            n_lvl = (n.get("level") or "").upper()
-            if n_lvl == "L5" and n_tid in junior_absorbed_task_ids:
-                _absorbed_node_ids.add(n["id"])
-                continue   # 제거 — Junior AI 가 대체
-            _kept.append(n)
-        if _absorbed_node_ids:
-            print(f"[TOBE] Smart Merge — Junior AI 흡수로 제거된 As-Is L5: "
-                  f"{len(_absorbed_node_ids)}개 / 잔존 {len(_kept)}개", flush=True)
-        asis_nodes_out = _kept
-        # 제거된 노드를 source/target 으로 갖는 As-Is 엣지도 정리
-        asis_edges_out = [
-            e for e in asis_edges_out
-            if e.get("source") not in _absorbed_node_ids
-            and e.get("target") not in _absorbed_node_ids
-        ]
-
-    # 매칭 안 된 As-Is (Human 분류 등) 는 원본 x 유지 — 하지만 Junior x 범위 내로 들어와야
-    # pipeline 안에서 자연스럽게 섞임. 너무 멀리 떨어진 노드는 normalize.
-    if junior_nodes_count := len([n for n in ai_nodes_out if n["actor"] == "Junior AI"]):
-        junior_x_list = [n["position"]["x"] for n in ai_nodes_out if n["actor"] == "Junior AI"]
-        jr_min_x, jr_max_x = min(junior_x_list), max(junior_x_list)
-        unmatched_asis = [n for n in asis_nodes_out
-                          if n.get("task_id") not in junior_by_taskid]
-        if unmatched_asis:
-            # 원본 x 순서 유지하되, junior 범위 뒤에 이어붙임
-            unmatched_asis.sort(key=lambda n: n["position"]["x"])
-            extra_step = 440.0
-            for i, n in enumerate(unmatched_asis):
-                n["position"]["x"] = jr_max_x + extra_step * (i + 1)
+    # 🔑 To-Be Only 정책 — As-Is L5 노드를 캔버스에서 모두 제거.
+    # 보존되어야 할 Human task (보고/결재/외부 업체 등) 는 Step 2 LLM 이 explicit 으로
+    # agent_type='Human' agent 로 설계해야 함 (아래 human_agents 처리에서 노드 생성).
+    # 상위 컨텍스트 노드 (L2/L3/L4) 는 그대로 유지 — swim lane 구조 / 헤더 역할.
+    _removed_l5_ids: set[str] = set()
+    _kept_asis = []
+    for n in asis_nodes_out:
+        if (n.get("level") or "").upper() == "L5":
+            _removed_l5_ids.add(n["id"])
+            continue
+        _kept_asis.append(n)
+    if _removed_l5_ids:
+        print(f"[TOBE] To-Be Only — As-Is L5 제거: {len(_removed_l5_ids)}개 / "
+              f"잔존 (L2/L3/L4 헤더): {len(_kept_asis)}개", flush=True)
+    asis_nodes_out = _kept_asis
+    # 제거된 L5 referencing 엣지 정리
+    asis_edges_out = [
+        e for e in asis_edges_out
+        if e.get("source") not in _removed_l5_ids
+        and e.get("target") not in _removed_l5_ids
+    ]
 
     # 3-1) Human 행동 노드 생성 — Junior AI 중 사람 개입 필요한 것
     human_nodes_out: list[dict] = []
@@ -5620,6 +5618,59 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
             eid=f"aie_hr_ret_{hr_id}_{jid}",
             src=hr_id, tgt=jid, label="확정", origin="ai",
         ))
+
+    # 3-1.5) Human Agent 노드 생성 — Step 2 LLM 이 agent_type='Human' 으로 explicit 설계한 task
+    # As-Is 의 보고/결재/외부 업체 작업을 To-Be 캔버스에 그대로 보존 (1:1 = task 1개당 노드 1개)
+    # 각 Human Agent 의 task 들을 그 performer swim lane (HR 임원/현업 임원/외부 업체 등) 에 배치
+    if human_agents:
+        # x-step: Junior AI x_step 와 동일하게 (시각 정렬)
+        _h_x_step = MIN_X_STEP if junior_agents else 440.0
+        _human_task_i = 0
+        _h_min_x = min_x if junior_agents else min_x
+        # 각 performer 별 실제 사용된 lane y 는 frontend swim lane 자동 정렬에 맡김 — 여기선 actor 만 정확히
+        for ag in human_agents:
+            performer = ag.get("performer") or "HR 담당자"
+            if performer not in _TOBE_ACTOR_ORDER:
+                performer = "HR 담당자"
+            agent_prefix = f"human_{ag['agent_id'] or _human_task_i}"
+            prev_hid: str | None = None
+            for ti, t in enumerate(ag["tasks"]):
+                tid = t.get("task_id", f"ht{ti}")
+                hid = f"{agent_prefix}_{tid}"
+                hx = _h_min_x + _h_x_step * (_human_task_i + 0.5)
+                _human_task_i += 1
+                _orig_name = t.get("task_name", "") or tid
+                ai_nodes_out.append({
+                    "id": hid,
+                    "label": _orig_name[:80],
+                    "level": "L5",
+                    "actor": performer,
+                    "type": "task",
+                    "ai_support": None,
+                    "position": {"x": hx, "y": 100.0},   # y 는 swim lane 자동 정렬용 placeholder
+                    "origin": "ai",
+                    "display_id": tid,
+                    "automation_level": "Human",
+                    "human_role": t.get("human_role", "") or t.get("ai_role", ""),
+                    "input_data": t.get("input_data", []),
+                    "output_data": t.get("output_data", []),
+                    "agent_name": ag["agent_name"],
+                    "data": {
+                        "role": performer,
+                        "label": _orig_name,
+                        "level": "L5",
+                        "id": tid,
+                        "description": t.get("ai_role", "") or t.get("human_role", ""),
+                    },
+                    "next": [],
+                })
+                # Human agent 내부 sequential
+                if prev_hid:
+                    ai_edges_out.append(_std_edge(
+                        eid=f"hue_seq_{prev_hid}_{hid}",
+                        src=prev_hid, tgt=hid, label="", origin="ai",
+                    ))
+                prev_hid = hid
 
     # 3-2) LLM이 제공한 AI ↔ As-Is 엣지 병합
     # jid → 대체하는 As-Is task_id (self-loop 필터링용)
@@ -6698,13 +6749,16 @@ Pain Points (수집된 raw 목소리):
 위의 transformative redesign 자유는 **개별 task 의 작업 방식 변경** (manual → AI) 에만 적용됩니다.
 다음 As-Is 구조는 **그대로 보존** 해야 합니다:
 
-1. **조직 핸드오프 (multi-actor handoff) 구조 보존**
+1. **조직 핸드오프 (multi-actor handoff) 구조 보존 + Human Agent 로 명시**
    As-Is JSON 에 여러 swim lane (HR 담당자, HR 임원, 현업 임원, 현업 담당자, 현업 팀장 등) 간
    순차적 보고·승인·협의 흐름이 있으면 To-Be 에서도 **동일 핸드오프 chain 을 유지**.
    - 예 As-Is: 현업 담당자 작성 → HR 임원 보고 → 현업 임원 승인 → HR 담당자 예산 품의 상신
    - ❌ To-Be: AI 가 작성 → 바로 임원 보고 (중간 핸드오프 우회·삭제)
-   - ✅ To-Be: AI 가 작성 보조 → 현업 담당자 검토·전달 → HR 임원 검토 → 현업 임원 승인 → HR 담당자 예산 품의 진행
-     (AI 는 각 단계의 "자료 작성·정리" 만 자동화하고, **사람 간 위계·승인 chain 은 As-Is 그대로**)
+   - ✅ To-Be:
+     · Junior AI "보고자료 자동 생성기" (현업 담당자 lane 의 작업 보조)
+     · **Human Agent "HR 임원 보고기" (agent_type="Human", performer="HR 임원")** — As-Is 의 "HR 임원 보고/검토" task 를 explicit 으로 보존
+     · **Human Agent "현업 임원 승인기" (agent_type="Human", performer="현업 임원")** — explicit 보존
+     · Junior AI "예산 품의 자동화기" (HR 담당자 lane)
    - Senior AI 가 핸드오프를 "자동 라우팅" 하는 건 OK — **승인 권한 자체를 우회·통합 금지**.
 
 2. **수행주체 (performer) 보존**
@@ -6730,8 +6784,13 @@ Pain Points (수집된 raw 목소리):
 
 스코프 내 태스크 분포: AI {cls_stats["AI"]}개 / AI+Human {cls_stats["AI + Human"]}개 / Human {cls_stats["Human"]}개
 
-- **Human으로 분류된 Task** → AI Agent의 `assigned_tasks`에 절대 포함하지 말 것.
-  이 Task들은 "현행 유지"로 간주하고 AI 설계 대상에서 제외. (결과 카운트에도 반영하지 말 것)
+- **Human으로 분류된 Task** → AI Agent (Senior/Junior AI) 의 `assigned_tasks`에 절대 포함하지 말 것.
+  대신 **반드시 `agent_type="Human"` agent 의 assigned_tasks 에 explicit 으로 포함** 시켜 To-Be 캔버스에 보존.
+  - 기존 As-Is 의 보고/결재/외부 업체 위탁/임원 면접 등 사람만 하는 task 들이 사라지지 않도록 Step 2 가 직접 책임짐
+  - `performer` 필드에 정확한 lane 명시: `"HR 임원"` / `"HR 담당자"` / `"현업 임원"` / `"현업 팀장"` / `"현업 구성원"` / `"외부 업체"`
+  - `automation_level`: `"Human"` (AI 미적용)
+  - `ai_role` 비움 / `human_role` 에 사람 작업 내용 기재
+  - 결과 카운트 (full_auto_count 등) 에는 반영하지 말 것 (사람 task 라서)
 
 - **AI + Human으로 분류된 Task** → 반드시 **AI 파트와 Human 파트를 분리**해서 반영:
   - task_summary / pain_detail에 이미 분리 정보(`AI 파트: ... / Human 파트: ...`)가 주입되어 있음. 이를 그대로 사용.
@@ -6782,9 +6841,13 @@ Pain Points (수집된 raw 목소리):
 5. **Process Innovation 모드 (위 섹션) 의 좋은 예시·anti-pattern 을 반드시 따를 것** — 1:1 mapping / 단순 라벨 변경은 무효 처리
 
 ## ⚠️ agent_type 규칙 (반드시 준수)
-- `agent_type`은 **"Senior AI"** 또는 **"Junior AI"** 둘 중 하나만 사용 (다른 텍스트 절대 금지)
+- `agent_type`은 **"Senior AI"** / **"Junior AI"** / **"Human"** 셋 중 하나만 사용 (다른 텍스트 금지)
 - **Senior AI**: 프로세스 전체 오케스트레이션, 상태 관리, 예외 라우팅, 복수 Agent 조율 역할 → 존재 시 항상 첫 번째로 배치
-- **Junior AI**: 하나의 목적을 완수하는 순차 파이프라인을 처리하는 실무 Agent
+- **Junior AI**: 하나의 목적을 완수하는 순차 파이프라인을 처리하는 AI 실무 Agent (AI / AI+Human 분류 task)
+- **Human**: 사람만 수행하는 task 묶음 — 보고/결재/외부 업체 위탁/임원 면접 등 (Human 분류 task)
+  - `performer` 필드 필수 (HR 임원 / HR 담당자 / 현업 임원 / 현업 팀장 / 현업 구성원 / 외부 업체)
+  - 한 Human Agent 안에 같은 performer 의 task 들 묶기 (예: "HR 임원 보고/결재기" 안에 보고·승인·확정 task)
+  - 각 task 의 `automation_level="Human"`
 
 ## 🔑 Senior AI 생성 여부 판단 (매우 중요)
 
@@ -6929,6 +6992,32 @@ Pain Points (수집된 raw 목소리):
           "bm_case_no": null,
           "bm_case_domain": null,
           "addressed_pain_task_ids": ["3.2.1.4", "3.2.1.5"]
+        }}
+      ]
+    }},
+    {{
+      "agent_id": "agent_2",
+      "agent_name": "HR 임원 보고기",
+      "agent_type": "Human",
+      "performer": "HR 임원",
+      "description": "As-Is 의 HR 임원 보고/검토 단계 — AI 가 생성한 보고자료를 검토 후 승인",
+      "automation_level": "Human",
+      "assigned_tasks": [
+        {{
+          "task_id": "1.5.2.2",
+          "task_name": "경영진 보고 및 확정",
+          "l4": "채용 계획 보고 및 확정",
+          "l3": "연간 채용계획 수립",
+          "ai_role": "",
+          "human_role": "Junior AI 가 생성한 보고자료를 검토 후 의견 첨부, 현업 임원에게 escalation",
+          "input_data": ["AI 생성 보고서 초안"],
+          "output_data": ["검토 의견·승인 결과"],
+          "automation_level": "Human",
+          "ai_technique": "",
+          "source_basis": "PainPoint",
+          "bm_case_no": null,
+          "bm_case_domain": null,
+          "addressed_pain_task_ids": []
         }}
       ]
     }}
