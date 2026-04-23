@@ -5471,24 +5471,55 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
                 "performer": str(ha.get("performer") or "HR 담당자").strip() or "HR 담당자",
             }
 
-    # ── 🔑 As-Is L5 x 정렬: Junior AI 가 대체하는 As-Is 는 같은 x 로 끌어올림 ──
-    # (좌→우 pipeline 흐름 유지 + 대체 관계 세로 정렬 시각화)
+    # ── 🔑 As-Is L5 x 정렬 + Junior AI 가 대체한 As-Is 노드 제거 (Smart Merge) ──
+    # 정책: To-Be Swim Lane 은 "최종 To-Be 상태" 만 표시.
+    #  · Junior AI 가 흡수한 As-Is task → 제거 (AI 가 대체했으므로 위 lane 에 중복 안 그림)
+    #  · Junior AI addressed_pain_task_ids 에 명시된 As-Is task → 제거 (NEW agent 가 해결)
+    #  · Junior AI 가 안 건드린 As-Is (Human 분류 / 외부 업체 / 의도적 유지) 만 잔존
     junior_by_taskid: dict[str, dict] = {}
+    junior_absorbed_task_ids: set[str] = set()  # Junior AI 가 가져간 As-Is task_id 전체
     for jn in ai_nodes_out:
         if jn["actor"] != "Junior AI":
             continue
-        # jn["id"] 에서 task_id 추출 (junior_agentid_taskid 형식)
-        # 또는 직접 매칭된 As-Is task_id 사용
-        for tid_key, asis_node in asis_by_task_id.items():
+        # 직접 매칭 (jn id 가 _{task_id} 로 끝남) → x 정렬용 + 흡수 set 등록
+        for tid_key in asis_by_task_id.keys():
             if jn["id"].endswith(f"_{tid_key}") or jn["id"].endswith(f"_{tid_key}_AI"):
                 junior_by_taskid[tid_key] = jn
+                junior_absorbed_task_ids.add(tid_key)
                 break
-    # 매칭된 As-Is 의 x 를 Junior AI 의 x 로 업데이트
+        # Junior AI 의 addressed_pain_task_ids (LLM 선언) → 그것도 흡수 처리
+        for _addr in (jn.get("addressed_pain_task_ids") or []):
+            if _addr in asis_by_task_id:
+                junior_absorbed_task_ids.add(_addr)
+    # 매칭된 As-Is 의 x 를 Junior AI 의 x 로 업데이트 (제거되기 전 마지막 정렬)
     for asis_n in asis_nodes_out:
         tid = asis_n.get("task_id")
         if tid and tid in junior_by_taskid:
             jx = junior_by_taskid[tid]["position"]["x"]
             asis_n["position"]["x"] = jx
+
+    # 🔑 Junior AI 가 흡수한 As-Is L5 노드는 ToBe 캔버스에서 제거 — As-Is/AI 중복 표시 방지
+    # 단, L5 가 아닌 상위 노드 (L2/L3/L4) 는 swim lane 컨텍스트로 유지
+    _absorbed_node_ids: set[str] = set()
+    if junior_absorbed_task_ids:
+        _kept = []
+        for n in asis_nodes_out:
+            n_tid = n.get("task_id")
+            n_lvl = (n.get("level") or "").upper()
+            if n_lvl == "L5" and n_tid in junior_absorbed_task_ids:
+                _absorbed_node_ids.add(n["id"])
+                continue   # 제거 — Junior AI 가 대체
+            _kept.append(n)
+        if _absorbed_node_ids:
+            print(f"[TOBE] Smart Merge — Junior AI 흡수로 제거된 As-Is L5: "
+                  f"{len(_absorbed_node_ids)}개 / 잔존 {len(_kept)}개", flush=True)
+        asis_nodes_out = _kept
+        # 제거된 노드를 source/target 으로 갖는 As-Is 엣지도 정리
+        asis_edges_out = [
+            e for e in asis_edges_out
+            if e.get("source") not in _absorbed_node_ids
+            and e.get("target") not in _absorbed_node_ids
+        ]
 
     # 매칭 안 된 As-Is (Human 분류 등) 는 원본 x 유지 — 하지만 Junior x 범위 내로 들어와야
     # pipeline 안에서 자연스럽게 섞임. 너무 멀리 떨어진 노드는 normalize.
