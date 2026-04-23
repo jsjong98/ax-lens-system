@@ -1,7 +1,9 @@
 "use client";
 
 import { Handle, Position, useReactFlow } from "@xyflow/react";
-import { memo, useState, useRef, useCallback } from "react";
+import { memo, Fragment, useState, useRef, useCallback } from "react";
+import { displayRole, extractCustomRole, hasCustomRole } from "@/lib/roleDisplay";
+import { getLaneAccent, getLaneAccentFromActors } from "@/lib/laneColors";
 
 /* ─────────────────────────────────────────────
  * 레벨별 차별화 디자인 시스템 (진한→연한 그라디언트)
@@ -83,12 +85,8 @@ interface NodeData {
   inputData?: string;
   outputData?: string;
   system?: string;
-  /* 벤치마킹 attribution — label 의 prefix 파트 (파란색 강조 렌더용) */
-  benchmark_source?: string;
-  /* Junior AI source_basis — sky-blue bar 텍스트 ("BM"/"PainPoint"/"Both"/"LLM") */
-  source_basis?: string;
-  bm_reference?: { case_no?: number; title?: string; domain?: string; companies?: string[] };
-  pain_point_reference?: { task_id?: string; task_name?: string; pain_categories?: string[] };
+  /** L5 가변 폭 — 기본 1, Senior AI 같은 오케스트레이터는 여러 컬럼 덮기 (예: colSpan=3) */
+  colSpan?: number;
   /* ── CSV-parsed systems (L5) ── */
   systems?: {
     hr: string;
@@ -98,35 +96,16 @@ interface NodeData {
     manual: string;
     etc: string;
   };
+  /* ── PwC Doosan custom fields ── */
+  /** 벤치마킹 attribution prefix — label 의 "{title} - {원본 task}" 중 prefix 부분 (파란색 강조 렌더용) */
+  benchmark_source?: string;
+  /** Junior AI source_basis — sky-blue bar 텍스트 ("BM"/"PainPoint"/"Both"/"LLM") */
+  source_basis?: string;
+  bm_reference?: { case_no?: number; title?: string; domain?: string; companies?: string[] };
+  pain_point_reference?: { task_id?: string; task_name?: string; pain_categories?: string[] };
 }
 
-/* 시스템 라벨 매핑 */
-const SYSTEM_TAGS: { key: keyof NonNullable<NodeData["systems"]>; label: string }[] = [
-  { key: "hr",        label: "HR시스템" },
-  { key: "groupware", label: "그룹웨어" },
-  { key: "office",    label: "오피스"   },
-  { key: "external",  label: "외부연동" },
-  { key: "manual",    label: "수작업"   },
-  { key: "etc",       label: "기타툴"   },
-];
-
-/* helper: 역할 문자열에서 '그 외:xxx' 또는 '기타:xxx' 부분 추출 (콤마 구분 지원)
-   hr-workflow-ai 규약: 값은 encodeURIComponent 로 저장되므로 표시 시 decode.
-   plain 한글 ("지주") 은 그대로, 인코딩된 값 ("%EC%A7%80%EC%A3%BC") 은 디코드. */
-function extractCustomRole(role?: string): string {
-  if (!role) return "";
-  const parts = role.split(",").map(r => r.trim());
-  const custom = parts.find(r => r.startsWith("그 외:") || r.startsWith("기타:"));
-  if (!custom) return "";
-  const raw = custom.startsWith("그 외:") ? custom.slice(4).trim() : custom.slice(3).trim();
-  try { return decodeURIComponent(raw); } catch { return raw; }
-}
-
-/** 역할 문자열이 '그 외' 또는 '기타' 본체(텍스트 없음) 또는 '그 외:xxx'를 포함하는지 */
-function hasCustomRole(role?: string): boolean {
-  if (!role) return false;
-  return role.split(",").map(r => r.trim()).some(r => r === "그 외" || r.startsWith("그 외:") || r === "기타" || r.startsWith("기타:"));
-}
+/* extractCustomRole / hasCustomRole / displayRole 은 @/lib/roleDisplay 참조 */
 
 /* helper: check if any metadata exists */
 function hasMeta(d: NodeData): boolean {
@@ -153,10 +132,33 @@ function getL5SystemName(data: NodeData): string {
 function L5NodeBase({ data, selected }: { data: NodeData; selected?: boolean }) {
   const s = LEVEL_STYLES.L5;
   const sysName = getL5SystemName(data);
+  // lane accent — role 우선, 비어있으면 CSV-파생 actors 사용 (캔버스엔 sheet 컨텍스트 없어서 y 기반은 불가)
+  const accent = getLaneAccent(data.role)
+    ?? getLaneAccentFromActors((data as unknown as { actors?: { exec?: string; hr?: string; teamlead?: string; member?: string } }).actors);
+  const upperStyle: React.CSSProperties = accent
+    ? { backgroundColor: `#${accent.bodyBg}`, border: `0.25pt solid #${accent.border}` }
+    : { border: '0.25pt solid #DEDEDE' };
+  // 컨테이너 테두리: selected > lane accent > 기본값
+  const containerClass = selected
+    ? 'border-[3px] border-blue-500 shadow-blue-300/60 shadow-lg'
+    : accent
+    ? 'border'
+    : 'border border-[#BFBFBF]';
+  // colSpan: 오케스트레이터 노드 가변 폭 (기본 1). 컬럼 피치 440px(Junior AI 간격과 동일) 기준.
+  const colSpan = Math.max(1, Math.round(data.colSpan || 1));
+  const L5_COL_PITCH = 440; // canvas px — Junior AI x 간격과 동일
+  const L5_BASE_W = 380;   // colSpan=1 일 때 현재 max-width 와 동일
+  const wideWidth = colSpan > 1 ? L5_BASE_W + (colSpan - 1) * L5_COL_PITCH : undefined;
+
+  const containerInlineStyle: React.CSSProperties = {
+    ...(wideWidth ? { width: wideWidth, minWidth: wideWidth, maxWidth: wideWidth } : {}),
+    ...(!selected && accent ? { borderColor: `#${accent.border}` } : {}),
+  };
 
   return (
     <div
-      className={`min-w-[300px] max-w-[380px] select-none relative shadow-md transition-all hover:shadow-lg rounded-sm ${selected ? 'border-[3px] border-blue-500 shadow-blue-300/60 shadow-lg' : 'border border-[#BFBFBF]'}`}
+      className={`${wideWidth ? '' : 'min-w-[300px] max-w-[380px]'} select-none relative shadow-md transition-all hover:shadow-lg rounded-sm ${containerClass}`}
+      style={containerInlineStyle}
     >
       {selected && <div className="absolute inset-0 bg-blue-400/10 pointer-events-none z-20 rounded-sm" />}
       {/* ── Target handles ── */}
@@ -171,7 +173,26 @@ function L5NodeBase({ data, selected }: { data: NodeData; selected?: boolean }) 
       <Handle type="source" position={Position.Left} id="left" className={`!w-5 !h-5 ${s.handleSource} !border-2 !border-white !-left-2.5 !z-10`} />
       <Handle type="source" position={Position.Right} id="right" className={`!w-5 !h-5 ${s.handleSource} !border-2 !border-white !-right-2.5 !z-10`} />
 
-      {/* ── source_basis bar (Junior AI 전용) — 위에 얹기, 노드 출처 표시 ── */}
+      {/* ── Column handles — colSpan>1 일 때 top/bottom 각 column 중앙에 자동 배치 ── */}
+      {/* Handle ID: top-c{i} / t-top-c{i} / bottom-c{i} / t-bottom-c{i} (i=0..colSpan-1) */}
+      {colSpan > 1 && Array.from({ length: colSpan }).map((_, i) => {
+        const leftStyle = { left: `${((i + 0.5) / colSpan) * 100}%` };
+        return (
+          <Fragment key={`col-handles-${i}`}>
+            <Handle type="target" position={Position.Top} id={`t-top-c${i}`} style={leftStyle}
+              className="!w-4 !h-4 !bg-transparent !border-0 !-top-2" />
+            <Handle type="source" position={Position.Top} id={`top-c${i}`} style={leftStyle}
+              className={`!w-4 !h-4 ${s.handleSource} !border-2 !border-white !-top-2 !z-10`} />
+            <Handle type="target" position={Position.Bottom} id={`t-bottom-c${i}`} style={leftStyle}
+              className="!w-4 !h-4 !bg-transparent !border-0 !-bottom-2" />
+            <Handle type="source" position={Position.Bottom} id={`bottom-c${i}`} style={leftStyle}
+              className={`!w-4 !h-4 ${s.handleSource} !border-2 !border-white !-bottom-2 !z-10`} />
+          </Fragment>
+        );
+      })}
+
+      {/* ── source_basis bar (Junior AI 전용) — 노드 출처 표시 ──
+          Backend 가 분류한 BM/PainPoint/Both/LLM 중 LLM 이 아니면 표시. */}
       {data.source_basis && data.source_basis !== "LLM" && (
         <div
           className="bg-sky-100 border border-sky-300 flex items-center justify-center"
@@ -202,14 +223,13 @@ function L5NodeBase({ data, selected }: { data: NodeData; selected?: boolean }) 
         </div>
       )}
 
-      {/* ── 위쪽 박스: ID + 레이블 (흰 배경, 0.25pt 테두리) ── */}
-      <div className="bg-white px-4 py-3 flex flex-col items-center justify-center" style={{ minHeight: 110, border: '0.25pt solid #DEDEDE' }}>
+      {/* ── 위쪽 박스: ID + 레이블 (lane accent 배경, 0.25pt 테두리) ── */}
+      <div className="px-4 py-3 flex flex-col items-center justify-center" style={{ minHeight: 110, ...upperStyle }}>
         <div className="text-[13px] font-bold text-black text-center leading-snug">
           {data.id || ""}
         </div>
         <div className="text-[13px] font-bold text-black text-center leading-snug mt-0.5">
-          {/* 벤치마킹 attribution prefix — 파란색으로 강조, 나머지는 검정
-              label 이 '{title} - {원본 task}' 형태일 때만 split 하여 렌더. */}
+          {/* 벤치마킹 attribution prefix — '{title} - {원본 task}' 형태이면 prefix 만 파란색 강조 */}
           {(() => {
             const bm = data.benchmark_source || "";
             const fullLabel = data.label || "";
@@ -241,7 +261,7 @@ function L5NodeBase({ data, selected }: { data: NodeData; selected?: boolean }) 
       {(data.memo || data.role || data.inputData || data.outputData || data.system) && (
         <div className="absolute top-1 left-1 flex items-center gap-1">
           {data.memo && <span className="text-[10px]" title="메모">📝</span>}
-          {data.role && !hasCustomRole(data.role) && <span className="text-[10px]" title={`수행: ${data.role}`}>👤</span>}
+          {data.role && !hasCustomRole(data.role) && <span className="text-[10px]" title={`수행: ${displayRole(data.role)}`}>👤</span>}
           {data.inputData && <span className="text-[10px]" title="Input">📥</span>}
           {data.outputData && <span className="text-[10px]" title="Output">📤</span>}
         </div>
@@ -338,7 +358,7 @@ function LevelNodeBase({ data, selected }: { data: NodeData; selected?: boolean 
         {metaPresent && (
           <div className="flex items-center gap-1.5">
             {data.memo && <span className="text-base" title="메모">📝</span>}
-            {data.role && <span className="text-base" title={`수행: ${data.role}`}>👤</span>}
+            {data.role && <span className="text-base" title={`수행: ${displayRole(data.role)}`}>👤</span>}
             {data.inputData && <span className="text-base" title="Input">📥</span>}
             {data.outputData && <span className="text-base" title="Output">📤</span>}
             {data.system && <span className="text-base" title={`시스템: ${data.system}`}>🖥️</span>}
@@ -367,7 +387,7 @@ function LevelNodeBase({ data, selected }: { data: NodeData; selected?: boolean 
             ? "bg-black/10 text-black/70"
             : "bg-white/20 text-white/90"
         }`}>
-          👤 {data.role}
+          👤 {displayRole(data.role)}
         </div>
       )}
 
