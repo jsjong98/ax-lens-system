@@ -22,9 +22,8 @@ export interface LaneAccent {
 const SENIOR_AI: LaneAccent = { bodyBg: "649EE2", border: "3A7BC8", text: "000000", accent: "1E5A9E" };
 /** AI 실행용 연한 블루 */
 const JUNIOR_AI: LaneAccent = { bodyBg: "98BEEC", border: "649EE2", text: "000000", accent: "3A7BC8" };
-/** 사람 역할 — 옅은 회색 계열 (상위/하위 2단계) */
-const HUMAN_UPPER: LaneAccent = { bodyBg: "FFFFFF", border: "94A3B8", text: "000000", accent: "64748B" };
-const HUMAN_LOWER: LaneAccent = { bodyBg: "F8FAFC", border: "CBD5E1", text: "000000", accent: "475569" };
+/** 사람 역할 공통 — HR 임원/HR 담당자/현업 임원/현업 팀장/현업 구성원/그 외 모두 동일 */
+const HUMAN: LaneAccent = { bodyBg: "FFFFFF", border: "94A3B8", text: "000000", accent: "64748B" };
 
 /** 정규화 매핑 — 소문자 기준, 동의어 포함 */
 const PALETTE: Record<string, LaneAccent> = {
@@ -34,18 +33,21 @@ const PALETTE: Record<string, LaneAccent> = {
   "junior ai": JUNIOR_AI,
   "junior": JUNIOR_AI,
   // HR 레인
-  "hr 임원": HUMAN_UPPER,
-  "hr 담당자": HUMAN_LOWER,
-  "hr": HUMAN_LOWER,
+  "hr 임원": HUMAN,
+  "hr 담당자": HUMAN,
+  "hr": HUMAN,
   // 현업 레인
-  "현업 임원": HUMAN_UPPER,
-  "현업 팀장": HUMAN_LOWER,
-  "현업 구성원": HUMAN_UPPER,
-  "현업": HUMAN_LOWER,
-  "임원": HUMAN_UPPER,
-  "임원 (=현업 임원)": HUMAN_UPPER,
-  "팀장": HUMAN_LOWER,
-  "구성원": HUMAN_UPPER,
+  "현업 임원": HUMAN,
+  "현업 팀장": HUMAN,
+  "현업 구성원": HUMAN,
+  "현업": HUMAN,
+  "임원": HUMAN,
+  "임원 (=현업 임원)": HUMAN,
+  "팀장": HUMAN,
+  "구성원": HUMAN,
+  // 그 외 lane (6분할 시트)
+  "그 외": HUMAN,
+  "기타": HUMAN,
 };
 
 /**
@@ -92,10 +94,7 @@ export function getLaneAccentFromActors(actors?: {
   member?: string;
 } | null): LaneAccent | null {
   if (!actors) return null;
-  if (actors.exec?.trim()) return HUMAN_UPPER;    // 임원
-  if (actors.hr?.trim()) return HUMAN_LOWER;      // HR
-  if (actors.teamlead?.trim()) return HUMAN_LOWER; // 팀장
-  if (actors.member?.trim()) return HUMAN_UPPER;  // 구성원
+  if (actors.exec?.trim() || actors.hr?.trim() || actors.teamlead?.trim() || actors.member?.trim()) return HUMAN;
   return null;
 }
 
