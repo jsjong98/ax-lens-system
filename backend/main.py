@@ -2678,6 +2678,8 @@ def _step1_system_prompt(process_name: str, task_summary: str, pain_summary: str
         output_format = f"""{{
   "blueprint_summary": "이 L4 Activity 기본 설계 요약 (3~5문장)",
   "process_name": "{process_name}",
+  "applied_bg_cases": [1, 5],
+  "applied_bg_cases_reason": "이 L4 의 task lifecycle 과 직접 관련된 Background BM case_no 만 선택한 근거 (1~2문장)",
   "benchmark_insights": [
     {{"source": "기업명", "insight": "구체적 사례", "application": "두산 적용 방안"}}
   ],
@@ -2720,6 +2722,8 @@ def _step1_system_prompt(process_name: str, task_summary: str, pain_summary: str
         output_format = f"""{{
   "blueprint_summary": "전체 기본 설계 요약 (3~5문장)",
   "process_name": "{process_name}",
+  "applied_bg_cases": [1, 2, 5],
+  "applied_bg_cases_reason": "이 프로세스 와 직접 관련된 Background BM case_no 만 선택한 근거 (1~2문장)",
   "benchmark_insights": [
     {{"source": "기업명", "insight": "구체적 사례", "application": "두산 적용 방안"}}
   ],
@@ -2759,6 +2763,13 @@ def _step1_system_prompt(process_name: str, task_summary: str, pain_summary: str
 - 아래 L5 Task 목록({process_name})이 설계의 기준입니다. 기존 Task는 최대한 유지하되, 필요 시 통합·세분화·추가·삭제를 제안할 수 있습니다.
 - `task_id`는 반드시 아래 Task 목록의 실제 ID를 사용하세요. 신규 추가 Task는 "NEW_xxx" 형식으로 표기하세요.
 - **Gap 분석 결과를 최우선으로 반영**: A.신규(도입), B.전환(AI 전환), C.폐기/통합(삭제/흡수) 방향을 설계에 직접 반영하세요.
+
+## ⚠️ Background BM 적용 가이드 (반드시 준수)
+- 아래 "Background BM — 도메인 사례 Title" 섹션에는 도메인 전체(예: 채용 라이프사이클 전체) 의 사례가 나열돼 있습니다.
+- **이 중 위 프로세스 ({process_name}) 의 task lifecycle 과 직접 관련된 case 만 선별해서 redesigned_process 에 적용**하세요.
+- 관련성이 약한 case (예: '사전 준비' L4 인데 '서류전형 Pre-screen', '면접 일정 자동 조율', '신규입사자 온보딩' 같은 다른 단계 case) 는 **redesigned_process 에 추가하지 마세요**. As-Is task 와 동일/유사한 단계의 case 만 유지·전환·통합 대상.
+- 적용할 case 의 case_no 를 출력의 `applied_bg_cases` 배열에 명시하고, 선택 근거를 `applied_bg_cases_reason` 에 1~2문장으로 작성하세요.
+- 이 가이드는 Background BM Title 섹션뿐 아니라 일반 "벤치마킹 결과" 항목에도 동일 적용 — As-Is task lifecycle 과 무관한 사례는 무시.
 
 ## ⚠️ 재설계 범위 (swim lane 기준)
 {redesign_scope_note}
@@ -2863,6 +2874,8 @@ def _save_step1_result(result_data: dict) -> dict:
         "blueprint_summary": result_data.get("blueprint_summary", ""),
         "process_name": result_data.get("process_name", ""),
         "l2_restructure": result_data.get("l2_restructure", ""),
+        "applied_bg_cases": result_data.get("applied_bg_cases", []),
+        "applied_bg_cases_reason": result_data.get("applied_bg_cases_reason", ""),
         "benchmark_insights": result_data.get("benchmark_insights", []),
         "redesigned_process": redesigned,
         "full_auto_count": full_auto,
@@ -3957,62 +3970,10 @@ async def generate_workflow_step1(request: Request):
     if process_name_override:
         process_name = process_name_override
 
-    # ── L4 scope 일 때 __background__ 행을 scoped tasks 와 keyword 매칭으로 한정 ──
-    # 시나리오: 사용자가 L4 BM 안 돌리고 Background BM 만으로 Step 1 실행 → 다른 L4 의
-    # Background BM 행이 LLM 컨텍스트에 그대로 흘러들어가 To-Be 가 라이프사이클 전체로 번지는 문제 방지
-    def _scope_bm_rows_to_tasks(rows: list) -> list:
-        """__background__ 행을 L3+L4+L5 결합 + 공백 무시 매칭으로 한정 (위 _scope_cases_to_tasks 와 동일 룰).
-
-        is_background=False (동적 BM) 는 사용자가 명시적으로 만든 결과라 그대로 유지.
-        """
-        if not step1_sheet_id or not scoped_tasks:
-            return rows
-
-        def _norm(s: str) -> str:
-            return (s or "").lower().replace(" ", "").replace("\t", "")
-        haystacks = [
-            _norm(f"{getattr(t, 'l3', '')} {getattr(t, 'l4', '')} {getattr(t, 'name', '')}")
-            for t in scoped_tasks
-        ]
-
-        # 도메인별로 cases 모듈 로드 후 keyword 매칭 → kept case_no set 구성
-        kept_case_nos: set = set()
-        for _mod_name in (
-            "recruit_benchmarks", "evaluation_benchmarks", "compensation_benchmarks",
-            "learning_benchmarks", "bp_benchmarks", "er_benchmarks",
-        ):
-            try:
-                _m = __import__(_mod_name)
-                _all = (
-                    getattr(_m, "RECRUIT_CASES", None)
-                    or getattr(_m, "EVALUATION_CASES", None)
-                    or getattr(_m, "COMPENSATION_CASES", None)
-                    or getattr(_m, "LEARNING_CASES", None)
-                    or getattr(_m, "BP_CASES", None)
-                    or getattr(_m, "ER_CASES", None)
-                    or []
-                )
-                for _c in _all:
-                    for _kw in _c.get("match_keywords", []):
-                        _kw_n = _norm(_kw)
-                        if _kw_n and any(_kw_n in hs for hs in haystacks):
-                            kept_case_nos.add(_c.get("case_no"))
-                            break
-            except Exception:
-                continue
-
-        out = []
-        for r in rows:
-            if r.get("is_background"):
-                if r.get("benchmark_case_no") in kept_case_nos:
-                    out.append(r)
-            else:
-                out.append(r)
-        return out
-
-    # 같은 스코프의 벤치마킹 결과만 사용
+    # 같은 스코프의 벤치마킹 결과만 사용 — 후보를 LLM 에게 모두 보여주고
+    # "이 L4 와 직접 관련된 case 만 적용" 이라는 instruction 으로 LLM 이 자체 판단 (system prompt 참조)
     if step1_sheet_id and step1_sheet_id in _wf_benchmark_table:
-        scoped_bm_rows = _scope_bm_rows_to_tasks(_wf_benchmark_table[step1_sheet_id])
+        scoped_bm_rows = _wf_benchmark_table[step1_sheet_id]
         benchmark_text = f"## 벤치마킹 결과 (시트: {step1_sheet_id}, {len(scoped_bm_rows)}건)\n"
         for bm in scoped_bm_rows[:10]:
             benchmark_text += (
@@ -4020,13 +3981,12 @@ async def generate_workflow_step1(request: Request):
                 f"{bm.get('use_case', '')} → {bm.get('outcome', '')}\n"
             )
     else:
-        # L3 전체 or fallback: 전체 시트 합산 — L4 scope 일 땐 __background__ 도 keyword 필터
+        # L3 전체 or fallback: 전체 시트 합산 (Background BM 포함)
         benchmark_text = f"## 벤치마킹 결과 (전체 {len(_wf_benchmark_table)}개 시트, 총 {len(all_bm_rows)}건)\n"
         for sheet_key, rows in _wf_benchmark_table.items():
-            scoped_rows = _scope_bm_rows_to_tasks(rows) if sheet_key == "__background__" else rows
-            if scoped_rows:
+            if rows:
                 benchmark_text += f"\n### 시트: {sheet_key}\n"
-                for bm in scoped_rows[:5]:
+                for bm in rows[:5]:
                     benchmark_text += (
                         f"- **{bm.get('source', '')}** ({bm.get('industry', '')}): "
                         f"{bm.get('use_case', '')} → {bm.get('outcome', '')}\n"
@@ -4036,47 +3996,18 @@ async def generate_workflow_step1(request: Request):
     # 1) Title 리스트: Task 이름 attribution 용 (LLM 이 Task 명명 시 참조)
     # 2) Player 개요: 선도사 접근 방식 참조
     # 3) 통합 시사점: 설계 방향성 가이드
-    # ── L4 scope 일 때 (step1_sheet_id 지정) — scoped tasks 와 keyword 매칭되는 case 만 노출
-    #    → LLM 이 다른 L4 lifecycle 까지 To-Be 설계하는 문제 방지
-    def _scope_cases_to_tasks(cases: list, mod) -> list:
-        """case.match_keywords 와 scoped_tasks 의 L3+L4+L5 결합 텍스트가 한 번이라도 매칭되면 keep.
-
-        - L5 task name 만 보면 너무 좁아 (예: "채용 수요 매핑" 은 "채용 전략" 키워드와 안 맞음)
-        - L4 Activity 명 + L3 Process 명까지 함께 비교 → "연간 인력계획 수립" 같은 상위 컨텍스트가
-          "인력 계획" 키워드와 매칭되어 case 가 살아남음
-        - 공백 무시 비교로 "인력 계획" ↔ "인력계획" 표기 차이도 흡수
-        """
-        if not step1_sheet_id or not scoped_tasks:
-            return cases  # L3 scope or scope 정보 없음 → 필터 미적용
-
-        def _norm(s: str) -> str:
-            return (s or "").lower().replace(" ", "").replace("\t", "")
-
-        # 각 scoped task 별 haystack: L3 + L4 + L5 결합 (정규화)
-        haystacks = [
-            _norm(f"{getattr(t, 'l3', '')} {getattr(t, 'l4', '')} {getattr(t, 'name', '')}")
-            for t in scoped_tasks
-        ]
-        matched_nos: set = set()
-        for c in cases:
-            for kw in c.get("match_keywords", []):
-                kw_n = _norm(kw)
-                if kw_n and any(kw_n in hs for hs in haystacks):
-                    matched_nos.add(c.get("case_no"))
-                    break
-        return [c for c in cases if c.get("case_no") in matched_nos]
-
+    # ── L4 scope 일 때 어떤 case 가 적용 가능한지는 LLM 이 system prompt 의 instruction 으로
+    #    자체 판단 — rule-based 사전 필터 없이 전체 candidate 를 LLM 에 노출
     _bg_domains_injected: list[str] = []
     # recruit 도메인 (채용 기획/운영 L2)
     try:
-        import recruit_benchmarks as _recruit_mod
         from recruit_benchmarks import (
             get_background_cases_for_tasks as _rc_cases,
             get_applicable_players_for_tasks as _rc_players,
             format_players_for_prompt as _rc_fmt_players,
             format_insights_for_prompt as _rc_fmt_insights,
         )
-        _cases = _scope_cases_to_tasks(_rc_cases(_wf_excel_tasks), _recruit_mod)
+        _cases = _rc_cases(_wf_excel_tasks)
         if _cases:
             benchmark_text += (
                 "\n## 📚 Background BM — 채용 도메인 사례 Title (Task 이름 attribution 용)\n"
@@ -4094,14 +4025,13 @@ async def generate_workflow_step1(request: Request):
 
     # evaluation 도메인 (평가/TM/DS/육성 L2)
     try:
-        import evaluation_benchmarks as _eval_mod
         from evaluation_benchmarks import (
             get_background_cases_for_tasks as _ev_cases,
             get_applicable_players_for_tasks as _ev_players,
             format_players_for_prompt as _ev_fmt_players,
             format_insights_for_prompt as _ev_fmt_insights,
         )
-        _cases = _scope_cases_to_tasks(_ev_cases(_wf_excel_tasks), _eval_mod)
+        _cases = _ev_cases(_wf_excel_tasks)
         if _cases:
             benchmark_text += (
                 "\n## 📚 Background BM — 평가 도메인 사례 Title (Task 이름 attribution 용)\n"
@@ -4119,14 +4049,13 @@ async def generate_workflow_step1(request: Request):
 
     # compensation 도메인 (보상/C&B L2)
     try:
-        import compensation_benchmarks as _comp_mod
         from compensation_benchmarks import (
             get_background_cases_for_tasks as _cp_cases,
             get_applicable_players_for_tasks as _cp_players,
             format_players_for_prompt as _cp_fmt_players,
             format_insights_for_prompt as _cp_fmt_insights,
         )
-        _cases = _scope_cases_to_tasks(_cp_cases(_wf_excel_tasks), _comp_mod)
+        _cases = _cp_cases(_wf_excel_tasks)
         if _cases:
             benchmark_text += (
                 "\n## 📚 Background BM — 보상 도메인 사례 Title (Task 이름 attribution 용)\n"
@@ -4144,14 +4073,13 @@ async def generate_workflow_step1(request: Request):
 
     # learning 도메인 (교육 기획/운영 L2)
     try:
-        import learning_benchmarks as _learn_mod
         from learning_benchmarks import (
             get_background_cases_for_tasks as _ln_cases,
             get_applicable_players_for_tasks as _ln_players,
             format_players_for_prompt as _ln_fmt_players,
             format_insights_for_prompt as _ln_fmt_insights,
         )
-        _cases = _scope_cases_to_tasks(_ln_cases(_wf_excel_tasks), _learn_mod)
+        _cases = _ln_cases(_wf_excel_tasks)
         if _cases:
             benchmark_text += (
                 "\n## 📚 Background BM — 교육 도메인 사례 Title (Task 이름 attribution 용)\n"
@@ -4169,14 +4097,13 @@ async def generate_workflow_step1(request: Request):
 
     # bp 도메인 (BP/복리후생 L2)
     try:
-        import bp_benchmarks as _bp_mod
         from bp_benchmarks import (
             get_background_cases_for_tasks as _bp_cases_step1,
             get_applicable_players_for_tasks as _bp_players,
             format_players_for_prompt as _bp_fmt_players,
             format_insights_for_prompt as _bp_fmt_insights,
         )
-        _cases = _scope_cases_to_tasks(_bp_cases_step1(_wf_excel_tasks), _bp_mod)
+        _cases = _bp_cases_step1(_wf_excel_tasks)
         if _cases:
             benchmark_text += (
                 "\n## 📚 Background BM — BP 도메인 사례 Title (Task 이름 attribution 용)\n"
@@ -4194,14 +4121,13 @@ async def generate_workflow_step1(request: Request):
 
     # er 도메인 (집단노사/준법지원 L2)
     try:
-        import er_benchmarks as _er_mod
         from er_benchmarks import (
             get_background_cases_for_tasks as _er_cases_step1,
             get_applicable_players_for_tasks as _er_players,
             format_players_for_prompt as _er_fmt_players,
             format_insights_for_prompt as _er_fmt_insights,
         )
-        _cases = _scope_cases_to_tasks(_er_cases_step1(_wf_excel_tasks), _er_mod)
+        _cases = _er_cases_step1(_wf_excel_tasks)
         if _cases:
             benchmark_text += (
                 "\n## 📚 Background BM — ER 도메인 사례 Title (Task 이름 attribution 용)\n"
