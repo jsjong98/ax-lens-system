@@ -5313,9 +5313,30 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
 
                 # 🔑 source_basis 분류 — BM/PainPoint/Both/LLM (Junior AI 전용)
                 # LevelNode 가 sky-blue bar 로 표시 (Benchmarking / Pain Point / Benchmarking · Pain Point)
+                # LLM 이 task 에 명시적으로 source_basis / addressed_pain_task_ids 를 적었으면 우선 사용 →
+                # NEW 신규 task 도 'PainPoint' 라벨이 정확히 붙음 (Process Innovation 모드 결과 가시화)
+                _llm_basis = (t.get("source_basis") or "").strip()
+                _llm_addressed = t.get("addressed_pain_task_ids") or []
                 _source_basis, _bm_ref, _pain_ref = _attribute_task_basis(
                     _orig_task_name, tid, _pain_index,
                 )
+                if _llm_basis in ("BM", "PainPoint", "Both", "LLM"):
+                    # LLM 선언이 더 풍부한 정보를 제공 — 우선 채택
+                    _source_basis = _llm_basis
+                    # addressed_pain_task_ids 가 있으면 첫 번째 As-Is task 의 pain_index 항목으로 pain_ref 보강
+                    if _llm_basis in ("PainPoint", "Both") and _llm_addressed and not _pain_ref:
+                        for _addr_id in _llm_addressed:
+                            if _addr_id in _pain_index:
+                                _ctx = _pain_index[_addr_id]
+                                _pain_ref = {
+                                    "task_id": _addr_id,
+                                    "task_name": _ctx.get("task_name", ""),
+                                    "pain_categories": [
+                                        p.get("type", "") for p in (_ctx.get("pain_points") or [])
+                                        if p.get("type")
+                                    ],
+                                }
+                                break
 
                 ai_nodes_out.append({
                     "id": jid,
@@ -6771,7 +6792,9 @@ Pain Points (수집된 raw 목소리):
           "input_data": ["지원서 PDF"],
           "output_data": ["구조화된 지원자 데이터"],
           "automation_level": "Full-Auto",
-          "ai_technique": "OCR, IDP, LLM 텍스트 추출"
+          "ai_technique": "OCR, IDP, LLM 텍스트 추출",
+          "source_basis": "BM",
+          "addressed_pain_task_ids": []
         }},
         {{
           "task_id": "Task ID 2",
@@ -6783,19 +6806,23 @@ Pain Points (수집된 raw 목소리):
           "input_data": ["구조화된 지원자 데이터", "JD 요건"],
           "output_data": ["적합도 등급, 사유"],
           "automation_level": "Human-in-Loop",
-          "ai_technique": "ML 분류모델, 임베딩 매칭, 설명가능 AI(SHAP)"
+          "ai_technique": "ML 분류모델, 임베딩 매칭, 설명가능 AI(SHAP)",
+          "source_basis": "Both",
+          "addressed_pain_task_ids": ["1.5.1.3"]
         }},
         {{
-          "task_id": "Task ID 3",
-          "task_name": "스크리닝 결과 알림",
-          "l4": "서류 전형",
-          "l3": "채용관리",
-          "ai_role": "합불 결과 지원자 자동 발송 및 내부 보고서 생성",
-          "human_role": "",
-          "input_data": ["적합도 등급"],
-          "output_data": ["합불 통보 메일, 스크리닝 보고서"],
-          "automation_level": "Full-Auto",
-          "ai_technique": "LLM 메일 생성, BI 리포트 자동화"
+          "task_id": "NEW_proactive_recommend",
+          "task_name": "선제적 휴가 추천",
+          "l4": "휴가 운영",
+          "l3": "근태관리",
+          "ai_role": "6개월 패턴·부서일정·가족정보 분석 → 휴가 시기·장소 선제 제안",
+          "human_role": "추천 검토 후 클릭 한 번으로 신청 진행",
+          "input_data": ["휴가 사용 패턴", "부서 일정"],
+          "output_data": ["개인화 휴가 추천 카드"],
+          "automation_level": "Human-on-the-Loop",
+          "ai_technique": "행동 패턴 분석, 협업 필터링, LLM 메시지 생성",
+          "source_basis": "PainPoint",
+          "addressed_pain_task_ids": ["3.2.1.4", "3.2.1.5"]
         }}
       ]
     }}
@@ -6825,6 +6852,26 @@ Pain Points (수집된 raw 목소리):
 - 신규 추가 Task 의 경우: 해당 L4 번호 뒤에 순번 (예: `"2.1.4.16"`, `"2.1.4.17"`)
   - L4 가 `2.1.4` 이고 기존 최대 L5 가 `2.1.4.15` 이면 신규는 `2.1.4.16` 부터
 - `"NEW_xxx"` 같은 임시 ID 지양 — 가능한 한 실제 L5 숫자 형식으로 작성
+
+## 🏷 task 별 source_basis 규칙 (Swim Lane sky-blue bar 표시)
+
+각 assigned_task 는 **설계 근거** 를 명시해야 합니다. 4가지 중 하나:
+- `"BM"` — 위 Background BM 사례 (예: 'Pre-screen', '온보딩 자동화') 패턴을 적용한 task
+- `"PainPoint"` — As-Is Pain Point cluster 분석에서 도출된 task (특히 Process Innovation 모드의 신규 Agent)
+- `"Both"` — BM 패턴 + Pain Point 양쪽 모두 근거
+- `"LLM"` — LLM 자체 reasoning 으로 도출 (BM/Pain 근거 약함)
+
+**판단 기준**:
+- 기존 As-Is task_id 그대로 + Pain Point 가 있는 task → 보통 `"PainPoint"` 또는 `"Both"`
+- 신규 task (NEW_xxx 또는 신규 L5 번호) 가 Pain Point cluster 해결 목적 → **반드시 `"PainPoint"`**
+- 신규 task 가 BM 사례 모방 → `"BM"`
+- 신규 task 가 BM + Pain 양쪽 → `"Both"`
+- 명확한 근거 없이 LLM 추론으로만 → `"LLM"`
+
+**`addressed_pain_task_ids`**: 이 task 가 해결하는 As-Is L5 task_id 목록 (배열).
+- Pain Point cluster 분석에서 어떤 As-Is task 의 Pain Point 를 해결했는지 명시
+- 예: 신규 '선제적 휴가 추천' 이 As-Is `3.2.1.4` ('휴가 신청서 작성') 와 `3.2.1.5` ('승인 요청') 의 Pain 을 동시에 해결 → `["3.2.1.4", "3.2.1.5"]`
+- BM-only task 면 빈 배열 `[]`
 
 ⚠️ **task별 ai_technique 필드 필수 규칙**
 
