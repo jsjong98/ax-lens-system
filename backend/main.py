@@ -2305,8 +2305,13 @@ def _build_mapped_asis_context(sheet_id: str = "") -> str:
     if sheet_id:
         matched_sheets = [s for s in parsed.sheets if s.sheet_id == sheet_id]
         if not matched_sheets:
-            print(f"[SCOPE⚠] _build_mapped_asis_context sheet_id='{sheet_id}' 매칭 없음! 전체 시트: {[s.sheet_id for s in parsed.sheets]}", flush=True)
-        target_sheets = matched_sheets if matched_sheets else parsed.sheets
+            # 🔑 silent all-sheets fallback 금지 (사용자가 의도한 L4 외에 다른 L4 가 섞이는 버그 원인)
+            raise HTTPException(
+                400,
+                f"sheet_id='{sheet_id}' 매칭 시트 없음. 사용 가능한 시트: "
+                f"{[s.sheet_id for s in parsed.sheets]}"
+            )
+        target_sheets = matched_sheets
     else:
         target_sheets = parsed.sheets
     print(f"[SCOPE] _build_mapped_asis_context sheet_id='{sheet_id}' → target_sheets={[s.sheet_id+'/'+s.name for s in target_sheets]}", flush=True)
@@ -2498,8 +2503,15 @@ def _build_task_and_pain_summary(sheet_id: str = "") -> tuple[str, str, str, lis
         if sheet_id:
             matched = [s for s in parsed.sheets if s.sheet_id == sheet_id]
             if not matched:
-                print(f"[SCOPE⚠] sheet_id='{sheet_id}' 매칭 시트 없음! 전체 시트 목록: {all_sheet_ids}", flush=True)
-            target_sheets = matched if matched else parsed.sheets  # fallback: 전체(L3)
+                # 🔑 매칭 실패 시 'all sheets' silent fallback 금지 — 다른 L4 가 섞여 redesign 되는 버그 원인
+                # 예: frontend 가 stale '__background__' 키를 sheet_id 로 보내면 10개 시트 다 들어가던 문제
+                # 명시적 에러로 frontend 가 올바른 sheet_id 를 보내도록 강제
+                raise HTTPException(
+                    400,
+                    f"sheet_id='{sheet_id}' 매칭 시트 없음. 사용 가능한 시트: {all_sheet_ids}. "
+                    f"As-Is 워크플로우 시트를 다시 선택해주세요."
+                )
+            target_sheets = matched
         else:
             target_sheets = parsed.sheets  # L3 전체: 모든 L4 시트 합산
 

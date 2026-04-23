@@ -268,9 +268,11 @@ export default function WorkflowPage() {
         if (r.benchmark_table && Object.keys(r.benchmark_table).length > 0) {
           setBenchmarkTableBySheet(r.benchmark_table);
           // 분석 스코프 복원: 가장 많은 결과를 가진 시트 ID
+          // __default__ (L3 전체) / __background__ (L2 큐레이션) 는 실제 시트 아님 → 제외
           const topSheet = Object.entries(r.benchmark_table)
+            .filter(([k]) => k !== "__default__" && k !== "__background__")
             .sort((a, b) => b[1].length - a[1].length)[0]?.[0];
-          if (topSheet && topSheet !== "__default__") setBmSheetId(topSheet);
+          if (topSheet) setBmSheetId(topSheet);
         }
         if (r.gap_analysis) {
           setGapAnalysis(r.gap_analysis);
@@ -489,13 +491,19 @@ export default function WorkflowPage() {
             if (r.has_step2 && r.step2) { setStep2Result(r.step2); setCurrentStep(3); }
             if (r.benchmark_table && Object.keys(r.benchmark_table).length > 0) {
               setBenchmarkTableBySheet(r.benchmark_table);
+              // __default__/__background__ 는 실제 시트가 아니므로 분석 스코프 후보에서 제외
               const topSheet2 = Object.entries(r.benchmark_table)
+                .filter(([k]) => k !== "__default__" && k !== "__background__")
                 .sort((a, b) => b[1].length - a[1].length)[0]?.[0];
-              if (topSheet2 && topSheet2 !== "__default__") setBmSheetId(topSheet2);
+              if (topSheet2) setBmSheetId(topSheet2);
             }
             if (r.gap_analysis) setGapAnalysis(r.gap_analysis);
           }
           if (sl.status === "fulfilled") setSessions(sl.value.sessions);
+          // Background BM 복원 (Excel L2 매칭 사례 title) — handleLoadSession 과 동일 처리
+          getBackgroundBenchmarks()
+            .then((ref) => setBackgroundBenchmarks(ref.references || []))
+            .catch(() => { /* 조용히 실패 */ });
         })
         .catch(() => {
           // 세션이 삭제됐거나 없는 경우 → 클리어 후 기존 방식 폴백
@@ -514,9 +522,11 @@ export default function WorkflowPage() {
           }
           if (r.benchmark_table && Object.keys(r.benchmark_table).length > 0) {
             setBenchmarkTableBySheet(r.benchmark_table);
+            // __default__/__background__ 는 실제 시트가 아니므로 분석 스코프 후보에서 제외
             const topSheet3 = Object.entries(r.benchmark_table)
+              .filter(([k]) => k !== "__default__" && k !== "__background__")
               .sort((a, b) => b[1].length - a[1].length)[0]?.[0];
-            if (topSheet3 && topSheet3 !== "__default__") setBmSheetId(topSheet3);
+            if (topSheet3) setBmSheetId(topSheet3);
           }
           if (r.gap_analysis) setGapAnalysis(r.gap_analysis);
           if (r.has_excel) {
@@ -534,6 +544,10 @@ export default function WorkflowPage() {
               .then((ws) => { setSummary(ws); if (ws.sheets.length > 0) setActiveSheet(ws.sheets[0].sheet_id); })
               .catch(() => {});
           }
+          // Background BM 복원 (백엔드 메모리에 Excel 이 살아있는 경우)
+          getBackgroundBenchmarks()
+            .then((ref) => setBackgroundBenchmarks(ref.references || []))
+            .catch(() => {});
         })
         .catch(() => {});
     }
@@ -607,6 +621,11 @@ export default function WorkflowPage() {
         setSummary(result);
         if (result.sheets.length > 0) setActiveSheet(result.sheets[0].sheet_id);
       }
+      // JSON 업로드 후에도 Background BM 동기화 — Excel L2 매칭 사례가 Step 1 즉시 표시되도록
+      try {
+        const ref = await getBackgroundBenchmarks();
+        setBackgroundBenchmarks(ref.references || []);
+      } catch { /* 조용히 실패 */ }
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -664,7 +683,7 @@ export default function WorkflowPage() {
     setError(null);
     try {
       // 우선순위: L4 dropdown 선택값 > BM 고정 시트 > As-Is 탭
-      const step1Sheet = (bmScope === "l4" ? l4SheetOverride : null) ?? bmSheetId ?? activeSheet;
+      const step1Sheet = (bmScope === "l4" ? (l4SheetOverride ?? activeSheet ?? bmSheetId) : null);
       const result = await generateWorkflowStep1({
         prompt: prompt || "선도사례를 분석하여 To-Be Workflow 기본 설계를 수행해주세요.",
         ...(step1Sheet ? { sheet_id: step1Sheet } : {}),
@@ -844,7 +863,7 @@ export default function WorkflowPage() {
     setError(null);
     try {
       // 우선순위: L4 dropdown 선택값 > BM 고정 시트 > As-Is 탭
-      const gapSheet = (bmScope === "l4" ? l4SheetOverride : null) ?? bmSheetId ?? activeSheet;
+      const gapSheet = (bmScope === "l4" ? (l4SheetOverride ?? activeSheet ?? bmSheetId) : null);
       const result = await generateGapAnalysis(gapSheet ?? undefined);
       setGapAnalysis(result);
     } catch (e) {
@@ -859,7 +878,7 @@ export default function WorkflowPage() {
     setTobeLoading(true);
     setError(null);
     try {
-      const tobeSheet = (bmScope === "l4" ? l4SheetOverride : null) ?? bmSheetId ?? activeSheet;
+      const tobeSheet = (bmScope === "l4" ? (l4SheetOverride ?? activeSheet ?? bmSheetId) : null);
       const result = await generateTobeFlow(tobeSheet ? { sheet_id: tobeSheet } : undefined);
       setTobeFlow(result);
       setTobeActiveSheet(0);
@@ -875,7 +894,7 @@ export default function WorkflowPage() {
     setLoading(true);
     setError(null);
     try {
-      const step2Sheet = (bmScope === "l4" ? l4SheetOverride : null) ?? bmSheetId ?? activeSheet;
+      const step2Sheet = (bmScope === "l4" ? (l4SheetOverride ?? activeSheet ?? bmSheetId) : null);
       const result = await generateWorkflowStep2({
         ...(step2Sheet ? { sheet_id: step2Sheet } : {}),
       });
@@ -890,7 +909,7 @@ export default function WorkflowPage() {
   const hasAsIs = summary || pptResult;
   const currentSheet = summary?.sheets.find((s) => s.sheet_id === activeSheet);
   // 분석 스코프 시트 — L4 dropdown > BM 고정 시트 > As-Is 탭 selection 우선순위
-  const _analysisSheetId = (bmScope === "l4" ? l4SheetOverride : null) ?? bmSheetId ?? activeSheet;
+  const _analysisSheetId = (bmScope === "l4" ? (l4SheetOverride ?? activeSheet ?? bmSheetId) : null);
   const analysisSheet = summary?.sheets.find((s) => s.sheet_id === _analysisSheetId);
   // 현재 시트의 벤치마킹 결과 (테이블 표시용) — bmSheetId 기준
   // L3 전체 scope면 "__default__" 키 fallback, 없으면 전체 시트 합산
