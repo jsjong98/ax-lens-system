@@ -42,7 +42,7 @@ RECRUIT_CASES: list[RecruitCase] = [
             "인력 계획", "충원 계획", "헤드카운트", "채용 전략",
             "내부 인재 육성", "내부 채용",
         ],
-        "applicable_l2": ["채용 기획"],
+        "applicable_l2": ["채용", "채용 기획"],
         "companies": ["IBM"],
     },
     {
@@ -52,7 +52,7 @@ RECRUIT_CASES: list[RecruitCase] = [
             "챗봇", "Chatbot", "chatbot", "문의 응대", "지원자 응대",
             "FAQ", "Q&A", "실시간 응대", "24/7",
         ],
-        "applicable_l2": ["채용 운영"],
+        "applicable_l2": ["채용", "채용 운영"],
         "companies": ["GM", "IBM"],
     },
     {
@@ -62,7 +62,7 @@ RECRUIT_CASES: list[RecruitCase] = [
             "공고 추천", "맞춤 공고", "맞춤형 공고",
             "직무 추천", "공고 매칭", "CV 분석",
         ],
-        "applicable_l2": ["채용 운영"],
+        "applicable_l2": ["채용", "채용 운영"],
         "companies": ["Siemens"],
     },
     {
@@ -73,7 +73,7 @@ RECRUIT_CASES: list[RecruitCase] = [
             "후보자 매칭", "지원자-직무 매칭", "우선순위 라우팅", "우선순위",
             "후보자 선별", "후보 리스트",
         ],
-        "applicable_l2": ["채용 운영"],
+        "applicable_l2": ["채용", "채용 운영"],
         "companies": ["Siemens", "IBM"],
     },
     {
@@ -86,7 +86,7 @@ RECRUIT_CASES: list[RecruitCase] = [
             "자격 요건", "자격요건 검증", "지원자격 검토",
             "서류 자동 필터링",
         ],
-        "applicable_l2": ["채용 운영"],
+        "applicable_l2": ["채용", "채용 운영"],
         "companies": ["GM", "IBM"],
     },
     {
@@ -97,7 +97,7 @@ RECRUIT_CASES: list[RecruitCase] = [
             "캘린더", "스케줄링", "Scheduling", "scheduling",
             "일정 자동", "일정 제안", "일정 확정",
         ],
-        "applicable_l2": ["채용 운영"],
+        "applicable_l2": ["채용", "채용 운영"],
         "companies": ["GM"],
     },
     {
@@ -108,7 +108,7 @@ RECRUIT_CASES: list[RecruitCase] = [
             "입사 안내", "입사 준비", "신규입사자",
             "계정 생성", "입사서류", "입사 Workflow",
         ],
-        "applicable_l2": ["채용 운영"],
+        "applicable_l2": ["채용", "채용 운영"],
         "companies": ["IBM"],
     },
 ]

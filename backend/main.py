@@ -2510,6 +2510,8 @@ def _build_task_and_pain_summary(sheet_id: str = "") -> tuple[str, str, str]:
         # (L4 노드 task_id를 쓰면 다른 시트 태스크가 오염됨)
         json_tids: set[str] = set()
         json_l4_ids: set[str] = set()
+        # L5 라벨도 함께 수집 — task_id 가 None 인 JSON (수동 export, 구버전) 대응 폴백
+        json_l5_labels: set[str] = set()
         for s in target_sheets:
             l5_only = [n for n in s.nodes.values() if n.level == "L5"]
             source_nodes = l5_only if l5_only else s.nodes.values()  # L5 없으면 전체 fallback
@@ -2521,6 +2523,8 @@ def _build_task_and_pain_summary(sheet_id: str = "") -> tuple[str, str, str]:
                         json_l4_ids.add(".".join(parts[:3]))  # x.y.z = L4
                     if len(parts) >= 2:
                         json_l3_ids.add(".".join(parts[:2]))  # x.y = L3
+                if n.level == "L5" and n.label:
+                    json_l5_labels.add(n.label.strip())
 
         print(f"[SCOPE] json_tids={sorted(json_tids)[:10]} json_l4_ids={sorted(json_l4_ids)}", flush=True)
 
@@ -2567,6 +2571,24 @@ def _build_task_and_pain_summary(sheet_id: str = "") -> tuple[str, str, str]:
         if not filtered:
             filtered = [t for t in _wf_excel_tasks if t.l3_id in json_l3_ids]
             print(f"[SCOPE] 3순위(l3_id) matched={len(filtered)}건 — L3 전체 fallback!", flush=True)
+        if not filtered and json_l5_labels:
+            # 4순위: L5 라벨(=Task 이름) 매칭 — JSON 의 task_id 가 모두 비어있는 경우 (수동 export 등)
+            # JSON 노드 라벨은 To-Be 명칭이라 As-Is L5 와 정확히 일치하지 않을 수 있어
+            # 양방향 부분 일치 (label ⊂ name, name ⊂ label) 까지 허용
+            def _label_matches(name: str) -> bool:
+                n = (name or "").strip()
+                if not n:
+                    return False
+                if n in json_l5_labels:
+                    return True
+                for lbl in json_l5_labels:
+                    if not lbl:
+                        continue
+                    if lbl in n or n in lbl:
+                        return True
+                return False
+            filtered = [t for t in _wf_excel_tasks if _label_matches(t.name)]
+            print(f"[SCOPE] 4순위(L5 라벨) matched={len(filtered)}건 (JSON 라벨 {len(json_l5_labels)}개): {[t.name for t in filtered[:5]]}", flush=True)
         if filtered:
             relevant_tasks = filtered
 
