@@ -2479,7 +2479,7 @@ def _build_mapped_asis_context(sheet_id: str = "") -> str:
     return "\n".join(lines)
 
 
-def _build_task_and_pain_summary(sheet_id: str = "") -> tuple[str, str, str]:
+def _build_task_and_pain_summary(sheet_id: str = "") -> tuple[str, str, str, list]:
     """엑셀 Task 데이터로 task_summary, pain_summary, process_name을 만든다.
     구조: JSON/PPT 파일 1개 = L3, 파일 안의 시트 1개 = L4
     계층: L2=x, L3=x.y, L4=x.y.z, L5=x.y.z.w (L1 없음)
@@ -2649,6 +2649,7 @@ def _build_task_and_pain_summary(sheet_id: str = "") -> tuple[str, str, str]:
         process_name,
         "\n".join(task_lines),
         "\n".join(pain_lines) if pain_lines else "Pain Point 정보 없음",
+        list(relevant_tasks),
     )
 
 
@@ -3212,7 +3213,7 @@ async def benchmark_workflow_step1(request: Request):
     scope = body.get("scope", "l4")  # "l3" = 전체 시트, "l4" = 현재 시트만
     sheet_id_bm = body.get("sheet_id", "") if scope != "l3" else ""
 
-    process_name, task_summary, pain_summary = _build_task_and_pain_summary(sheet_id_bm)
+    process_name, task_summary, pain_summary, _ = _build_task_and_pain_summary(sheet_id_bm)
 
     # ── 공통 인덱스 + L4/L3/L2 세부 정보 구축 ───────────────────────────────
     _, excel_by_l4, excel_by_l3, excel_by_l2 = _build_excel_index()
@@ -3734,7 +3735,7 @@ async def generate_gap_analysis(request: Request):
     if not all_bm_rows:
         raise HTTPException(400, "벤치마킹을 먼저 수행해주세요.")
 
-    process_name, task_summary, pain_summary = _build_task_and_pain_summary(gap_sheet_id)
+    process_name, task_summary, pain_summary, _ = _build_task_and_pain_summary(gap_sheet_id)
     asis_context = _build_mapped_asis_context(gap_sheet_id)
 
     # 벤치마킹 요약 (선도사 To-Be)
@@ -3952,13 +3953,44 @@ async def generate_workflow_step1(request: Request):
 
     # 벤치마킹과 동일한 스코프로 컨텍스트 구성
     # sheet_id 있으면 L4 단위, 없으면 L3 전체
-    process_name, task_summary, pain_summary = _build_task_and_pain_summary(step1_sheet_id)
+    process_name, task_summary, pain_summary, scoped_tasks = _build_task_and_pain_summary(step1_sheet_id)
     if process_name_override:
         process_name = process_name_override
 
+    # ── L4 scope 일 때 __background__ 행을 scoped tasks 와 keyword 매칭으로 한정 ──
+    # 시나리오: 사용자가 L4 BM 안 돌리고 Background BM 만으로 Step 1 실행 → 다른 L4 의
+    # Background BM 행이 LLM 컨텍스트에 그대로 흘러들어가 To-Be 가 라이프사이클 전체로 번지는 문제 방지
+    def _scope_bm_rows_to_tasks(rows: list) -> list:
+        if not step1_sheet_id or not scoped_tasks:
+            return rows
+        # 도메인별 keyword 매칭 — scoped task 와 매칭되는 case_no 만 keep
+        kept_case_nos: set = set()
+        for _mod_name in (
+            "recruit_benchmarks", "evaluation_benchmarks", "compensation_benchmarks",
+            "learning_benchmarks", "bp_benchmarks", "er_benchmarks",
+        ):
+            try:
+                _m = __import__(_mod_name)
+                for _t in scoped_tasks:
+                    _c = _m.match_benchmark_for_task(_t.name)
+                    if _c:
+                        kept_case_nos.add(_c.get("case_no"))
+            except Exception:
+                continue
+        # is_background=False 인 동적 BM 행은 그대로 유지 (사용자가 명시적으로 만든 결과)
+        # is_background=True 행만 scoped case_nos 로 필터
+        out = []
+        for r in rows:
+            if r.get("is_background"):
+                if r.get("benchmark_case_no") in kept_case_nos:
+                    out.append(r)
+            else:
+                out.append(r)
+        return out
+
     # 같은 스코프의 벤치마킹 결과만 사용
     if step1_sheet_id and step1_sheet_id in _wf_benchmark_table:
-        scoped_bm_rows = _wf_benchmark_table[step1_sheet_id]
+        scoped_bm_rows = _scope_bm_rows_to_tasks(_wf_benchmark_table[step1_sheet_id])
         benchmark_text = f"## 벤치마킹 결과 (시트: {step1_sheet_id}, {len(scoped_bm_rows)}건)\n"
         for bm in scoped_bm_rows[:10]:
             benchmark_text += (
@@ -3966,12 +3998,13 @@ async def generate_workflow_step1(request: Request):
                 f"{bm.get('use_case', '')} → {bm.get('outcome', '')}\n"
             )
     else:
-        # L3 전체 or fallback: 전체 시트 합산
+        # L3 전체 or fallback: 전체 시트 합산 — L4 scope 일 땐 __background__ 도 keyword 필터
         benchmark_text = f"## 벤치마킹 결과 (전체 {len(_wf_benchmark_table)}개 시트, 총 {len(all_bm_rows)}건)\n"
         for sheet_key, rows in _wf_benchmark_table.items():
-            if rows:
+            scoped_rows = _scope_bm_rows_to_tasks(rows) if sheet_key == "__background__" else rows
+            if scoped_rows:
                 benchmark_text += f"\n### 시트: {sheet_key}\n"
-                for bm in rows[:5]:
+                for bm in scoped_rows[:5]:
                     benchmark_text += (
                         f"- **{bm.get('source', '')}** ({bm.get('industry', '')}): "
                         f"{bm.get('use_case', '')} → {bm.get('outcome', '')}\n"
@@ -3981,16 +4014,30 @@ async def generate_workflow_step1(request: Request):
     # 1) Title 리스트: Task 이름 attribution 용 (LLM 이 Task 명명 시 참조)
     # 2) Player 개요: 선도사 접근 방식 참조
     # 3) 통합 시사점: 설계 방향성 가이드
+    # ── L4 scope 일 때 (step1_sheet_id 지정) — scoped tasks 와 keyword 매칭되는 case 만 노출
+    #    → LLM 이 다른 L4 lifecycle 까지 To-Be 설계하는 문제 방지
+    def _scope_cases_to_tasks(cases: list, mod) -> list:
+        """case.match_keywords 가 scoped_tasks 의 task name 과 한 번이라도 매칭되면 keep."""
+        if not step1_sheet_id or not scoped_tasks:
+            return cases  # L3 scope or scope 정보 없음 → 필터 미적용
+        matched_nos: set = set()
+        for t in scoped_tasks:
+            c = mod.match_benchmark_for_task(t.name)
+            if c:
+                matched_nos.add(c.get("case_no"))
+        return [c for c in cases if c.get("case_no") in matched_nos]
+
     _bg_domains_injected: list[str] = []
     # recruit 도메인 (채용 기획/운영 L2)
     try:
+        import recruit_benchmarks as _recruit_mod
         from recruit_benchmarks import (
             get_background_cases_for_tasks as _rc_cases,
             get_applicable_players_for_tasks as _rc_players,
             format_players_for_prompt as _rc_fmt_players,
             format_insights_for_prompt as _rc_fmt_insights,
         )
-        _cases = _rc_cases(_wf_excel_tasks)
+        _cases = _scope_cases_to_tasks(_rc_cases(_wf_excel_tasks), _recruit_mod)
         if _cases:
             benchmark_text += (
                 "\n## 📚 Background BM — 채용 도메인 사례 Title (Task 이름 attribution 용)\n"
@@ -4008,13 +4055,14 @@ async def generate_workflow_step1(request: Request):
 
     # evaluation 도메인 (평가/TM/DS/육성 L2)
     try:
+        import evaluation_benchmarks as _eval_mod
         from evaluation_benchmarks import (
             get_background_cases_for_tasks as _ev_cases,
             get_applicable_players_for_tasks as _ev_players,
             format_players_for_prompt as _ev_fmt_players,
             format_insights_for_prompt as _ev_fmt_insights,
         )
-        _cases = _ev_cases(_wf_excel_tasks)
+        _cases = _scope_cases_to_tasks(_ev_cases(_wf_excel_tasks), _eval_mod)
         if _cases:
             benchmark_text += (
                 "\n## 📚 Background BM — 평가 도메인 사례 Title (Task 이름 attribution 용)\n"
@@ -4032,13 +4080,14 @@ async def generate_workflow_step1(request: Request):
 
     # compensation 도메인 (보상/C&B L2)
     try:
+        import compensation_benchmarks as _comp_mod
         from compensation_benchmarks import (
             get_background_cases_for_tasks as _cp_cases,
             get_applicable_players_for_tasks as _cp_players,
             format_players_for_prompt as _cp_fmt_players,
             format_insights_for_prompt as _cp_fmt_insights,
         )
-        _cases = _cp_cases(_wf_excel_tasks)
+        _cases = _scope_cases_to_tasks(_cp_cases(_wf_excel_tasks), _comp_mod)
         if _cases:
             benchmark_text += (
                 "\n## 📚 Background BM — 보상 도메인 사례 Title (Task 이름 attribution 용)\n"
@@ -4056,13 +4105,14 @@ async def generate_workflow_step1(request: Request):
 
     # learning 도메인 (교육 기획/운영 L2)
     try:
+        import learning_benchmarks as _learn_mod
         from learning_benchmarks import (
             get_background_cases_for_tasks as _ln_cases,
             get_applicable_players_for_tasks as _ln_players,
             format_players_for_prompt as _ln_fmt_players,
             format_insights_for_prompt as _ln_fmt_insights,
         )
-        _cases = _ln_cases(_wf_excel_tasks)
+        _cases = _scope_cases_to_tasks(_ln_cases(_wf_excel_tasks), _learn_mod)
         if _cases:
             benchmark_text += (
                 "\n## 📚 Background BM — 교육 도메인 사례 Title (Task 이름 attribution 용)\n"
@@ -4080,13 +4130,14 @@ async def generate_workflow_step1(request: Request):
 
     # bp 도메인 (BP/복리후생 L2)
     try:
+        import bp_benchmarks as _bp_mod
         from bp_benchmarks import (
             get_background_cases_for_tasks as _bp_cases_step1,
             get_applicable_players_for_tasks as _bp_players,
             format_players_for_prompt as _bp_fmt_players,
             format_insights_for_prompt as _bp_fmt_insights,
         )
-        _cases = _bp_cases_step1(_wf_excel_tasks)
+        _cases = _scope_cases_to_tasks(_bp_cases_step1(_wf_excel_tasks), _bp_mod)
         if _cases:
             benchmark_text += (
                 "\n## 📚 Background BM — BP 도메인 사례 Title (Task 이름 attribution 용)\n"
@@ -4104,13 +4155,14 @@ async def generate_workflow_step1(request: Request):
 
     # er 도메인 (집단노사/준법지원 L2)
     try:
+        import er_benchmarks as _er_mod
         from er_benchmarks import (
             get_background_cases_for_tasks as _er_cases_step1,
             get_applicable_players_for_tasks as _er_players,
             format_players_for_prompt as _er_fmt_players,
             format_insights_for_prompt as _er_fmt_insights,
         )
-        _cases = _er_cases_step1(_wf_excel_tasks)
+        _cases = _scope_cases_to_tasks(_er_cases_step1(_wf_excel_tasks), _er_mod)
         if _cases:
             benchmark_text += (
                 "\n## 📚 Background BM — ER 도메인 사례 Title (Task 이름 attribution 용)\n"
@@ -6016,7 +6068,7 @@ async def chat_workflow_step1(request: Request):
         raise HTTPException(400, "메시지가 필요합니다.")
 
     # 채팅도 L3 전체 기준 (JSON의 모든 시트 합산)
-    process_name, task_summary, pain_summary = _build_task_and_pain_summary("")
+    process_name, task_summary, pain_summary, _ = _build_task_and_pain_summary("")
 
     # 메시지에서 기업명 감지 → 추가 쿼리에 포함
     import re as _re
@@ -6049,7 +6101,7 @@ async def chat_workflow_step1(request: Request):
         companies = list(set(company_pattern)) if company_pattern else []
 
         # JSON 전체 시트 기준 L4 ID 수집
-        _, task_sum_txt, _ = _build_task_and_pain_summary("")
+        _, task_sum_txt, _, _ = _build_task_and_pain_summary("")
         _, excel_by_l4, excel_by_l3, excel_by_l2 = _build_excel_index()
 
         scoped_l4_ids: set[str] = set()
@@ -6417,9 +6469,9 @@ async def generate_workflow_step2(request: Request):
 
     # 상세 설계 스코프: sheet_id 있으면 해당 L4만, 없으면 JSON 전체(L3)
     # (스코프를 먼저 계산해서, hybrid 분리를 스코프 내 태스크로만 한정 → 속도 대폭 향상)
-    scoped_tasks_step2, _, _ = _build_task_and_pain_summary(step2_sheet_id or "")
-    # _build_task_and_pain_summary가 relevant_tasks를 반환하지 않으므로 직접 구성
-    scoped_tasks_step2 = _wf_excel_tasks  # 기본: 전체
+    _, _, _, scoped_tasks_step2 = _build_task_and_pain_summary(step2_sheet_id or "")
+    if not scoped_tasks_step2:
+        scoped_tasks_step2 = _wf_excel_tasks  # 폴백
     if "parsed" in _workflow_cache:
         _p2 = _workflow_cache["parsed"]
         if step2_sheet_id:
