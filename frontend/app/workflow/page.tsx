@@ -124,6 +124,9 @@ export default function WorkflowPage() {
 
   // L3/L4 스코프 선택
   const [bmScope, setBmScope] = useState<"l3" | "l4">("l4");
+  // L4 단위 분석 시 사용자가 명시적으로 선택한 시트 ID (As-Is 탭 selection 과 분리)
+  // null 이면 activeSheet 를 fallback 으로 사용
+  const [l4SheetOverride, setL4SheetOverride] = useState<string | null>(null);
 
   // 멀티 세션
   const [sessions, setSessions] = useState<WorkflowSession[]>([]);
@@ -621,13 +624,15 @@ export default function WorkflowPage() {
     const loadingMsg = `벤치마킹 수행 중...${companies ? ` (기업: ${companies})` : " (Big Tech / Industry 선도사)"}`;
     setChatMessages((prev) => [...prev, { role: "system", content: loadingMsg }]);
 
+    // L4 dropdown 선택값 우선 → 없으면 As-Is 탭 (activeSheet) fallback
+    const scopedSheetId = bmScope === "l4" ? (l4SheetOverride ?? activeSheet) : null;
     benchmarkWorkflowStep1Stream(
-      { companies, sheet_id: activeSheet ?? undefined, scope: bmScope },
+      { companies, sheet_id: scopedSheetId ?? undefined, scope: bmScope },
       (event) => {
         setBmProgressLog((prev) => [...prev, event]);
       },
       (result) => {
-        const sheetKey = result.sheet_id ?? activeSheet ?? "__default__";
+        const sheetKey = result.sheet_id ?? scopedSheetId ?? activeSheet ?? "__default__";
         setBenchmarkTableBySheet((prev) => ({ ...prev, [sheetKey]: result.benchmark_table }));
         // 벤치마킹 완료 시 분석 스코프 고정
         // - L4 단위: 해당 시트 ID로 고정 → Gap/기본설계가 그 L4 기준으로 실행
@@ -651,15 +656,15 @@ export default function WorkflowPage() {
         setBmLoading(false);
       }
     );
-  }, [activeSheet, bmScope]);
+  }, [activeSheet, bmScope, l4SheetOverride]);
 
   /* ── Step 2: Step 1 기본 설계 생성 + 채팅 ──────────────── */
   const handleGenerateStep1 = useCallback(async (prompt?: string) => {
     setLoading(true);
     setError(null);
     try {
-      // bmSheetId 우선: 벤치마킹 완료된 시트가 분석 스코프
-      const step1Sheet = bmSheetId ?? activeSheet;
+      // 우선순위: L4 dropdown 선택값 > BM 고정 시트 > As-Is 탭
+      const step1Sheet = (bmScope === "l4" ? l4SheetOverride : null) ?? bmSheetId ?? activeSheet;
       const result = await generateWorkflowStep1({
         prompt: prompt || "선도사례를 분석하여 To-Be Workflow 기본 설계를 수행해주세요.",
         ...(step1Sheet ? { sheet_id: step1Sheet } : {}),
@@ -675,7 +680,7 @@ export default function WorkflowPage() {
     } finally {
       setLoading(false);
     }
-  }, [bmSheetId, activeSheet]);
+  }, [bmSheetId, activeSheet, bmScope, l4SheetOverride]);
 
   /* ── 사용자 리소스 핸들러 ──────────────────────────────────── */
 
@@ -838,22 +843,23 @@ export default function WorkflowPage() {
     setGapLoading(true);
     setError(null);
     try {
-      // bmSheetId 우선: 벤치마킹 완료된 시트가 분석 스코프
-      const result = await generateGapAnalysis(bmSheetId ?? activeSheet ?? undefined);
+      // 우선순위: L4 dropdown 선택값 > BM 고정 시트 > As-Is 탭
+      const gapSheet = (bmScope === "l4" ? l4SheetOverride : null) ?? bmSheetId ?? activeSheet;
+      const result = await generateGapAnalysis(gapSheet ?? undefined);
       setGapAnalysis(result);
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setGapLoading(false);
     }
-  }, [bmSheetId, activeSheet]);
+  }, [bmSheetId, activeSheet, bmScope, l4SheetOverride]);
 
   /* ── To-Be Swim Lane 생성 ───────────────────────────────── */
   const handleGenerateTobeFlow = useCallback(async () => {
     setTobeLoading(true);
     setError(null);
     try {
-      const tobeSheet = bmSheetId ?? activeSheet;
+      const tobeSheet = (bmScope === "l4" ? l4SheetOverride : null) ?? bmSheetId ?? activeSheet;
       const result = await generateTobeFlow(tobeSheet ? { sheet_id: tobeSheet } : undefined);
       setTobeFlow(result);
       setTobeActiveSheet(0);
@@ -862,14 +868,14 @@ export default function WorkflowPage() {
     } finally {
       setTobeLoading(false);
     }
-  }, [bmSheetId, activeSheet]);
+  }, [bmSheetId, activeSheet, bmScope, l4SheetOverride]);
 
   /* ── Step 3: Step 2 상세 설계 생성 ──────────────────────── */
   const handleGenerateStep2 = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const step2Sheet = bmSheetId ?? activeSheet;
+      const step2Sheet = (bmScope === "l4" ? l4SheetOverride : null) ?? bmSheetId ?? activeSheet;
       const result = await generateWorkflowStep2({
         ...(step2Sheet ? { sheet_id: step2Sheet } : {}),
       });
@@ -879,12 +885,13 @@ export default function WorkflowPage() {
     } finally {
       setLoading(false);
     }
-  }, [bmSheetId, activeSheet]);
+  }, [bmSheetId, activeSheet, bmScope, l4SheetOverride]);
 
   const hasAsIs = summary || pptResult;
   const currentSheet = summary?.sheets.find((s) => s.sheet_id === activeSheet);
-  // 분석 스코프 시트 (벤치마킹 완료 시트 → Gap/기본설계 고정 스코프)
-  const analysisSheet = summary?.sheets.find((s) => s.sheet_id === bmSheetId);
+  // 분석 스코프 시트 — L4 dropdown > BM 고정 시트 > As-Is 탭 selection 우선순위
+  const _analysisSheetId = (bmScope === "l4" ? l4SheetOverride : null) ?? bmSheetId ?? activeSheet;
+  const analysisSheet = summary?.sheets.find((s) => s.sheet_id === _analysisSheetId);
   // 현재 시트의 벤치마킹 결과 (테이블 표시용) — bmSheetId 기준
   // L3 전체 scope면 "__default__" 키 fallback, 없으면 전체 시트 합산
   const benchmarkTableRaw = bmSheetId
@@ -1636,17 +1643,17 @@ export default function WorkflowPage() {
               </div>
               {/* 분석 범위 배지 — bmSheetId 고정 시 표시 */}
               {analysisSheet && (
-                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-50 border border-blue-200 text-xs text-blue-700 font-semibold shrink-0" title="벤치마킹이 완료된 시트 — Gap 분석·기본 설계의 고정 분석 범위">
-                  <span className="w-1.5 h-1.5 rounded-full bg-blue-500 inline-block" />
+                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-50 border border-blue-200 text-xs text-blue-700 font-semibold shrink-0" title={bmSheetId ? "벤치마킹이 완료된 시트 — Gap 분석·기본 설계의 고정 분석 범위" : "현재 선택된 분석 범위 (BM 미실행 시 dropdown / 탭 selection 기준)"}>
+                  <span className={`w-1.5 h-1.5 rounded-full inline-block ${bmSheetId ? "bg-blue-500" : "bg-gray-400"}`} />
                   분석 범위: {analysisSheet.sheet_name || analysisSheet.sheet_id}
                 </div>
               )}
-              {/* 버튼 그룹 — 스코프 토글 · 벤치마킹 · 기본 설계 생성 */}
+              {/* 버튼 그룹 — 스코프 토글 · 시트 선택 · 벤치마킹 · 기본 설계 생성 */}
               <div className="flex items-center gap-2 flex-shrink-0 ml-4">
                 {/* L3/L4 스코프 토글 */}
                 <div
                   className="flex items-center rounded-lg border border-gray-200 bg-gray-100 p-0.5"
-                  title="L3: JSON 파일 전체 프로세스 | L4: 현재 탭 하나"
+                  title="L3: JSON 파일 전체 프로세스 | L4: 아래 dropdown 에서 선택한 시트"
                 >
                   <button
                     onClick={() => setBmScope("l3")}
@@ -1665,6 +1672,22 @@ export default function WorkflowPage() {
                     L4 단위
                   </button>
                 </div>
+                {/* L4 단위 선택 시 — 시트 dropdown (As-Is JSON 의 시트 목록) */}
+                {bmScope === "l4" && summary && summary.sheets.length > 0 && (
+                  <select
+                    value={l4SheetOverride ?? activeSheet ?? ""}
+                    onChange={(e) => setL4SheetOverride(e.target.value || null)}
+                    disabled={bmLoading || loading}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-gray-300 bg-white text-gray-700 hover:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-200 max-w-[220px] truncate"
+                    title="L4 분석 대상 시트 — BM·Gap·기본설계가 이 시트 기준으로 실행됨"
+                  >
+                    {summary.sheets.map((s) => (
+                      <option key={s.sheet_id} value={s.sheet_id}>
+                        {s.sheet_name || s.sheet_id}
+                      </option>
+                    ))}
+                  </select>
+                )}
                 {/* 벤치마킹 버튼 */}
                 <button
                   onClick={() => handleBenchmark()}
