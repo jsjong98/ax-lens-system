@@ -2810,120 +2810,20 @@ def _build_task_and_pain_summary(sheet_id: str = "") -> tuple[str, str, str, lis
     )
 
 
-def _step1_system_prompt(process_name: str, task_summary: str, pain_summary: str,
-                         benchmark_text: str = "",
-                         scope: str = "l3") -> str:
-    """scope='l4': 특정 L4 Activity 내 L5 Task AI 적용 설계
-       scope='l3': 전체 L3 프로세스 재구조화 + L4/L5 AI 적용 설계"""
-
-    redesign_scope_note = (
-        "- **재설계 가능**: HR 담당자, HR 임원, 지주, 자회사, BG, 계열사 등 두산 내부 조직이 수행하는 Task\n"
-        "- **재설계 불가 (현행 유지)**: 큐벡스, 업체 등 외부 업체/시스템이 수행하는 Task — "
-        "`change_type: \"유지\"`, `ai_application: \"해당 없음\"`으로 처리\n"
-        "- As-Is 컨텍스트에서 수행주체 라인에 `[외부 업체/시스템 — 재설계 제외]` 표시된 Task는 반드시 현행 유지"
-    )
-
-    if scope == "l4":
-        # ── L4 단위: 이 L4의 L5 Task AI 적용 설계만 ──────────────────
-        design_direction = (
-            "- **L5 Task AI 적용 설계**: 이 L4 Activity의 각 L5 Task별로 AI 적용 여부와 방식 기술\n"
-            "  - change_type: \"유지\" / \"통합\" / \"세분화\" / \"추가\" / \"삭제\" 중 하나\n"
-            "  - AI 미적용 Task는 ai_application을 \"해당 없음\"으로\n"
-            "  - automation_level: \"Full-Auto\" / \"Human-in-Loop\" / \"Human-on-the-Loop\" / \"Human\" 중 하나\n"
-            "- **L3 재구조화 불필요**: L4 단위 설계이므로 상위 L3 변경은 제안하지 마세요."
-        )
-        output_format = f"""{{
-  "blueprint_summary": "이 L4 Activity 기본 설계 요약 (3~5문장)",
-  "process_name": "{process_name}",
-  "applied_bg_cases": [1, 5],
-  "applied_bg_cases_reason": "이 L4 의 task lifecycle 과 직접 관련된 Background BM case_no 만 선택한 근거 (1~2문장)",
-  "benchmark_insights": [
-    {{"source": "기업명", "insight": "구체적 사례", "application": "두산 적용 방안"}}
-  ],
-  "redesigned_process": [
-    {{
-      "l3_id": "",
-      "l3_name": "",
-      "change_type": "유지",
-      "change_reason": "L4 단위 설계 — L3 변경 없음",
-      "l4_list": [
-        {{
-          "l4_id": "기존 L4 ID (예: 3.1.1)",
-          "l4_name": "{process_name}",
-          "change_type": "유지|통합|세분화|추가|삭제",
-          "change_reason": "변경 이유 (1문장)",
-          "l5_list": [
-            {{
-              "task_id": "기존 task_id 또는 NEW_xxx",
-              "task_name": "Task명",
-              "change_type": "유지|통합|세분화|추가|삭제",
-              "ai_application": "AI 적용 내용 또는 해당 없음",
-              "automation_level": "Full-Auto|Human-in-Loop|Human-on-the-Loop|Human",
-              "ai_technique": "사용 AI 기법 (예: LLM 요약, RAG, 분류모델, 해당 없음)"
-            }}
-          ]
-        }}
-      ]
-    }}
-  ]
-}}"""
-    else:
-        # ── L3 단위: 전체 프로세스 재구조화 + L4/L5 AI 적용 ─────────
-        design_direction = (
-            "- **L2~L3 재구조화**: 선도사례를 참고하여 L3 프로세스 그룹의 통합·세분화·추가·삭제 방향 제시\n"
-            "- **L4~L5 AI 적용 기본 설계**: 각 L4 Activity / L5 Task별로 AI 적용 여부와 방식 기술\n"
-            "  - change_type: \"유지\" / \"통합\" / \"세분화\" / \"추가\" / \"삭제\" 중 하나\n"
-            "  - AI 미적용 Task는 ai_application을 \"해당 없음\"으로\n"
-            "  - automation_level: \"Full-Auto\" / \"Human-in-Loop\" / \"Human-on-the-Loop\" / \"Human\" 중 하나"
-        )
-        output_format = f"""{{
-  "blueprint_summary": "전체 기본 설계 요약 (3~5문장)",
-  "process_name": "{process_name}",
-  "applied_bg_cases": [1, 2, 5],
-  "applied_bg_cases_reason": "이 프로세스 와 직접 관련된 Background BM case_no 만 선택한 근거 (1~2문장)",
-  "benchmark_insights": [
-    {{"source": "기업명", "insight": "구체적 사례", "application": "두산 적용 방안"}}
-  ],
-  "l2_restructure": "L2~L3 프로세스 재구조화 방향 설명 (2~3문장)",
-  "redesigned_process": [
-    {{
-      "l3_id": "기존 L3 ID (예: 3.1)",
-      "l3_name": "L3 프로세스명",
-      "change_type": "유지|통합|세분화|추가|삭제",
-      "change_reason": "변경 이유 (1문장)",
-      "l4_list": [
-        {{
-          "l4_id": "기존 L4 ID (예: 3.1.1)",
-          "l4_name": "L4 Activity명",
-          "change_type": "유지|통합|세분화|추가|삭제",
-          "change_reason": "변경 이유 (1문장)",
-          "l5_list": [
-            {{
-              "task_id": "기존 task_id 또는 NEW_xxx",
-              "task_name": "Task명",
-              "change_type": "유지|통합|세분화|추가|삭제",
-              "ai_application": "AI 적용 내용 또는 해당 없음",
-              "automation_level": "Full-Auto|Human-in-Loop|Human-on-the-Loop|Human",
-              "ai_technique": "사용 AI 기법 (예: LLM 요약, RAG, 분류모델, 해당 없음)"
-            }}
-          ]
-        }}
-      ]
-    }}
-  ]
-}}"""
-
-    return f"""당신은 AI 기반 업무 혁신 설계 전문가입니다.
+# ─ Step 1 STATIC prompt 블록 — 프롬프트 캐싱 대상 (scope 별로 1개씩 고정) ──
+# 이 텍스트는 process_name / task_summary / benchmark_text 등 call-specific 변수를 포함하지 않아
+# Anthropic cache_control 로 재사용 가능. 처음 호출 때 cache write, 이후 TTL(5분) 안에 cache read.
+_STEP1_STATIC_HEAD = """당신은 AI 기반 업무 혁신 설계 전문가입니다.
 벤치마킹 선도사례와 Gap 분석 결과를 동시에 활용하여, 기존 As-Is 프로세스를 재구조화하고 각 Task에 AI 적용 기본 설계를 수행합니다.
 
 ## ⚠️ 핵심 원칙
-- 아래 L5 Task 목록({process_name})이 설계의 기준입니다. 기존 Task는 최대한 유지하되, 필요 시 통합·세분화·추가·삭제를 제안할 수 있습니다.
+- 아래 L5 Task 목록이 설계의 기준입니다. 기존 Task는 최대한 유지하되, 필요 시 통합·세분화·추가·삭제를 제안할 수 있습니다.
 - `task_id`는 반드시 아래 Task 목록의 실제 ID를 사용하세요. 신규 추가 Task는 "NEW_xxx" 형식으로 표기하세요.
 - **Gap 분석 결과를 최우선으로 반영**: A.신규(도입), B.전환(AI 전환), C.폐기/통합(삭제/흡수) 방향을 설계에 직접 반영하세요.
 
 ## ⚠️ Background BM 적용 가이드 (반드시 준수)
 - 아래 "Background BM — 도메인 사례 Title" 섹션에는 도메인 전체(예: 채용 라이프사이클 전체) 의 사례가 나열돼 있습니다.
-- **이 중 위 프로세스 ({process_name}) 의 task lifecycle 과 직접 관련된 case 만 선별해서 redesigned_process 에 적용**하세요.
+- **이 중 현재 프로세스 (아래 '프로세스:' 헤더에 명시) 의 task lifecycle 과 직접 관련된 case 만 선별해서 redesigned_process 에 적용**하세요.
 - 관련성이 약한 case (예: '사전 준비' L4 인데 '서류전형 Pre-screen', '면접 일정 자동 조율', '신규입사자 온보딩' 같은 다른 단계 case) 는 **redesigned_process 에 추가하지 마세요**. As-Is task 와 동일/유사한 단계의 case 만 유지·전환·통합 대상.
 - 적용할 case 의 case_no 를 출력의 `applied_bg_cases` 배열에 명시하고, 선택 근거를 `applied_bg_cases_reason` 에 1~2문장으로 작성하세요.
 - 이 가이드는 Background BM Title 섹션뿐 아니라 일반 "벤치마킹 결과" 항목에도 동일 적용 — As-Is task lifecycle 과 무관한 사례는 무시.
@@ -2944,9 +2844,90 @@ task_name 에 `" - "` (공백-대시-공백) 구분자는 **오직 BM attributio
   - 나쁜 예: `"예산 품의 자동화 - 예산 품의 자동 검증 및 라우팅"` ❌ (BM 없는데 - 쓰면 사용자가 BM prefix 로 오인)
 
 ## ⚠️ 재설계 범위 (swim lane 기준)
-{redesign_scope_note}
+- **재설계 가능**: HR 담당자, HR 임원, 지주, 자회사, BG, 계열사 등 두산 내부 조직이 수행하는 Task
+- **재설계 불가 (현행 유지)**: 큐벡스, 업체 등 외부 업체/시스템이 수행하는 Task — `change_type: "유지"`, `ai_application: "해당 없음"`으로 처리
+- As-Is 컨텍스트에서 수행주체 라인에 `[외부 업체/시스템 — 재설계 제외]` 표시된 Task는 반드시 현행 유지
 
-## 프로세스: {process_name}
+## 설계 방향 (scope 별)
+
+### [scope=l4] L4 단위 설계
+- **L5 Task AI 적용 설계**: 이 L4 Activity의 각 L5 Task별로 AI 적용 여부와 방식 기술
+  - change_type: "유지" / "통합" / "세분화" / "추가" / "삭제" 중 하나
+  - AI 미적용 Task는 ai_application을 "해당 없음"으로
+  - automation_level: "Full-Auto" / "Human-in-Loop" / "Human-on-the-Loop" / "Human" 중 하나
+- **L3 재구조화 불필요**: L4 단위 설계이므로 상위 L3 변경은 제안하지 마세요.
+
+### [scope=l3] 전체 L3 재구조화
+- **L2~L3 재구조화**: 선도사례를 참고하여 L3 프로세스 그룹의 통합·세분화·추가·삭제 방향 제시
+- **L4~L5 AI 적용 기본 설계**: 각 L4 Activity / L5 Task별로 AI 적용 여부와 방식 기술
+  - change_type: "유지" / "통합" / "세분화" / "추가" / "삭제" 중 하나
+  - AI 미적용 Task는 ai_application을 "해당 없음"으로
+  - automation_level: "Full-Auto" / "Human-in-Loop" / "Human-on-the-Loop" / "Human" 중 하나
+
+## 출력 형식 (JSON만, 마크다운 코드 블록 없음) — scope 별 스키마
+
+- 현재 scope 는 아래 DYNAMIC 섹션 "## 프로세스:" 헤더 뒤에 `(scope=l4)` 또는 `(scope=l3)` 로 명시됨.
+- 해당 scope 의 schema 를 사용. `process_name` 값은 DYNAMIC 의 실제 값으로 치환.
+- l3 scope 에만 추가되는 필드: `l2_restructure` (L2~L3 재구조화 2~3문장).
+
+### scope=l4 schema
+```json
+{
+  "blueprint_summary": "이 L4 Activity 기본 설계 요약 (3~5문장)",
+  "process_name": "<DYNAMIC 의 실제 process_name>",
+  "applied_bg_cases": [1, 5],
+  "applied_bg_cases_reason": "이 L4 의 task lifecycle 과 직접 관련된 Background BM case_no 만 선택한 근거 (1~2문장)",
+  "benchmark_insights": [
+    {"source": "기업명", "insight": "구체적 사례", "application": "두산 적용 방안"}
+  ],
+  "redesigned_process": [
+    {
+      "l3_id": "",
+      "l3_name": "",
+      "change_type": "유지",
+      "change_reason": "L4 단위 설계 — L3 변경 없음",
+      "l4_list": [
+        {
+          "l4_id": "기존 L4 ID (예: 3.1.1)",
+          "l4_name": "<DYNAMIC 의 process_name 그대로>",
+          "change_type": "유지|통합|세분화|추가|삭제",
+          "change_reason": "변경 이유 (1문장)",
+          "l5_list": [
+            {
+              "task_id": "기존 task_id 또는 NEW_xxx",
+              "task_name": "Task명",
+              "change_type": "유지|통합|세분화|추가|삭제",
+              "ai_application": "AI 적용 내용 또는 해당 없음",
+              "automation_level": "Full-Auto|Human-in-Loop|Human-on-the-Loop|Human",
+              "ai_technique": "사용 AI 기법 (예: LLM 요약, RAG, 분류모델, 해당 없음)"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+### scope=l3 schema
+l4 스키마와 동일하되 최상위에 `"l2_restructure": "..."` (L2~L3 재구조화 2~3문장) 추가. `redesigned_process[].l3_id`/`l3_name` 은 실제 L3 값으로 채우고, `change_type` 을 L3 단위 변경으로 설정. l4_list 의 각 l4 는 실제 L4 이름.
+"""
+
+
+def _step1_system_prompt(process_name: str, task_summary: str, pain_summary: str,
+                         benchmark_text: str = "",
+                         scope: str = "l3"):
+    """scope='l4': 특정 L4 Activity 내 L5 Task AI 적용 설계
+       scope='l3': 전체 L3 프로세스 재구조화 + L4/L5 AI 적용 설계
+
+    Returns: list[block] — Anthropic cache-control 블록.
+      block 1: STATIC (캐시 대상) — 핵심 원칙/BM 가이드/task_name 규칙/재설계 범위
+      block 2: DYNAMIC — process_name + task_summary + pain + BM 결과 + gap + 설계 방향 + 출력 형식
+    OpenAI fallback 에선 두 블록을 concat 하여 단일 system 메시지로 사용 (_call_llm_step1 처리).
+    """
+
+    scope_marker = "(scope=l4)" if scope == "l4" else "(scope=l3)"
+    dynamic_text = f"""## 프로세스: {process_name} {scope_marker}
 
 ## As-Is L5 Task 목록 (설계의 기준)
 {task_summary}
@@ -2956,17 +2937,29 @@ task_name 에 `" - "` (공백-대시-공백) 구분자는 **오직 BM attributio
 
 {benchmark_text}
 
-## 설계 방향
-{design_direction}
-
-## 출력 형식 (JSON만 출력, 마크다운 코드 블록 없음)
-{output_format}
+※ 위 STATIC 섹션의 "설계 방향 (scope 별)" 에서 해당 scope (l4/l3) 의 지침을 따르고,
+  "출력 형식" 의 scope 별 schema 로 JSON 만 출력. process_name 은 위 "## 프로세스:" 헤더의 실제 값 사용.
 """
+    return [
+        {
+            "type": "text",
+            "text": _STEP1_STATIC_HEAD,
+            "cache_control": {"type": "ephemeral"},
+        },
+        {
+            "type": "text",
+            "text": dynamic_text,
+        },
+    ]
 
 
-async def _call_llm_step1(system: str, messages: list, max_tokens: int = 16384) -> dict | None:
+async def _call_llm_step1(system, messages: list, max_tokens: int = 16384) -> dict | None:
     """Step 1 LLM 호출 공통 로직.
 
+    system:
+      - str: 기존처럼 단일 문자열 (캐시 미사용)
+      - list[dict]: Anthropic cache-control 블록 (예: [{type:text, text:STATIC, cache_control:{type:ephemeral}}, {type:text, text:DYNAMIC}])
+        OpenAI fallback 은 text 만 이어붙여 단일 system 으로 전달.
     max_tokens: Anthropic 응답 한도. 벤치마킹처럼 긴 JSON 이 나올 땐 상향 전달.
     """
     settings = load_settings()
@@ -2975,6 +2968,16 @@ async def _call_llm_step1(system: str, messages: list, max_tokens: int = 16384) 
 
     from usage_store import add_usage as _add_usage
 
+    # OpenAI fallback 용 string 변환 헬퍼
+    def _system_to_str(s) -> str:
+        if isinstance(s, str):
+            return s
+        if isinstance(s, list):
+            return "\n\n".join(
+                (b.get("text", "") if isinstance(b, dict) else str(b)) for b in s
+            )
+        return str(s)
+
     if anthropic_key:
         try:
             from anthropic import AsyncAnthropic
@@ -2982,15 +2985,21 @@ async def _call_llm_step1(system: str, messages: list, max_tokens: int = 16384) 
             response = await client.messages.create(
                 model=settings.anthropic_model or "claude-sonnet-4-6",
                 max_tokens=max_tokens,
-                system=system,
+                system=system,   # str or list[block]
                 messages=messages,
             )
             if response.usage:
                 _add_usage("anthropic",
                            input_tokens=response.usage.input_tokens,
                            output_tokens=response.usage.output_tokens)
+            # 프롬프트 캐싱 적중률 로그 (telemetry)
+            _u = response.usage
+            _ct_in = getattr(_u, "cache_creation_input_tokens", None)
+            _ct_rd = getattr(_u, "cache_read_input_tokens", None)
+            if _ct_in or _ct_rd:
+                print(f"[workflow-step1] cache write={_ct_in or 0} / read={_ct_rd or 0} "
+                      f"tokens (정규 input={_u.input_tokens})", flush=True)
             raw = response.content[0].text
-            # stop_reason 체크 — max_tokens 에서 잘린 경우 경고 로그
             stop_reason = getattr(response, "stop_reason", None)
             if stop_reason and stop_reason != "end_turn":
                 print(f"[workflow-step1] ⚠️ Anthropic stop_reason={stop_reason} "
@@ -3012,7 +3021,7 @@ async def _call_llm_step1(system: str, messages: list, max_tokens: int = 16384) 
             response = await client.chat.completions.create(
                 model=settings.model or "gpt-5.4",
                 temperature=0.0,
-                messages=[{"role": "system", "content": system}, *messages],
+                messages=[{"role": "system", "content": _system_to_str(system)}, *messages],
                 response_format={"type": "json_object"},
             )
             if response.usage:
