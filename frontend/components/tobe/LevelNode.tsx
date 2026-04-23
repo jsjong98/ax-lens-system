@@ -101,7 +101,9 @@ interface NodeData {
   benchmark_source?: string;
   /** Junior AI source_basis — sky-blue bar 텍스트 ("BM"/"PainPoint"/"Both"/"LLM") */
   source_basis?: string;
-  bm_reference?: { case_no?: number; title?: string; domain?: string; companies?: string[] };
+  /** BM 출처 — "background" (PwC 사전 큐레이션) 또는 "dynamic" (Gap 분석 추가 검색) */
+  bm_origin?: string;
+  bm_reference?: { case_no?: number; title?: string; domain?: string; companies?: string[]; origin?: string };
   pain_point_reference?: { task_id?: string; task_name?: string; pain_categories?: string[] };
 }
 
@@ -192,26 +194,36 @@ function L5NodeBase({ data, selected }: { data: NodeData; selected?: boolean }) 
       })}
 
       {/* ── source_basis bar (Junior AI 전용) — 노드 출처 표시 ──
-          Backend 가 분류한 BM/PainPoint/Both/LLM 중 LLM 이 아니면 표시. */}
-      {data.source_basis && data.source_basis !== "LLM" && (
-        <div
-          className="bg-sky-100 border border-sky-300 flex items-center justify-center"
-          style={{ height: 24, fontSize: 9, fontWeight: 700, color: '#1D4ED8' }}
-          title={(() => {
-            const bm = data.bm_reference;
-            const pp = data.pain_point_reference;
-            const parts: string[] = [];
-            if (bm?.title) parts.push(`Benchmarking: ${bm.companies?.join(' · ') ?? ''} — ${bm.title}`);
-            if (pp?.pain_categories?.length) parts.push(`Pain Point: ${pp.pain_categories.join(', ')}${pp.task_name ? ` (${pp.task_name})` : ''}`);
-            return parts.join('\n');
-          })()}
-        >
-          {data.source_basis === "BM" ? "Benchmarking"
-            : data.source_basis === "PainPoint" ? "Pain Point"
-            : data.source_basis === "Both" ? "Benchmarking · Pain Point"
-            : ""}
-        </div>
-      )}
+          Backend 가 분류한 BM/PainPoint/Both/LLM 중 LLM 이 아니면 표시.
+          BM 인 경우 origin (background=PwC 사전 큐레이션 / dynamic=Gap 분석 추가 검색) 도 구분. */}
+      {data.source_basis && data.source_basis !== "LLM" && (() => {
+        const origin = (data.bm_origin || data.bm_reference?.origin || "").toLowerCase();
+        const bmLabel = origin === "dynamic" ? "Benchmarking (추가)" : "Benchmarking";   // background 기본
+        let label = "";
+        if (data.source_basis === "BM") label = bmLabel;
+        else if (data.source_basis === "PainPoint") label = "Pain Point";
+        else if (data.source_basis === "Both") label = `${bmLabel} · Pain Point`;
+        return (
+          <div
+            className="bg-sky-100 border border-sky-300 flex items-center justify-center"
+            style={{ height: 24, fontSize: 9, fontWeight: 700, color: '#1D4ED8' }}
+            title={(() => {
+              const bm = data.bm_reference;
+              const pp = data.pain_point_reference;
+              const parts: string[] = [];
+              if (bm?.title) {
+                const originHint = origin === "dynamic" ? " — Gap 분석 추가 검색"
+                                : origin === "background" ? " — PwC 사전 큐레이션" : "";
+                parts.push(`Benchmarking: ${bm.companies?.join(' · ') ?? ''} — ${bm.title}${originHint}`);
+              }
+              if (pp?.pain_categories?.length) parts.push(`Pain Point: ${pp.pain_categories.join(', ')}${pp.task_name ? ` (${pp.task_name})` : ''}`);
+              return parts.join('\n');
+            })()}
+          >
+            {label}
+          </div>
+        );
+      })()}
 
       {/* ── Custom role bar (그 외:value) — 위에 얹기 (0.36cm × 3.15cm) ── */}
       {extractCustomRole(data.role) && (

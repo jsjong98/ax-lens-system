@@ -1712,20 +1712,24 @@ def _attribute_task_basis(task_name: str, task_id: str, pain_index: dict) -> tup
 
     매칭 절차:
     1) 6 도메인 Background BM (recruit/evaluation/compensation/learning/bp/er) 의
-       match_benchmark_for_task() 순회 — 첫 매칭이 BM 출처
-    2) Pain Point 인덱스 (task_id → pain_context) 조회 — 매칭되면 Pain 출처
-    3) 두 출처 모두 / BM 만 / Pain 만 / 둘 다 없음 → "Both" / "BM" / "PainPoint" / "LLM"
+       match_benchmark_for_task() 순회 — 매칭되면 origin="background" 로 태깅
+    2) 위 실패 시 _wf_benchmark_table 의 dynamic BM (Gap 분석/Perplexity) 에서
+       task_name substring 매칭 → origin="dynamic" 로 태깅
+    3) Pain Point 인덱스 (task_id → pain_context) 조회 — 매칭되면 Pain 출처
+    4) 두 출처 모두 / BM 만 / Pain 만 / 둘 다 없음 → "Both" / "BM" / "PainPoint" / "LLM"
 
     Returns:
         (source_basis, bm_ref, pain_ref)
         - source_basis: "BM" | "PainPoint" | "Both" | "LLM"
-        - bm_ref: {case_no, title, domain, companies} | None
+        - bm_ref: {case_no, title, domain, companies, origin} | None
+          · origin="background" → PwC 사전 큐레이션 (recruit_benchmarks.py 등)
+          · origin="dynamic"    → Gap 분석 시 Perplexity 가 추가 검색한 BM
         - pain_ref: {task_id, task_name, pain_categories} | None
     """
     bm_ref = None
     pain_ref = None
 
-    # 1) BM 매칭 — 6 도메인 순회
+    # 1) Background BM 매칭 — 6 도메인 순회 (PwC 사전 큐레이션)
     for domain in ("recruit", "evaluation", "compensation", "learning", "bp", "er"):
         try:
             mod = __import__(f"{domain}_benchmarks")
@@ -1736,10 +1740,34 @@ def _attribute_task_basis(task_name: str, task_id: str, pain_index: dict) -> tup
                     "title": case["title"],
                     "domain": domain,
                     "companies": case["companies"],
+                    "origin": "background",
                 }
                 break
         except Exception:
             continue
+
+    # 2) Background 매칭 실패 시 → dynamic BM (Gap 분석 추가 검색 결과) 에서 찾기
+    # _wf_benchmark_table 은 {sheet_id: [bm_rows], '__background__': [...]} 구조.
+    # __background__ 이외 키의 행만 dynamic 으로 간주.
+    if not bm_ref and task_name:
+        _tn = (task_name or "").lower().replace(" ", "")
+        for _sheet_key, _rows in _wf_benchmark_table.items():
+            if _sheet_key == "__background__":
+                continue
+            for _r in (_rows or []):
+                _uc = str(_r.get("use_case") or "").lower().replace(" ", "")
+                _src = str(_r.get("source") or "")
+                if _uc and (_tn in _uc or _uc[:40] in _tn):
+                    bm_ref = {
+                        "case_no": None,
+                        "title": str(_r.get("use_case") or "")[:80],
+                        "domain": _src or "dynamic",
+                        "companies": [_src] if _src else [],
+                        "origin": "dynamic",
+                    }
+                    break
+            if bm_ref:
+                break
 
     # 2) Pain Point 매칭 (task_id 기반)
     if task_id and task_id in pain_index:
@@ -5450,12 +5478,13 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
 
                 # 0순위: LLM 이 명시한 bm_case_no + bm_case_domain — 가장 신뢰
                 # (Step 2 LLM 이 task_name 을 짧게 줄이면서 prefix 떼는 문제 해결용)
+                # bm_origin ('background' | 'dynamic') 도 LLM 이 명시하면 우선 채택
                 _llm_bm_case_no = t.get("bm_case_no")
                 _llm_bm_domain = (t.get("bm_case_domain") or "").strip().lower()
+                _llm_bm_origin = (t.get("bm_origin") or "").strip().lower()
                 if _llm_bm_case_no and _llm_bm_domain:
                     try:
                         _mod = __import__(f"{_llm_bm_domain}_benchmarks")
-                        # 도메인 모듈의 CASES 리스트 attribute 자동 탐색
                         _all_cases = (
                             getattr(_mod, "RECRUIT_CASES", None)
                             or getattr(_mod, "EVALUATION_CASES", None)
@@ -5472,6 +5501,9 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
                         if _matched_case:
                             _bm_source = _matched_case["title"]
                             _display_label = _prefix_once(_bm_source, _orig_task_name)
+                            # LLM 이 origin 안 적었으면 background (도메인 모듈은 사전 큐레이션)
+                            if not _llm_bm_origin:
+                                _llm_bm_origin = "background"
                     except Exception:
                         pass
                 # 1순위: keyword 매칭 fallback (LLM 이 bm_case_no 안 적었을 때)
@@ -5504,9 +5536,7 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
                     _orig_task_name, tid, _pain_index,
                 )
                 if _llm_basis in ("BM", "PainPoint", "Both", "LLM"):
-                    # LLM 선언이 더 풍부한 정보를 제공 — 우선 채택
                     _source_basis = _llm_basis
-                    # addressed_pain_task_ids 가 있으면 첫 번째 As-Is task 의 pain_index 항목으로 pain_ref 보강
                     if _llm_basis in ("PainPoint", "Both") and _llm_addressed and not _pain_ref:
                         for _addr_id in _llm_addressed:
                             if _addr_id in _pain_index:
@@ -5521,6 +5551,14 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
                                 }
                                 break
 
+                # 🔑 bm_origin 병합 — LLM 선언 (0순위) > _attribute_task_basis 결과 (1순위) > default
+                _final_bm_origin: str | None = None
+                if _source_basis in ("BM", "Both"):
+                    _final_bm_origin = _llm_bm_origin or (_bm_ref or {}).get("origin") or "background"
+                # bm_ref 에 origin 필드 보강 (LLM 경로에선 비어있을 수 있음)
+                if _bm_ref and _final_bm_origin and not _bm_ref.get("origin"):
+                    _bm_ref = {**_bm_ref, "origin": _final_bm_origin}
+
                 ai_nodes_out.append({
                     "id": jid,
                     "label": _display_label[:80],
@@ -5528,19 +5566,19 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
                     "actor": "Junior AI",
                     "type": "task",
                     "ai_support": t.get("ai_role", ""),
-                    # 교대 y 제거: 같은 lane 내 겹침은 프론트가 stack으로 처리
                     "position": {"x": x, "y": junior_y},
                     "origin": "ai",
-                    "display_id": display_l5_id,   # LevelNode 가 data.id 로 보여줌
+                    "display_id": display_l5_id,
                     "automation_level": t.get("automation_level", ""),
                     "human_role": t.get("human_role", ""),
                     "input_data": t.get("input_data", []),
                     "output_data": t.get("output_data", []),
                     "agent_name": ag["agent_name"],
-                    "benchmark_source": _bm_source,   # 파란색 attribution 뱃지용 (None 이면 없음)
-                    "source_basis": _source_basis,    # "BM"/"PainPoint"/"Both"/"LLM"
-                    "bm_reference": _bm_ref,           # {case_no, title, domain, companies} | None
-                    "pain_point_reference": _pain_ref, # {task_id, task_name, pain_categories} | None
+                    "benchmark_source": _bm_source,
+                    "source_basis": _source_basis,      # "BM"/"PainPoint"/"Both"/"LLM"
+                    "bm_origin": _final_bm_origin,      # "background"/"dynamic"/None — BM 출처 구분
+                    "bm_reference": _bm_ref,
+                    "pain_point_reference": _pain_ref,
                     "next": [],
                 })
                 # Junior AI 내부 sequential 엣지
@@ -6138,6 +6176,9 @@ def _tobe_cache_to_hr_json(cache: dict) -> dict:
             # source_basis (BM/PainPoint/Both/LLM) — Junior AI 노드에 sky-blue bar 표시용
             if n.get("source_basis"):
                 base_data["source_basis"] = n["source_basis"]
+            # bm_origin (background=PwC 사전 큐레이션, dynamic=Gap 분석 추가 검색)
+            if n.get("bm_origin"):
+                base_data["bm_origin"] = n["bm_origin"]
             if n.get("bm_reference"):
                 base_data["bm_reference"] = n["bm_reference"]
             if n.get("pain_point_reference"):
@@ -6901,6 +6942,14 @@ Pain Points (수집된 raw 목소리):
 3. **외부 업체/시스템 (큐벡스, 노무사, 헤드헌터 등) 보존**
    재설계 불가 — 위에 명시된 swim lane 규칙과 일치.
 
+4. **L4 connector 노드 해석 (As-Is JSON 에 섞여있는 L4 레벨 노드)**
+   As-Is 시트 안에 L5 가 아닌 L4 노드가 섞여있을 때 위치로 의미가 다름:
+   - 시트 **맨 앞/맨 뒤** 의 L4 — 단순히 **이전/다음 프로세스 연결자** (해당 시트 스코프 밖).
+     → 재설계 대상 아님, Junior AI assigned_tasks 에도 포함 금지.
+   - 시트 **중간** 에 끼어있는 L4 — "**그 L4 모듈을 호출·활용한다**" 는 의미.
+     → 해당 L4 의 sub-process 가 현재 흐름에서 사용된다는 것. 재설계 시 Junior AI 가
+       그 L4 모듈 결과를 input 으로 받거나 module call 로 기술.
+
 **요약**: Process Innovation = "각 task 의 방식 (어떻게 하는가)" 을 transformative 하게 바꾸는 것이지,
 **"누가 누구에게 보고하는가" (조직 위계) 는 As-Is JSON 의 swim lane / edge 구조를 따라야 합니다**.
 조직 구조를 모두 무시하고 직접 보고·자동 승인 chain 을 그리면 두산 거버넌스에 맞지 않아 무효 처리.
@@ -7102,6 +7151,7 @@ Pain Points (수집된 raw 목소리):
           "source_basis": "BM",
           "bm_case_no": 5,
           "bm_case_domain": "recruit",
+          "bm_origin": "background",
           "addressed_pain_task_ids": []
         }},
         {{
@@ -7118,6 +7168,7 @@ Pain Points (수집된 raw 목소리):
           "source_basis": "Both",
           "bm_case_no": 4,
           "bm_case_domain": "recruit",
+          "bm_origin": "background",
           "addressed_pain_task_ids": ["1.5.1.3"]
         }},
         {{
@@ -7134,6 +7185,7 @@ Pain Points (수집된 raw 목소리):
           "source_basis": "PainPoint",
           "bm_case_no": null,
           "bm_case_domain": null,
+          "bm_origin": null,
           "addressed_pain_task_ids": ["3.2.1.4", "3.2.1.5"]
         }}
       ]
@@ -7229,12 +7281,16 @@ Pain Points (수집된 raw 목소리):
 - 예: 신규 '선제적 휴가 추천' 이 As-Is `3.2.1.4` ('휴가 신청서 작성') 와 `3.2.1.5` ('승인 요청') 의 Pain 을 동시에 해결 → `["3.2.1.4", "3.2.1.5"]`
 - BM-only task 면 빈 배열 `[]`
 
-**`bm_case_no` + `bm_case_domain`** (BM 또는 Both 일 때만): 적용한 Background BM case 번호 + 도메인.
-- task_name 은 짧게 (10~20자) 유지하되, 어떤 BM case 를 적용한 건지 명시 → Swim Lane 이 자동으로 case title 을 파란색 prefix 로 표시
-- 예: `bm_case_no: 1, bm_case_domain: "recruit"` → Swim Lane 노드 상단에 "'스킬 추론' 기반 채용 전략 수립 지원" prefix 자동 부착
-- domain 값: `"recruit"` / `"evaluation"` / `"compensation"` / `"learning"` / `"bp"` / `"er"`
-- 둘 중 하나만 있고 매칭 안 되면 prefix 안 붙음 (LLM 라벨만)
-- BM 근거 없으면 `null`
+**`bm_case_no` + `bm_case_domain` + `bm_origin`** (BM 또는 Both 일 때만): 적용한 BM case 식별·출처.
+- **두 종류의 BM 구분 (`bm_origin`)**:
+  · `"background"` — PwC 가 사전 큐레이션한 도메인 모듈 (recruit/evaluation/... 의 CASES). bm_case_no + bm_case_domain 필수.
+  · `"dynamic"` — Gap 분석 시 Perplexity 가 추가 검색해서 `_wf_benchmark_table[sheet_id]` 에 저장된 사례.
+    bm_case_no/bm_case_domain 은 `null` 이어도 됨 (외부 검색 결과라 case 번호가 없을 수 있음).
+- `bm_origin="background"` 예: `{bm_case_no: 1, bm_case_domain: "recruit", bm_origin: "background"}`
+  → Swim Lane 노드 상단에 "'스킬 추론' 기반 채용 전략 수립 지원" prefix 자동 부착 (파란색)
+- `bm_origin="dynamic"` 예: `{bm_case_no: null, bm_case_domain: null, bm_origin: "dynamic"}`
+  → Swim Lane 상단 라벨은 "Benchmarking (추가)" 로 표시 (일반 prefix 없음)
+- BM 근거 전혀 없으면 (Add-on / LLM 추론만) 셋 다 `null`
 
 ⚠️ **task별 ai_technique 필드 필수 규칙**
 
