@@ -2599,8 +2599,24 @@ def _build_task_and_pain_summary(sheet_id: str = "") -> tuple[str, str, str, lis
                     if lbl in n or n in lbl:
                         return True
                 return False
-            filtered = [t for t in _wf_excel_tasks if _label_matches(t.name)]
-            print(f"[SCOPE] 4순위(L5 라벨) matched={len(filtered)}건 (JSON 라벨 {len(json_l5_labels)}개): {[t.name for t in filtered[:5]]}", flush=True)
+            raw_match = [t for t in _wf_excel_tasks if _label_matches(t.name)]
+            # 🔑 중복 제거 — Excel 이 동일 L5 이름을 여러 L4 에 두는 경우 (예: '보고자료 작성' 6회)
+            # Step 2 LLM 이 같은 이름을 별개 task 로 취급해 Junior AI 가 N개씩 생성되는 버그 방지.
+            # 첫 등장만 유지 (Excel 행 순서상 가장 먼저 = planning 단계가 우선됨)
+            seen_names: set[str] = set()
+            filtered = []
+            for t in raw_match:
+                key = (t.name or "").strip()
+                if key and key not in seen_names:
+                    seen_names.add(key)
+                    filtered.append(t)
+            dropped = len(raw_match) - len(filtered)
+            print(
+                f"[SCOPE] 4순위(L5 라벨) matched={len(filtered)}건 "
+                f"(JSON 라벨 {len(json_l5_labels)}개, raw {len(raw_match)} → dedupe -{dropped}): "
+                f"{[t.name for t in filtered[:5]]}",
+                flush=True,
+            )
         if filtered:
             relevant_tasks = filtered
 
