@@ -569,6 +569,13 @@ export default function WorkflowPage() {
         const ref = await getBackgroundBenchmarks();
         setBackgroundBenchmarks(ref.references || []);
       } catch { /* 조용히 실패 */ }
+      // Background BM 자동 주입된 테이블 행도 즉시 프론트에 반영 (새로고침 없이)
+      try {
+        const sr = await getWorkflowStepResults();
+        if (sr.benchmark_table && Object.keys(sr.benchmark_table).length > 0) {
+          setBenchmarkTableBySheet(sr.benchmark_table);
+        }
+      } catch { /* 조용히 실패 */ }
 
       // 새 프로젝트에서 시작한 경우: 백엔드가 생성한 새 세션을 pending 이름으로 rename
       const newSessionId = (result as { session_id?: string }).session_id;
@@ -625,6 +632,13 @@ export default function WorkflowPage() {
       try {
         const ref = await getBackgroundBenchmarks();
         setBackgroundBenchmarks(ref.references || []);
+      } catch { /* 조용히 실패 */ }
+      // Background BM 테이블 행 (__background__) 도 동기화 — UI 블록 노출 조건
+      try {
+        const sr = await getWorkflowStepResults();
+        if (sr.benchmark_table && Object.keys(sr.benchmark_table).length > 0) {
+          setBenchmarkTableBySheet(sr.benchmark_table);
+        }
       } catch { /* 조용히 실패 */ }
     } catch (e) {
       setError((e as Error).message);

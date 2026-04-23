@@ -1315,7 +1315,12 @@ export interface TobeNode {
   /** BM 출처: "background" (PwC 사전 큐레이션) | "dynamic" (Gap 분석 추가 검색) */
   bm_origin?: "background" | "dynamic" | null;
   bm_reference?: { case_no?: number; title?: string; domain?: string; companies?: string[]; origin?: string } | null;
-  pain_point_reference?: { task_id?: string; task_name?: string; pain_categories?: string[] } | null;
+  pain_point_reference?: {
+    task_id?: string;
+    task_name?: string;
+    pain_categories?: string[];
+    pain_details?: { type?: string; text?: string }[];
+  } | null;
 }
 
 export interface TobeEdge {

@@ -1778,6 +1778,11 @@ def _attribute_task_basis(task_name: str, task_id: str, pain_index: dict) -> tup
                 "task_id": task_id,
                 "task_name": ctx.get("task_name", ""),
                 "pain_categories": [p.get("type", "") for p in pain_points if p.get("type")],
+                # 🔑 pain 의 실제 text 도 포함 — 사용자가 "어떤 Pain 때문에 이 task 가 생겼나" 추적 가능
+                "pain_details": [
+                    {"type": p.get("type", ""), "text": (p.get("text", "") or "")[:200]}
+                    for p in pain_points if p.get("text")
+                ],
             }
 
     # 3) 통합 라벨
@@ -5538,18 +5543,30 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
                 if _llm_basis in ("BM", "PainPoint", "Both", "LLM"):
                     _source_basis = _llm_basis
                     if _llm_basis in ("PainPoint", "Both") and _llm_addressed and not _pain_ref:
+                        # 여러 As-Is pain 을 한꺼번에 해결하는 NEW task 일 수 있음 → 전체 수집
+                        _collected_cats: list[str] = []
+                        _collected_details: list[dict] = []
+                        _first_task_name = ""
                         for _addr_id in _llm_addressed:
-                            if _addr_id in _pain_index:
-                                _ctx = _pain_index[_addr_id]
-                                _pain_ref = {
-                                    "task_id": _addr_id,
-                                    "task_name": _ctx.get("task_name", ""),
-                                    "pain_categories": [
-                                        p.get("type", "") for p in (_ctx.get("pain_points") or [])
-                                        if p.get("type")
-                                    ],
-                                }
-                                break
+                            if _addr_id not in _pain_index:
+                                continue
+                            _ctx = _pain_index[_addr_id]
+                            if not _first_task_name:
+                                _first_task_name = _ctx.get("task_name", "")
+                            for _pp in (_ctx.get("pain_points") or []):
+                                _cat = _pp.get("type", "")
+                                if _cat and _cat not in _collected_cats:
+                                    _collected_cats.append(_cat)
+                                _txt = (_pp.get("text", "") or "").strip()
+                                if _txt:
+                                    _collected_details.append({"type": _cat, "text": _txt[:200]})
+                        if _collected_cats or _collected_details:
+                            _pain_ref = {
+                                "task_id": _llm_addressed[0] if _llm_addressed else "",
+                                "task_name": _first_task_name,
+                                "pain_categories": _collected_cats,
+                                "pain_details": _collected_details,
+                            }
 
                 # 🔑 bm_origin 병합 — LLM 선언 (0순위) > _attribute_task_basis 결과 (1순위) > default
                 _final_bm_origin: str | None = None

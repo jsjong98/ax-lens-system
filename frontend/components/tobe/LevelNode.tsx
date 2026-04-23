@@ -104,7 +104,13 @@ interface NodeData {
   /** BM 출처 — "background" (PwC 사전 큐레이션) 또는 "dynamic" (Gap 분석 추가 검색) */
   bm_origin?: string;
   bm_reference?: { case_no?: number; title?: string; domain?: string; companies?: string[]; origin?: string };
-  pain_point_reference?: { task_id?: string; task_name?: string; pain_categories?: string[] };
+  pain_point_reference?: {
+    task_id?: string;
+    task_name?: string;
+    pain_categories?: string[];
+    /** Pain 의 실제 text 스니펫 (어떤 Pain 때문에 이 task 가 추가됐는지 추적용) */
+    pain_details?: { type?: string; text?: string }[];
+  };
 }
 
 /* extractCustomRole / hasCustomRole / displayRole 은 @/lib/roleDisplay 참조 */
@@ -195,33 +201,71 @@ function L5NodeBase({ data, selected }: { data: NodeData; selected?: boolean }) 
 
       {/* ── source_basis bar (Junior AI 전용) — 노드 출처 표시 ──
           Backend 가 분류한 BM/PainPoint/Both/LLM 중 LLM 이 아니면 표시.
-          BM 인 경우 origin (background=PwC 사전 큐레이션 / dynamic=Gap 분석 추가 검색) 도 구분. */}
+          BM 인 경우 origin (background=PwC 사전 큐레이션 / dynamic=Gap 분석 추가 검색) 도 구분.
+          Pain Point 기반이면 실제 pain text 스니펫도 아래 캡션으로 노출. */}
       {data.source_basis && data.source_basis !== "LLM" && (() => {
         const origin = (data.bm_origin || data.bm_reference?.origin || "").toLowerCase();
-        const bmLabel = origin === "dynamic" ? "Benchmarking (추가)" : "Benchmarking";   // background 기본
+        const bmLabel = origin === "dynamic" ? "Benchmarking (추가)" : "Benchmarking";
         let label = "";
         if (data.source_basis === "BM") label = bmLabel;
         else if (data.source_basis === "PainPoint") label = "Pain Point";
         else if (data.source_basis === "Both") label = `${bmLabel} · Pain Point`;
+
+        const bm = data.bm_reference;
+        const pp = data.pain_point_reference;
+        // pain 요약 — categories 또는 첫 pain text 스니펫
+        const painSummary = (() => {
+          if (!pp) return "";
+          const cats = pp.pain_categories || [];
+          const details = pp.pain_details || [];
+          if (details.length > 0) {
+            const first = details[0];
+            const rest = details.length > 1 ? ` +${details.length - 1}건` : "";
+            const text = (first?.text || "").replace(/\s+/g, " ").slice(0, 36);
+            return `${first?.type ? `[${first.type}] ` : ""}${text}${rest}`;
+          }
+          if (cats.length) return cats.join(" · ");
+          return "";
+        })();
+        const tooltip = (() => {
+          const parts: string[] = [];
+          if (bm?.title) {
+            const originHint = origin === "dynamic" ? " — Gap 분석 추가 검색"
+                            : origin === "background" ? " — PwC 사전 큐레이션" : "";
+            parts.push(`Benchmarking: ${bm.companies?.join(' · ') ?? ''} — ${bm.title}${originHint}`);
+          }
+          if (pp?.pain_details?.length) {
+            parts.push(`해결 Pain Point (${pp.task_name || "As-Is"}):`);
+            pp.pain_details.slice(0, 4).forEach((d) => {
+              parts.push(`  · [${d.type}] ${d.text}`);
+            });
+          } else if (pp?.pain_categories?.length) {
+            parts.push(`Pain Point: ${pp.pain_categories.join(', ')}${pp.task_name ? ` (${pp.task_name})` : ''}`);
+          }
+          return parts.join('\n');
+        })();
+
+        const hasPainDetail = data.source_basis !== "BM" && !!painSummary;
         return (
-          <div
-            className="bg-sky-100 border border-sky-300 flex items-center justify-center"
-            style={{ height: 24, fontSize: 9, fontWeight: 700, color: '#1D4ED8' }}
-            title={(() => {
-              const bm = data.bm_reference;
-              const pp = data.pain_point_reference;
-              const parts: string[] = [];
-              if (bm?.title) {
-                const originHint = origin === "dynamic" ? " — Gap 분석 추가 검색"
-                                : origin === "background" ? " — PwC 사전 큐레이션" : "";
-                parts.push(`Benchmarking: ${bm.companies?.join(' · ') ?? ''} — ${bm.title}${originHint}`);
-              }
-              if (pp?.pain_categories?.length) parts.push(`Pain Point: ${pp.pain_categories.join(', ')}${pp.task_name ? ` (${pp.task_name})` : ''}`);
-              return parts.join('\n');
-            })()}
-          >
-            {label}
-          </div>
+          <>
+            <div
+              className="bg-sky-100 border border-sky-300 flex items-center justify-center"
+              style={{ height: 24, fontSize: 9, fontWeight: 700, color: '#1D4ED8' }}
+              title={tooltip}
+            >
+              {label}
+            </div>
+            {/* Pain Point 캡션 — 어떤 Pain 때문에 이 task 가 추가됐는지 한눈에 */}
+            {hasPainDetail && (
+              <div
+                className="bg-sky-50 border-b border-sky-200 text-[9px] text-sky-800 px-2 py-1 leading-tight"
+                title={tooltip}
+              >
+                <span className="font-semibold">해결 Pain: </span>
+                <span>{painSummary}</span>
+              </div>
+            )}
+          </>
         );
       })()}
 
