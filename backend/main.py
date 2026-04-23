@@ -2937,6 +2937,12 @@ def _inject_background_benchmarks():
         all_rows.extend(_bp_rows)  # bp 자체에서 domain 채움
     except Exception as _e:
         print(f"[BACKGROUND BM] bp 주입 실패 (무시): {_e}", flush=True)
+    try:
+        from er_benchmarks import build_background_benchmark_rows as _build_er
+        _er_rows = _build_er(l2_names)
+        all_rows.extend(_er_rows)  # er 자체에서 domain 채움
+    except Exception as _e:
+        print(f"[BACKGROUND BM] er 주입 실패 (무시): {_e}", flush=True)
 
     if all_rows:
         _wf_benchmark_table["__background__"] = all_rows
@@ -3017,6 +3023,18 @@ async def get_background_benchmarks():
             })
     except Exception as _e:
         print(f"[BG BM] bp cases fetch 실패: {_e}", flush=True)
+    try:
+        from er_benchmarks import get_background_cases_for_tasks as _er_cases
+        for c in _er_cases(_wf_excel_tasks):
+            refs.append({
+                "case_no": c["case_no"],
+                "title": c["title"],
+                "companies": c["companies"],
+                "applicable_l2": c["applicable_l2"],
+                "domain": "er",
+            })
+    except Exception as _e:
+        print(f"[BG BM] er cases fetch 실패: {_e}", flush=True)
     return {"ok": True, "references": refs, "total": len(refs)}
 
 
@@ -4006,6 +4024,30 @@ async def generate_workflow_step1(request: Request):
             _bg_domains_injected.append(f"bp({len(_cases)}사례)")
     except Exception as _re:
         print(f"[STEP1] bp Background 주입 실패 (무시): {_re}", flush=True)
+
+    # er 도메인 (집단노사/준법지원 L2)
+    try:
+        from er_benchmarks import (
+            get_background_cases_for_tasks as _er_cases_step1,
+            get_applicable_players_for_tasks as _er_players,
+            format_players_for_prompt as _er_fmt_players,
+            format_insights_for_prompt as _er_fmt_insights,
+        )
+        _cases = _er_cases_step1(_wf_excel_tasks)
+        if _cases:
+            benchmark_text += (
+                "\n## 📚 Background BM — ER 도메인 사례 Title (Task 이름 attribution 용)\n"
+                "※ AI 기능이 이 사례와 같으면 Task 이름 앞에 'title - ' 형태로 prefix 자동 부착됨.\n\n"
+            )
+            for c in _cases:
+                benchmark_text += f"- [{c['case_no']}] **{c['title']}** (Player: {', '.join(c['companies'])})\n"
+            _players = _er_players(_wf_excel_tasks)
+            if _players:
+                benchmark_text += "\n" + _er_fmt_players(_players)
+            benchmark_text += "\n" + _er_fmt_insights()
+            _bg_domains_injected.append(f"er({len(_cases)}사례)")
+    except Exception as _re:
+        print(f"[STEP1] er Background 주입 실패 (무시): {_re}", flush=True)
 
     if _bg_domains_injected:
         print(f"[STEP1] Background BM 주입 완료 — {' + '.join(_bg_domains_injected)}", flush=True)
@@ -5110,7 +5152,7 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
                 # 프론트 LevelNode 에서 prefix 부분을 파란색으로 강조 표시.
                 _orig_task_name = t.get("task_name", "") or tid
                 # 도메인별 attribution 시도 — 먼저 매칭되는 쪽이 prefix
-                # 순서: recruit → evaluation → compensation → learning → bp (도메인 추가 시 여기에 추가)
+                # 순서: recruit → evaluation → compensation → learning → bp → er (6 도메인 전체)
                 _display_label, _bm_source = _orig_task_name, None
                 for _dom_mod in (
                     "recruit_benchmarks",
@@ -5118,6 +5160,7 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
                     "compensation_benchmarks",
                     "learning_benchmarks",
                     "bp_benchmarks",
+                    "er_benchmarks",
                 ):
                     try:
                         _mod = __import__(_dom_mod)
