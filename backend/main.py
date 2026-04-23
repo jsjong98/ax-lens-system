@@ -2359,6 +2359,40 @@ def _build_mapped_asis_context(sheet_id: str = "") -> str:
 
         decision_nodes_map = {n.id: n for n in s.nodes.values() if n.level == "DECISION"}
 
+        # 🔑 y-position 기반 lane 추론 — role/actors 필드가 비어있는 JSON 대응
+        # (workflow_builder 로 export 한 JSON 은 lane 을 y 좌표로만 표시하는 경우가 많음)
+        _sheet_lanes = list(getattr(s, "lanes", []) or [])
+        _lane_heights = list(getattr(s, "lane_heights", []) or [])
+        _swim_h = float(getattr(s, "swim_height", 0) or 0)
+        _lane_cum: list[float] = [0.0]
+        for h in _lane_heights:
+            _lane_cum.append(_lane_cum[-1] + float(h))
+
+        def _lane_from_y(ny: float) -> str:
+            """node y 좌표 → lane 이름 (정확한 lane_heights 있으면 누적 기준, 없으면 균등 분할)."""
+            if not _sheet_lanes:
+                return ""
+            n_lanes = len(_sheet_lanes)
+            # ① laneHeights 있음 — 누적 구간
+            if len(_lane_cum) == n_lanes + 1:
+                for i in range(n_lanes):
+                    if _lane_cum[i] <= ny < _lane_cum[i + 1]:
+                        return _sheet_lanes[i]
+                return _sheet_lanes[-1]   # y > last lane 하한 → 마지막 lane
+            # ② swim_height 균등 분할
+            if _swim_h > 0:
+                lane_h = _swim_h / n_lanes
+                idx = min(max(int(ny / lane_h), 0), n_lanes - 1)
+                return _sheet_lanes[idx]
+            # ③ 자동 추정 — y 최대값 기준 균등
+            all_ys = [nd.position_y for nd in s.nodes.values() if nd.level not in ("L2", "L3", "MEMO")]
+            if not all_ys:
+                return ""
+            y_max = max(all_ys)
+            lane_h = (y_max + 200) / n_lanes
+            idx = min(max(int(ny / lane_h), 0), n_lanes - 1)
+            return _sheet_lanes[idx]
+
         def _render_branches(node_id: str, indent: str = "    ") -> list[str]:
             """노드 → Decision/조건 엣지 분기 구조를 텍스트로 렌더링."""
             result = []
@@ -2407,12 +2441,21 @@ def _build_mapped_asis_context(sheet_id: str = "") -> str:
         def _node_meta_lines(node: "WorkflowNode", indent: str = "      ") -> list[str]:
             """노드 메타데이터(수행주체·시스템·협의관계)를 텍스트 라인으로 반환."""
             meta_lines = []
-            # 수행주체 (role > actors 우선)
+            # 수행주체 (role > actors > y-position lane fallback)
             role_val = node.metadata.get("role", "")
             actors_val = node.metadata.get("actors", "")
             actor_label = role_val or (
                 ", ".join(actors_val) if isinstance(actors_val, list) else str(actors_val)
             )
+            # actors dict 가 모두 빈 값인 경우 (workflow-builder export) 도 비어있다고 간주
+            if isinstance(actors_val, dict) and not any(str(v).strip() for v in actors_val.values()):
+                if not role_val:
+                    actor_label = ""
+            # 🔑 role/actors 모두 비어있으면 y-좌표 lane 에서 추론 — multi-lane 핸드오프 시각화의 핵심 정보
+            if not actor_label:
+                _lane_name = _lane_from_y(float(node.position_y or 0))
+                if _lane_name:
+                    actor_label = _lane_name
             if actor_label:
                 # "/ " 로 구분된 복수 수행주체 → 협의 관계 명시
                 actor_parts = [a.strip() for a in actor_label.replace("，", ",").split("/") if a.strip()]
@@ -6755,8 +6798,8 @@ Pain Points (수집된 raw 목소리):
    - ❌ To-Be: AI 가 작성 → 바로 임원 보고 (중간 핸드오프 우회·삭제)
    - ✅ To-Be (agents + human_tasks 조합):
      · **Junior AI "보고자료 자동 생성기"** (현업 담당자 lane 의 작업 보조) — agents 배열
-     · **human_tasks**: `{task_id: "1.5.2.2", task_name: "HR 임원 보고/검토", performer: "HR 임원", ...}` — As-Is 그대로 1개 task
-     · **human_tasks**: `{task_id: "1.5.2.3", task_name: "현업 임원 승인", performer: "현업 임원", ...}` — 1개 task
+     · **human_tasks** 항목: task_id="1.5.2.2" / task_name="HR 임원 보고/검토" / performer="HR 임원" — As-Is 그대로 1개 task
+     · **human_tasks** 항목: task_id="1.5.2.3" / task_name="현업 임원 승인" / performer="현업 임원" — 1개 task
      · **Junior AI "예산 품의 자동화기"** (HR 담당자 lane) — agents 배열
    - Senior AI 가 핸드오프를 "자동 라우팅" 하는 건 OK — **승인 권한 자체를 우회·통합 금지**.
 
