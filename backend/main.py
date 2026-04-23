@@ -6715,8 +6715,25 @@ Pain Points (수집된 raw 목소리):
 
 ## 프로세스: {process_name}
 
-## Step 1 기본 설계 결과
-{json.dumps(_wf_step1_cache, ensure_ascii=False, indent=2)[:4000]}
+## ⚠️ Step 1 기본 설계 — Source of Truth (반드시 그대로 가져감)
+
+아래 redesigned_process 의 **모든 L5 task** 는 **task_id + task_name 을 1글자도 바꾸지 말고** Step 2 의 assigned_tasks 에 동일하게 사용하세요.
+- task_name 에 `'벤치마킹 title - ' prefix` 가 있으면 **prefix 포함 그대로 유지** (예: "'스킬 추론' 기반 채용 전략 수립 지원 - 채용 수요 AI 분석")
+- task_id 가 `NEW_xxx` 또는 신규 L5 번호여도 그대로 사용
+- ai_application / automation_level / ai_technique 도 Step 1 값을 우선 채택 (필요 시 보강)
+- 이 inheritance 규칙을 어기면 (Step 1 task 누락 / 임의 rename / 새 분할 task 추가) **무효 처리**
+
+위 inheritance 후, Process Innovation 모드의 "신규 Agent" 가 **추가 필요할 때만** NEW_ prefix 로 task 신설 가능.
+즉 출력 task = (Step 1 의 모든 L5) + (선택적 신규 NEW_ task) 이며, Step 1 task 가 빠지면 안 됨.
+
+```json
+{json.dumps(_wf_step1_cache.get("redesigned_process", []), ensure_ascii=False, indent=2)}
+```
+
+## Step 1 추가 메타 (참고용)
+- blueprint_summary: {_wf_step1_cache.get("blueprint_summary", "")[:500]}
+- applied_bg_cases: {_wf_step1_cache.get("applied_bg_cases", [])} (선택된 Background BM case 번호)
+- benchmark_insights (요약): {(_wf_step1_cache.get("benchmark_insights") or [])[:3]}
 
 ## As-Is 워크플로우 + 엑셀 매핑 (L3→L4→Task 계층, Pain Point 포함)
 {asis_info or "As-Is 워크플로우 정보 없음 (JSON/PPT 미업로드)"}
@@ -6900,9 +6917,10 @@ Pain Points (수집된 raw 목소리):
 - `"~한다"`, `"~수행한다"`, `"~처리한다"` 로 끝나는 완전 문장 금지
 
 **규칙**:
-- task_name: 10~20자 짧은 명사구 or 동사+목적어
+- **Step 1 에서 이미 정해진 task_name 은 그대로 inherit (BM prefix 포함) — 이 규칙이 모든 길이 가이드보다 우선**
+- 신규 (NEW_) task 만 위 길이 가이드 (10~20자) 적용
 - 긴 action 문장·방법·결과 설명은 **ai_role / human_role / description 필드**에 넣을 것
-- task_name 은 Swim Lane 뱃지·PPT 상자에 표시되므로 짧고 명확해야 함
+- task_name 은 Swim Lane 뱃지·PPT 상자에 표시되므로 짧고 명확해야 함 (단, BM prefix 는 보존)
 
 ## ⚠️ task_id 형식 규칙
 
