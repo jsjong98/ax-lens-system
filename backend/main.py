@@ -6577,6 +6577,45 @@ Step 1에서 도출된 기본 설계를 기반으로, 두산에 최적화된 **A
 - **Senior AI 기반 End-to-End 오케스트레이션 구조로 전환**
 - Step 1(Top-Down)의 벤치마킹 인사이트 + Step 2(Bottom-Up)의 Pain Point 분석을 융합
 
+## 🔥 Process Innovation 모드 (가장 중요 — 반드시 준수)
+
+**Pain Point 는 단순히 "고쳐야 할 문제" 가 아니라 "전혀 새로운 AI 서비스를 설계할 seed" 입니다.**
+As-Is task 옆에 AI 를 살짝 붙이는 1:1 mapping 은 ❌. **Pain Point 가 발생할 필요 자체가 없어지도록 틀을 바꾸는 redesign** 이 목표입니다.
+
+### ✅ 좋은 예시 — 휴가 추천 시스템
+
+Pain Points (수집된 raw 목소리):
+> "연차 신청하려다 시기 놓쳐서 늦게 신청"
+> "어디 갈지 고민 귀찮아서 못 쓰다가 마지막에 몰아씀"
+> "미리 알려주면 좋을 텐데"
+
+❌ **나쁜 redesign (피해야 할 패턴)**:
+- As-Is task `연차 신청서 작성` → AI 가 자동 작성
+- As-Is task `승인 요청` → AI 가 자동 라우팅
+→ **여전히 사용자가 "신청해야지" 라고 떠올려야만 작동**. Pain Point 의 본질 (= 떠올리지 못함) 미해결.
+
+✅ **좋은 redesign (process innovation)**:
+- **NEW Agent: "선제적 휴가 추천 챗봇"** (As-Is 에 없던 신규)
+  - Input: 6개월 휴가 사용 패턴 + 부서 일정 + 가족 정보
+  - Logic: "최근 X일 미사용 / 다음 분기 마감 임박 / 비슷한 가족 구성원이 많이 가는 곳" 분석
+  - Output: 사용자에게 "○○일 휴가 어떠세요? 가족동반은 △△ 추천" proactively 제안
+- **NEW Agent: "승인 후 후속 처리 자동화"**
+  - 사용자 클릭 한 번 → 챗봇이 신청서 작성 + 승인 라우팅 + 캘린더 등록 + 인수인계 알림 일괄 처리
+→ 사용자는 "휴가 써야지" 떠올릴 필요 없이 **AI 가 먼저 제안 → 검토만 → 끝**.
+
+### 설계 원칙
+1. **Pain Point cluster** 식별: 비슷한 결의 Pain Point 들을 묶어서 "이게 발생하는 근본 원인" 도출
+2. 근본 원인을 해결하는 **새로운 Junior AI Agent 를 자유롭게 신설** (As-Is task 없어도 OK, change_type="추가" 또는 NEW_xxx task_id)
+3. As-Is task 는 "삭제" / "통합" 도 적극 허용 — Pain Point 가 사라지면 task 자체가 불필요해질 수 있음
+4. **Proactive (선제적) > Reactive (수동 대응)** — 사람이 요청해야 작동하는 task 는 가능한 한 AI 가 선제 제안하도록 재설계
+5. **End-to-end 자동화 chain** 구성 — 한 Agent 의 output 이 다음 Agent 의 trigger 가 되어 사람의 개입 없이 흐르는 구조
+
+### Anti-Pattern (절대 피할 것)
+- ❌ As-Is task 1개 → To-Be task 1개 + "AI 적용" 한 줄 (단순 라벨 변경)
+- ❌ "AI 가 자동으로 작성" / "AI 가 추천" 같은 추상적 표현만 (구체 trigger·input·output 없음)
+- ❌ 모든 task 를 Human-in-Loop 로 두기 (자동화 효과 미미)
+- ❌ Pain Point 한 줄당 task 한 줄 1:1 매칭 (cluster 분석 없음)
+
 ## ⚠️ 재설계 범위 (swim lane 기준)
 - **재설계 가능**: HR 담당자, HR 임원, 지주, 자회사, BG, 계열사 등 두산 내부 조직이 수행하는 Task
 - **재설계 불가 (현행 유지)**: 큐벡스, 업체 등 외부 업체/시스템이 수행하는 Task — AI Agent 설계 대상에서 제외하고 "현행 유지" 처리
@@ -6616,10 +6655,10 @@ Step 1에서 도출된 기본 설계를 기반으로, 두산에 최적화된 **A
 
 ## 상세 설계 요구사항
 1. Lv.4~5 단위로 구체적인 AI 적용 방안 설계
-2. 각 Agent의 구체적 역할, 사용 AI 기법, Input/Output 명시
-3. Human-on-the-Loop 중심으로 설계 (Senior AI가 전체 관리)
-4. 기존 As-Is에 없던 혁신적 Task 추가 가능
-5. Pain Point를 근본적으로 해결하는 방향
+2. 각 Agent의 구체적 역할 (특히 **trigger 조건 — "언제 작동하는가"**), 사용 AI 기법, Input/Output 명시
+3. Human-on-the-Loop 중심 (Senior AI 가 전체 관리, 사람은 검토·승인만)
+4. **Pain Point cluster 분석 → As-Is 에 없던 신규 Agent 자유 신설 (적극 권장)**
+5. **Process Innovation 모드 (위 섹션) 의 좋은 예시·anti-pattern 을 반드시 따를 것** — 1:1 mapping / 단순 라벨 변경은 무효 처리
 
 ## ⚠️ agent_type 규칙 (반드시 준수)
 - `agent_type`은 **"Senior AI"** 또는 **"Junior AI"** 둘 중 하나만 사용 (다른 텍스트 절대 금지)
