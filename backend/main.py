@@ -2368,8 +2368,33 @@ def _build_mapped_asis_context(sheet_id: str = "") -> str:
         for h in _lane_heights:
             _lane_cum.append(_lane_cum[-1] + float(h))
 
+        # 🔑 ③ 자동 추정 시 사용할 lane_h — consecutive y-gap median 기반
+        # (workflow (4).json 류: laneHeights=None, swim_height=None 인 경우 기존 (y_max+200)/n 은
+        #  노드가 한 lane 에 집중되면 lane_h 가 과소 추정돼서 노드가 마지막 lane 으로 잘못 떨어짐.
+        #  실제 lane 간 y-gap 중앙값이 경험적으로 lane 높이와 일치해 훨씬 정확.)
+        def _estimate_lane_h() -> float:
+            all_ys = [nd.position_y for nd in s.nodes.values() if nd.level not in ("L2", "L3", "MEMO")]
+            if not all_ys:
+                return 0.0
+            uniq_ys = sorted({round(y / 10) * 10 for y in all_ys})   # 10px 허용오차 dedup
+            if len(uniq_ys) < 2:
+                return 0.0
+            gaps = [uniq_ys[i + 1] - uniq_ys[i] for i in range(len(uniq_ys) - 1)]
+            # 같은 lane 내 jitter (< 50px) 제외한 "의미있는 gap" 만
+            meaningful = [g for g in gaps if g >= 50]
+            if not meaningful:
+                return 0.0
+            meaningful_sorted = sorted(meaningful)
+            # 중앙값
+            mid = len(meaningful_sorted) // 2
+            if len(meaningful_sorted) % 2 == 1:
+                return float(meaningful_sorted[mid])
+            return float((meaningful_sorted[mid - 1] + meaningful_sorted[mid]) / 2)
+
+        _auto_lane_h_cache: dict = {}
+
         def _lane_from_y(ny: float) -> str:
-            """node y 좌표 → lane 이름 (정확한 lane_heights 있으면 누적 기준, 없으면 균등 분할)."""
+            """node y 좌표 → lane 이름 (정확한 lane_heights 있으면 누적 기준, 없으면 gap median 추정)."""
             if not _sheet_lanes:
                 return ""
             n_lanes = len(_sheet_lanes)
@@ -2384,12 +2409,15 @@ def _build_mapped_asis_context(sheet_id: str = "") -> str:
                 lane_h = _swim_h / n_lanes
                 idx = min(max(int(ny / lane_h), 0), n_lanes - 1)
                 return _sheet_lanes[idx]
-            # ③ 자동 추정 — y 최대값 기준 균등
-            all_ys = [nd.position_y for nd in s.nodes.values() if nd.level not in ("L2", "L3", "MEMO")]
-            if not all_ys:
-                return ""
-            y_max = max(all_ys)
-            lane_h = (y_max + 200) / n_lanes
+            # ③ 자동 추정 — consecutive y-gap median (fallback: y 최대값 기준)
+            if "lane_h" not in _auto_lane_h_cache:
+                _auto_lane_h_cache["lane_h"] = _estimate_lane_h()
+            lane_h = _auto_lane_h_cache["lane_h"]
+            if lane_h <= 0:
+                all_ys = [nd.position_y for nd in s.nodes.values() if nd.level not in ("L2", "L3", "MEMO")]
+                if not all_ys:
+                    return ""
+                lane_h = (max(all_ys) + 200) / n_lanes
             idx = min(max(int(ny / lane_h), 0), n_lanes - 1)
             return _sheet_lanes[idx]
 
@@ -2528,6 +2556,21 @@ def _build_mapped_asis_context(sheet_id: str = "") -> str:
                 # Decision 분기
                 branch_lines = _render_branches(l4n.id)
                 lines.extend(branch_lines)
+
+        # 🔑 L4 매칭이 안 된 L5 노드들 (To-Be 재번호 때문에 prefix 가 L4 와 불일치)
+        # — 별도 섹션으로 그대로 표시: multi-lane 핸드오프 정보 보존이 핵심
+        if l5_nodes:
+            rendered_l5_ids = set()
+            for l4n in l4_nodes:
+                for n in l5_nodes:
+                    if n.task_id and n.task_id.startswith(l4n.task_id + "."):
+                        rendered_l5_ids.add(n.id)
+            orphan_l5 = [n for n in l5_nodes if n.id not in rendered_l5_ids]
+            if orphan_l5:
+                lines.append("\n  - (시트 내 L5 노드 — 수행주체별)")
+                for l5n in sorted(orphan_l5, key=lambda x: (x.position_y, x.position_x)):
+                    lines.append(f"      └ L5 [{l5n.task_id or '-'}] {l5n.label}")
+                    lines.extend(_node_meta_lines(l5n, indent="          "))
 
     return "\n".join(lines)
 
@@ -5029,20 +5072,34 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
             else:
                 # ② swim_height / num_lanes 균등 분할 (또는 ③ 자동 추정)
                 swim_h = float(getattr(asis_sheet, "swim_height", 0) or 0)
-                if swim_h <= 0:
+                band: float | None = None
+                if swim_h > 0:
+                    band = swim_h / num_lanes
+                else:
+                    # 🔑 ③ 자동 추정 — consecutive y-gap median 우선
+                    # (workflow (4).json 류: 노드가 한 lane 에 집중되면 (y_max+200)/n 은 과소 추정됨.
+                    #  실제 lane 간 y-gap 중앙값이 경험적으로 lane 높이와 일치)
                     all_ys = [
                         nd.position_y for nd in asis_sheet.nodes.values()
                         if nd.level not in ("L2", "L3", "MEMO")
                     ]
                     if all_ys:
-                        y_max = max(all_ys)
-                        # hr-workflow-ai default swim_height = 2400 가정,
-                        # 데이터 y_max 가 더 크면 그것 사용
-                        swim_h = max(2400.0, y_max + 100.0)
+                        uniq_ys = sorted({round(y / 10) * 10 for y in all_ys})
+                        if len(uniq_ys) >= 2:
+                            gaps = [uniq_ys[i + 1] - uniq_ys[i] for i in range(len(uniq_ys) - 1)]
+                            meaningful = sorted(g for g in gaps if g >= 50)
+                            if meaningful:
+                                mid = len(meaningful) // 2
+                                band = (
+                                    float(meaningful[mid])
+                                    if len(meaningful) % 2 == 1
+                                    else float((meaningful[mid - 1] + meaningful[mid]) / 2)
+                                )
+                        if band is None or band <= 0:
+                            band = (max(all_ys) + 200.0) / num_lanes
                     else:
                         _y_to_lane_cache = {"valid": False}
-                if (_y_to_lane_cache or {}).get("valid") is None:
-                    band = swim_h / num_lanes
+                if band is not None:
                     _y_to_lane_cache = {
                         "valid": True, "mode": "uniform",
                         "band": band, "y_origin": 0.0, "num_lanes": num_lanes,
