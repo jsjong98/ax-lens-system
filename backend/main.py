@@ -3961,9 +3961,21 @@ async def generate_workflow_step1(request: Request):
     # 시나리오: 사용자가 L4 BM 안 돌리고 Background BM 만으로 Step 1 실행 → 다른 L4 의
     # Background BM 행이 LLM 컨텍스트에 그대로 흘러들어가 To-Be 가 라이프사이클 전체로 번지는 문제 방지
     def _scope_bm_rows_to_tasks(rows: list) -> list:
+        """__background__ 행을 L3+L4+L5 결합 + 공백 무시 매칭으로 한정 (위 _scope_cases_to_tasks 와 동일 룰).
+
+        is_background=False (동적 BM) 는 사용자가 명시적으로 만든 결과라 그대로 유지.
+        """
         if not step1_sheet_id or not scoped_tasks:
             return rows
-        # 도메인별 keyword 매칭 — scoped task 와 매칭되는 case_no 만 keep
+
+        def _norm(s: str) -> str:
+            return (s or "").lower().replace(" ", "").replace("\t", "")
+        haystacks = [
+            _norm(f"{getattr(t, 'l3', '')} {getattr(t, 'l4', '')} {getattr(t, 'name', '')}")
+            for t in scoped_tasks
+        ]
+
+        # 도메인별로 cases 모듈 로드 후 keyword 매칭 → kept case_no set 구성
         kept_case_nos: set = set()
         for _mod_name in (
             "recruit_benchmarks", "evaluation_benchmarks", "compensation_benchmarks",
@@ -3971,14 +3983,24 @@ async def generate_workflow_step1(request: Request):
         ):
             try:
                 _m = __import__(_mod_name)
-                for _t in scoped_tasks:
-                    _c = _m.match_benchmark_for_task(_t.name)
-                    if _c:
-                        kept_case_nos.add(_c.get("case_no"))
+                _all = (
+                    getattr(_m, "RECRUIT_CASES", None)
+                    or getattr(_m, "EVALUATION_CASES", None)
+                    or getattr(_m, "COMPENSATION_CASES", None)
+                    or getattr(_m, "LEARNING_CASES", None)
+                    or getattr(_m, "BP_CASES", None)
+                    or getattr(_m, "ER_CASES", None)
+                    or []
+                )
+                for _c in _all:
+                    for _kw in _c.get("match_keywords", []):
+                        _kw_n = _norm(_kw)
+                        if _kw_n and any(_kw_n in hs for hs in haystacks):
+                            kept_case_nos.add(_c.get("case_no"))
+                            break
             except Exception:
                 continue
-        # is_background=False 인 동적 BM 행은 그대로 유지 (사용자가 명시적으로 만든 결과)
-        # is_background=True 행만 scoped case_nos 로 필터
+
         out = []
         for r in rows:
             if r.get("is_background"):
@@ -4017,14 +4039,31 @@ async def generate_workflow_step1(request: Request):
     # ── L4 scope 일 때 (step1_sheet_id 지정) — scoped tasks 와 keyword 매칭되는 case 만 노출
     #    → LLM 이 다른 L4 lifecycle 까지 To-Be 설계하는 문제 방지
     def _scope_cases_to_tasks(cases: list, mod) -> list:
-        """case.match_keywords 가 scoped_tasks 의 task name 과 한 번이라도 매칭되면 keep."""
+        """case.match_keywords 와 scoped_tasks 의 L3+L4+L5 결합 텍스트가 한 번이라도 매칭되면 keep.
+
+        - L5 task name 만 보면 너무 좁아 (예: "채용 수요 매핑" 은 "채용 전략" 키워드와 안 맞음)
+        - L4 Activity 명 + L3 Process 명까지 함께 비교 → "연간 인력계획 수립" 같은 상위 컨텍스트가
+          "인력 계획" 키워드와 매칭되어 case 가 살아남음
+        - 공백 무시 비교로 "인력 계획" ↔ "인력계획" 표기 차이도 흡수
+        """
         if not step1_sheet_id or not scoped_tasks:
             return cases  # L3 scope or scope 정보 없음 → 필터 미적용
+
+        def _norm(s: str) -> str:
+            return (s or "").lower().replace(" ", "").replace("\t", "")
+
+        # 각 scoped task 별 haystack: L3 + L4 + L5 결합 (정규화)
+        haystacks = [
+            _norm(f"{getattr(t, 'l3', '')} {getattr(t, 'l4', '')} {getattr(t, 'name', '')}")
+            for t in scoped_tasks
+        ]
         matched_nos: set = set()
-        for t in scoped_tasks:
-            c = mod.match_benchmark_for_task(t.name)
-            if c:
-                matched_nos.add(c.get("case_no"))
+        for c in cases:
+            for kw in c.get("match_keywords", []):
+                kw_n = _norm(kw)
+                if kw_n and any(kw_n in hs for hs in haystacks):
+                    matched_nos.add(c.get("case_no"))
+                    break
         return [c for c in cases if c.get("case_no") in matched_nos]
 
     _bg_domains_injected: list[str] = []
