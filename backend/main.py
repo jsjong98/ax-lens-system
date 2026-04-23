@@ -2890,6 +2890,21 @@ def _step1_system_prompt(process_name: str, task_summary: str, pain_summary: str
 - 적용할 case 의 case_no 를 출력의 `applied_bg_cases` 배열에 명시하고, 선택 근거를 `applied_bg_cases_reason` 에 1~2문장으로 작성하세요.
 - 이 가이드는 Background BM Title 섹션뿐 아니라 일반 "벤치마킹 결과" 항목에도 동일 적용 — As-Is task lifecycle 과 무관한 사례는 무시.
 
+## ⚠️ task_name 명명 규칙 (`-` 구분자는 BM 전용 — 엄격)
+
+task_name 에 `" - "` (공백-대시-공백) 구분자는 **오직 BM attribution 에만 사용**. 다른 용도에 절대 금지:
+
+- ✅ **BM 적용 task** (해당 L5 가 Background BM 사례를 직접 실현) — 정확히 한 번만 prefix:
+  - 형식: `"<BM case title> - <구체 task명>"`
+  - 예: `"'스킬 추론' 기반 채용 전략 수립 지원 - 채용 수요 AI 분석"`
+  - **절대 금지**: prefix 를 두 번 이상 넣거나 (`"title - title - name"`) task_name 에 붙이고 또 Step 2 에서 다시 붙임
+  - BM case title 부분은 case.title 원문 그대로 (수정·요약 금지)
+
+- ❌ **BM 근거 없는 task** (Add-on / LLM 추론 / Gap 기반 신규 등):
+  - `" - "` 구분자 **사용 금지**
+  - 설명을 보조 표기하고 싶으면 본문을 ai_application / change_reason 에 넣거나 공백 없이 연결: `"예산 품의 자동화 검증 및 라우팅"` ✓
+  - 나쁜 예: `"예산 품의 자동화 - 예산 품의 자동 검증 및 라우팅"` ❌ (BM 없는데 - 쓰면 사용자가 BM prefix 로 오인)
+
 ## ⚠️ 재설계 범위 (swim lane 기준)
 {redesign_scope_note}
 
@@ -5417,6 +5432,22 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
                 # 프론트 LevelNode 가 prefix 부분을 파란색으로 강조 표시.
                 _orig_task_name = t.get("task_name", "") or tid
                 _display_label, _bm_source = _orig_task_name, None
+
+                def _prefix_once(title: str, base: str) -> str:
+                    """title prefix 중복 방지.
+                    base 가 이미 'title - ' 로 시작하거나 'title' 이 base 안에 포함되면 그대로 유지.
+                    (Step 1 inheritance 로 이미 prefix 붙은 경우 + backend 자동 부착 → 이중 prefix 막기)
+                    """
+                    if not title:
+                        return base
+                    base_s = (base or "").strip()
+                    title_s = title.strip()
+                    if base_s.startswith(f"{title_s} -") or base_s.startswith(f"{title_s} —"):
+                        return base_s   # 이미 prefix 포함
+                    if title_s in base_s:
+                        return base_s   # 어디든 들어있으면 이중 표기 방지
+                    return f"{title_s} - {base_s}"
+
                 # 0순위: LLM 이 명시한 bm_case_no + bm_case_domain — 가장 신뢰
                 # (Step 2 LLM 이 task_name 을 짧게 줄이면서 prefix 떼는 문제 해결용)
                 _llm_bm_case_no = t.get("bm_case_no")
@@ -5440,7 +5471,7 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
                         )
                         if _matched_case:
                             _bm_source = _matched_case["title"]
-                            _display_label = f"{_bm_source} - {_orig_task_name}"
+                            _display_label = _prefix_once(_bm_source, _orig_task_name)
                     except Exception:
                         pass
                 # 1순위: keyword 매칭 fallback (LLM 이 bm_case_no 안 적었을 때)
@@ -5457,7 +5488,8 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
                             _mod = __import__(_dom_mod)
                             _lbl, _src = _mod.attribute_task_name(_orig_task_name)
                             if _src:
-                                _display_label, _bm_source = _lbl, _src
+                                _bm_source = _src
+                                _display_label = _prefix_once(_src, _orig_task_name)
                                 break
                         except Exception:
                             continue
@@ -7161,6 +7193,14 @@ Pain Points (수집된 raw 목소리):
 - 신규 (NEW_) task 만 위 길이 가이드 (10~20자) 적용
 - 긴 action 문장·방법·결과 설명은 **ai_role / human_role / description 필드**에 넣을 것
 - task_name 은 Swim Lane 뱃지·PPT 상자에 표시되므로 짧고 명확해야 함 (단, BM prefix 는 보존)
+
+**⚠️ `" - "` 구분자는 BM attribution 전용 (엄격)**:
+- `"<BM case title> - <task명>"` 형식은 **해당 task 가 BM 사례를 직접 실현할 때만** 사용.
+- BM prefix 는 **정확히 한 번만** 붙음. 이미 Step 1 에서 붙었으면 그대로 두고, **다시 덧붙이지 말 것** (중복 prefix 금지).
+- Add-on / LLM 추론 task 는 `" - "` 사용 금지 → 공백 없이 연결하거나 ai_role/description 에 부가 설명.
+- 나쁜 예: `"예산 품의 자동화 - 예산 품의 자동 검증 및 라우팅"` ❌ (BM 근거 없음 → `-` 금지)
+- 좋은 예 (BM 있음): `"'스킬 추론' 기반 채용 전략 수립 지원 - 채용 수요 AI 분석"` ✓
+- 좋은 예 (Add-on): `"예산 품의 자동 검증 및 라우팅"` ✓
 
 ## ⚠️ task_id 형식 규칙
 
