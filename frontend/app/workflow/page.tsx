@@ -2736,25 +2736,85 @@ export default function WorkflowPage() {
 
                         {/* 소속 Task */}
                         <div className="space-y-1.5">
-                          {agent.assigned_tasks?.map((task) => (
-                            <div key={task.task_id} className="bg-gray-50 rounded-lg px-3 py-2 text-xs">
-                              <div className="flex items-center gap-2 mb-1">
-                                <span className="font-mono text-gray-400">{task.task_id}</span>
-                                <span className="font-medium text-gray-800">{task.task_name}</span>
-                                <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold ${
-                                  task.automation_level?.includes("Full") ? "bg-green-100 text-green-700" :
-                                  task.automation_level?.includes("on-the") ? "bg-blue-100 text-blue-700" :
-                                  "bg-yellow-100 text-yellow-700"
-                                }`}>
-                                  {task.automation_level}
-                                </span>
+                          {agent.assigned_tasks?.map((task) => {
+                            const t = task as typeof task & {
+                              source_basis?: "BM" | "PainPoint" | "Both" | "LLM";
+                              bm_origin?: "background" | "dynamic" | null;
+                              addressed_pain_task_ids?: string[];
+                            };
+                            const sb = t.source_basis;
+                            const bmOrigin = (t.bm_origin || "").toLowerCase();
+                            const bmLabel = bmOrigin === "dynamic" ? "Benchmarking (추가)" : "Benchmarking";
+                            const basisBadge = sb === "BM" ? bmLabel
+                              : sb === "PainPoint" ? "Pain Point"
+                              : sb === "Both" ? `${bmLabel} · Pain Point`
+                              : null;
+                            const basisColor = sb === "BM" ? "bg-sky-100 text-sky-700 border-sky-300"
+                              : sb === "PainPoint" ? "bg-rose-100 text-rose-700 border-rose-300"
+                              : sb === "Both" ? "bg-violet-100 text-violet-700 border-violet-300"
+                              : "";
+                            // Pain 기반 task: step2Result.pain_context 에서 addressed_pain_task_ids 의
+                            // pain 상세를 찾아서 표시
+                            const painCtx = (step2Result as unknown as { pain_context?: Array<{ task_id: string; task_name: string; pain_points?: Array<{ type: string; text: string }> }> }).pain_context ?? [];
+                            const addressed = (t.addressed_pain_task_ids || []).map((pid) => {
+                              const ctx = painCtx.find((p) => p.task_id === pid);
+                              return ctx ? { id: pid, task_name: ctx.task_name, pains: ctx.pain_points || [] } : null;
+                            }).filter(Boolean) as Array<{ id: string; task_name: string; pains: Array<{ type: string; text: string }> }>;
+                            return (
+                              <div key={task.task_id} className="bg-gray-50 rounded-lg px-3 py-2 text-xs">
+                                <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                  <span className="font-mono text-gray-400">{task.task_id}</span>
+                                  <span className="font-medium text-gray-800">{task.task_name}</span>
+                                  <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold ${
+                                    task.automation_level?.includes("Full") ? "bg-green-100 text-green-700" :
+                                    task.automation_level?.includes("on-the") ? "bg-blue-100 text-blue-700" :
+                                    "bg-yellow-100 text-yellow-700"
+                                  }`}>
+                                    {task.automation_level}
+                                  </span>
+                                  {basisBadge && (
+                                    <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold border ${basisColor}`}>
+                                      {basisBadge}
+                                    </span>
+                                  )}
+                                  {/* NEW task (NEW_ 접두 또는 신규 L5 번호) 표시 */}
+                                  {task.task_id?.startsWith("NEW") && (
+                                    <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold border bg-emerald-100 text-emerald-700 border-emerald-300">
+                                      NEW Agent
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-gray-500">
+                                  AI: {task.ai_role}
+                                  {task.human_role && <span className="ml-2">| Human: {task.human_role}</span>}
+                                </div>
+                                {/* Pain Point 추적 — 어떤 As-Is pain 때문에 이 task 가 추가됐는지 */}
+                                {(sb === "PainPoint" || sb === "Both") && addressed.length > 0 && (
+                                  <div className="mt-1.5 border-l-2 border-rose-300 pl-2 py-1 bg-rose-50 rounded-r">
+                                    <div className="text-[9px] font-bold text-rose-700 mb-0.5">🎯 해결 Pain Point</div>
+                                    {addressed.slice(0, 3).map((a) => (
+                                      <div key={a.id} className="text-[10px] text-rose-900">
+                                        <span className="font-mono text-rose-500 mr-1">[{a.id}]</span>
+                                        <span className="font-semibold">{a.task_name}:</span>
+                                        <span className="ml-1">
+                                          {a.pains.slice(0, 2).map((p, i) => (
+                                            <span key={i} className="inline-block mr-1.5">
+                                              <span className="text-rose-600 font-medium">[{p.type}]</span>{" "}
+                                              {p.text?.slice(0, 50)}{(p.text?.length ?? 0) > 50 ? "…" : ""}
+                                            </span>
+                                          ))}
+                                          {a.pains.length > 2 && <span className="text-rose-500">+{a.pains.length - 2}건</span>}
+                                        </span>
+                                      </div>
+                                    ))}
+                                    {addressed.length > 3 && (
+                                      <div className="text-[9px] text-rose-500 mt-0.5">+ {addressed.length - 3}개 As-Is task 더 해결</div>
+                                    )}
+                                  </div>
+                                )}
                               </div>
-                              <div className="text-gray-500">
-                                AI: {task.ai_role}
-                                {task.human_role && <span className="ml-2">| Human: {task.human_role}</span>}
-                              </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       </div>
                     ))}

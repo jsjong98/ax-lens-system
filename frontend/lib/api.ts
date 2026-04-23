@@ -1819,6 +1819,15 @@ export interface NewWorkflowAssignedTask {
   output_data: string[];
   automation_level: "Human-on-the-Loop" | "Human-in-the-Loop" | "Human-Supervised";
   ai_technique?: string;   // task 전용 AI 기법 (Agent 레벨과 다를 수 있음)
+  /** 설계 근거 분류 (Step 2 LLM 선언 또는 backend 자동 분류) */
+  source_basis?: "BM" | "PainPoint" | "Both" | "LLM";
+  /** BM 출처 — 'background' (PwC 사전 큐레이션) | 'dynamic' (Gap 분석 추가 검색) */
+  bm_origin?: "background" | "dynamic" | null;
+  /** 적용된 Background BM case 번호 (source_basis='BM' or 'Both' 일 때) */
+  bm_case_no?: number | null;
+  bm_case_domain?: string | null;
+  /** 이 task 가 해결하는 As-Is L5 task_id 목록 (Pain Point 기반일 때) */
+  addressed_pain_task_ids?: string[];
 }
 
 export interface NewWorkflowAgent {
