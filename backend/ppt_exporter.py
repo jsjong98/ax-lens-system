@@ -785,26 +785,6 @@ def export_ppt(
     # Slide 3+: Agent 정의서
     agents = design.get("agent_definitions", []) if design else []
 
-    # Senior AI가 없으면 워크플로우 정보로 자동 생성하여 맨 앞에 추가
-    has_senior = any(a.get("agent_type") == "Senior AI" for a in agents)
-    if not has_senior and agents:
-        process_name = workflow.get("process_name", "") if workflow else ""
-        junior_names = [a.get("agent_name", "") for a in agents if a.get("agent_type") != "Senior AI"][:3]
-        senior_def = {
-            "agent_id": "senior-auto",
-            "agent_name": f"{process_name} 오케스트레이터" if process_name else "Senior AI 오케스트레이터",
-            "agent_type": "Senior AI",
-            "roles": ["Junior AI Agent 실행 오케스트레이션", "전체 워크플로우 조율 및 결과 품질 관리"],
-            "input_data": [f"Junior AI 실행 결과 ({', '.join(junior_names)})" if junior_names else "Junior AI 실행 결과", "업무 요청 데이터"],
-            "processing_steps": [
-                {"step_name": "워크플로우 분석", "method": "LLM", "result": "실행 계획"},
-                {"step_name": "Junior AI 지시·조율", "method": "오케스트레이션", "result": "실행 결과"},
-                {"step_name": "결과 품질 검증", "method": "LLM", "result": "검증 보고"},
-            ],
-            "output_data": ["Junior AI 실행 지시", "최종 결과 품질 검증 보고"],
-        }
-        agents = [senior_def] + agents
-
     if agents:
         # 1) 먼저 필요한 슬라이드 수만큼 복제 (빈 상태에서 복제)
         agent_slides = [prs.slides[3]]  # 첫 번째는 원본

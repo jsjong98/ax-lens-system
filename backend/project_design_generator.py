@@ -645,32 +645,6 @@ def _dict_to_project_design(data: dict, project_title: str = "") -> ProjectDesig
             flow_step_orders=a.get("flow_step_orders", []),
         ))
 
-    # LLM이 Senior AI를 빠뜨렸으면 자동 추가
-    has_senior = any(ad.agent_type == "Senior AI" for ad in agent_defs)
-    if not has_senior and agent_defs:
-        junior_names = [ad.agent_name for ad in agent_defs][:3]
-        senior_def = AgentDefinition(
-            agent_id="senior-auto",
-            agent_name="Senior AI 오케스트레이터",
-            agent_type="Senior AI",
-            roles=[
-                "Junior AI Agent 실행 오케스트레이션",
-                "전체 워크플로우 조율 및 결과 품질 관리",
-            ],
-            input_data=[
-                f"Junior AI 실행 결과 ({', '.join(junior_names)})" if junior_names else "Junior AI 실행 결과",
-                "업무 요청 데이터",
-            ],
-            processing_steps=[
-                ProcessingStep(1, "워크플로우 분석", "LLM", "실행 계획"),
-                ProcessingStep(2, "Junior AI 지시·조율", "오케스트레이션", "실행 결과"),
-                ProcessingStep(3, "결과 품질 검증", "LLM", "검증 보고"),
-            ],
-            output_data=["Junior AI 실행 지시", "최종 결과 품질 검증 보고"],
-            flow_step_orders=[1],
-        )
-        agent_defs = [senior_def] + agent_defs
-
     return ProjectDesign(
         project_title=project_title,
         ai_service_flow=AIServiceFlow(
@@ -782,39 +756,17 @@ def generate_project_design_fallback(
             flow_step_orders=[idx + 2],
         ))
 
-    # Senior AI가 없으면 오케스트레이터 Agent 자동 생성
+    # Flow steps 기본 생성 — Senior AI 는 agent_defs 에 있을 때만 첫 스텝으로 추가
     has_senior = any(ad.agent_type == "Senior AI" for ad in agent_defs)
-    if not has_senior and agent_defs:
-        junior_names = [ad.agent_name for ad in agent_defs]
-        senior_input = [f"Junior AI 실행 결과 ({', '.join(junior_names[:3])})", "업무 요청 데이터"]
-        senior_output = ["Junior AI 실행 지시", "최종 결과 품질 검증 보고"]
-        senior_def = AgentDefinition(
-            agent_id="senior-auto",
-            agent_name=f"{process_name} 오케스트레이터",
-            agent_type="Senior AI",
-            roles=[
-                "Junior AI Agent 실행 오케스트레이션",
-                "전체 워크플로우 조율 및 결과 품질 관리",
-            ],
-            input_data=senior_input,
-            processing_steps=[
-                ProcessingStep(1, "워크플로우 분석", "LLM", "실행 계획"),
-                ProcessingStep(2, "Junior AI 지시·조율", "오케스트레이션", "실행 결과"),
-                ProcessingStep(3, "결과 품질 검증", "LLM", "검증 보고"),
-            ],
-            output_data=senior_output,
-            flow_step_orders=[1],
-        )
-        agent_defs = [senior_def] + agent_defs
-
-    # Flow steps 기본 생성
-    steps = [
-        AIServiceFlowStep(1, "전략 수립 및 오케스트레이션", "Senior AI", "전체 워크플로우 조율"),
-    ]
-    for i, ad in enumerate(agent_defs):
+    steps: list[AIServiceFlowStep] = []
+    if has_senior:
+        steps.append(AIServiceFlowStep(
+            1, "전략 수립 및 오케스트레이션", "Senior AI", "전체 워크플로우 조율",
+        ))
+    for ad in agent_defs:
         if ad.agent_type != "Senior AI":
             steps.append(AIServiceFlowStep(
-                i + 2, ad.agent_name, "Junior AI", ad.roles[0] if ad.roles else "",
+                len(steps) + 1, ad.agent_name, "Junior AI", ad.roles[0] if ad.roles else "",
             ))
     steps.append(AIServiceFlowStep(
         len(steps) + 1, "검토 및 최종 승인", "HR 담당자", "결과물 검토 및 승인",

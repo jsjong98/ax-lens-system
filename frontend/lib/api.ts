@@ -846,7 +846,8 @@ export interface ToBeResult {
       is_hybrid_part: boolean;
       reason: string;
     }>;
-    senior_agent: { id: string; name: string; description: string };
+    senior_agent: { id: string; name: string; description: string; orchestration_strategy?: string } | null;
+    senior_decision?: string;
   };
   execution_steps: Array<{
     step: number;

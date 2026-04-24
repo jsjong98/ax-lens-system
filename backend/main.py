@@ -4960,20 +4960,6 @@ async def _build_tobe_sheet_from_asis(asis_sheet, process_name: str) -> dict:
             if tid:
                 junior_replaced_tids.add(tid)
 
-    # 🔑 Senior AI fallback — Junior AI 가 2개 이상인데 Senior AI 가 없으면 자동 주입
-    # (LLM 이 3가지 기준을 엄격히 보고 Senior 생략 시, 복수 Junior 간 조율 주체가 없어
-    #  pipeline 흐름이 끊겨 보임. 2 agent 이상이면 오케스트레이터가 필요하다고 간주.)
-    if len(junior_agents) >= 2 and not senior_agents:
-        senior_agents.append({
-            "agent_id": "auto_senior_0",
-            "agent_name": f"{sheet_name} 오케스트레이터" if sheet_name else "Senior AI Orchestrator",
-            "ai_technique": "플로우 제어, 상태 관리, 예외 라우팅",
-            "description": f"{len(junior_agents)}개 Junior AI 의 실행 순서·결과 집계·예외 케이스를 관리",
-            "tasks": [],
-        })
-        print(f"[TOBE] Senior AI 자동 주입 — Junior {len(junior_agents)}개 존재, "
-              f"Senior 누락 보완", flush=True)
-
     # 타겟 L4 스코프 추출 (task_id 접두사 + l4 이름)
     target_l4_ids: set[str] = set()
     target_l4_names: set[str] = set()

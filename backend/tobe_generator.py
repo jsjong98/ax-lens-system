@@ -82,27 +82,31 @@ class HumanStep:
 
 @dataclass
 class SeniorAgent:
-    """전체를 관장하는 Senior AI Agent (과제당 1개)."""
+    """Senior AI orchestrator — 오케스트레이션 역할 메타데이터.
+    워크플로우 구조적 복잡도(Q1/Q2/Q3) 판단에서 필요할 때만 생성됨.
+    """
     id: str
     name: str
-    junior_agents: list[JuniorAgent] = field(default_factory=list)
-    human_steps: list[HumanStep] = field(default_factory=list)
-    input_sources: list[InputSource] = field(default_factory=list)
-    orchestration_flow: list[dict] = field(default_factory=list)
     description: str = ""
-
-    @property
-    def total_junior_tasks(self) -> int:
-        return sum(j.task_count for j in self.junior_agents)
+    orchestration_strategy: str = ""
 
 
 @dataclass
 class ToBeWorkflow:
-    """To-Be Workflow 전체."""
-    senior_agent: SeniorAgent
+    """To-Be Workflow 전체 — Junior/Human/Input 은 항상 존재, Senior 는 선택."""
+    process_name: str = ""
+    junior_agents: list[JuniorAgent] = field(default_factory=list)
+    human_steps: list[HumanStep] = field(default_factory=list)
+    input_sources: list[InputSource] = field(default_factory=list)
+    orchestration_flow: list[dict] = field(default_factory=list)
+    senior_agent: SeniorAgent | None = None
     execution_steps: list[dict] = field(default_factory=list)
     react_flow: dict = field(default_factory=dict)
     summary: dict = field(default_factory=dict)
+
+    @property
+    def total_junior_tasks(self) -> int:
+        return sum(j.task_count for j in self.junior_agents)
 
 
 # ── LLM 프롬프트 ─────────────────────────────────────────────────────────────
@@ -151,13 +155,57 @@ Step E. 오케스트레이션 전략
   - 각 Junior Agent 또는 Human이 업무를 시작하기 위해 받아야 하는 자료
   - 예: ERP 데이터, 설문 결과, 규정 문서, 외부 벤치마크 자료, 이전 단계 산출물
 
-■ Senior AI Agent (Orchestrator) = 대리·과장급 관리자
+■ Senior AI Agent (Orchestrator) = 대리·과장급 관리자 — **선택적으로 생성**
+  - 워크플로우의 구조적 복잡도를 보고 **필요할 때만** 생성 (아래 Q1/Q2/Q3 판단)
   - As-Is에 없던 새로운 엔티티로 신규 생성
   - 팀장이 팀원들에게 업무를 배분하고 진행 상황을 관리하듯이,
     모든 Junior Agent의 실행 순서를 관리
   - Junior Agent 간 산출물 전달 및 정합성 검증
   - Human 수행 단계로의 핸드오프 제어
   - 각 Junior Agent에게 기동 지시(어떤 범위와 기준으로 수행할지) 전달
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【🔑 Senior AI 생성 여부 판단 — 매우 중요】
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+**Senior AI는 항상 만들지 않습니다.** 아래 3가지 질문을 평가한 뒤 **하나라도 Yes** 이면
+Senior AI 를 생성하고, **세 가지 모두 No** 이면 Senior AI 를 **생성하지 마세요**
+(출력 JSON 의 `senior_agent` 값을 `null` 로 두거나 키 자체를 생략).
+
+평가 초점: **워크플로우의 구조적 복잡성**
+
+### Q1. 여러 이질적인 작업자 참여
+"서로 다른 역량·도구·권한을 가진 2개 이상의 작업자(AI Agent 또는 인간)가 참여하며,
+이들 간 **작업 위임 & 결과 통합**이 필요한가?"
+- Yes: 이질적 작업자 2+ 참여, 위임·통합 필요
+- No: 단일 또는 동종 Agent 로 처리 가능
+
+"이질적 작업자" 조작적 정의 (아래 중 하나 이상 충족):
+  (a) 서로 다른 시스템 접근 권한 — 예: HR 담당자(인사 DB) + 현업 팀장(업무시스템)
+  (b) 서로 다른 프로세스 담당 — 예: 채용 담당자 + 교육 담당자
+  (c) 조직 외부 이해관계자 — 예: 헤드헌터, 외부 평가기관, 아웃소싱 업체
+
+### Q2. 비선형 작업 의존성
+"Task 간에 **분기 / 병렬 / merge 등 단순 순차(A→B→C)를 넘는 의존 구조**가 존재하는가?"
+- Yes: 분기·병렬·합류 구조 존재
+- No: 단순 순차 흐름 (A→B→C→D)
+
+### Q3. Cross-Task 상태 관리
+"앞선 Task의 결과가 **후속 Task 의 입력·조건·경로를 결정**하여,
+전체 워크플로우의 **누적 상태(state)를 추적·전달**해야 하는가?"
+- Yes: 누적 상태 추적·전달 필요
+- No: Task 간 독립적이거나 단순 전달만 하면 충분
+
+### 판단 예시
+- ✅ Senior 필요: Q1=Yes (HR+현업+외부 3자), Q2=Yes (분기·병렬), Q3=Yes (상태 추적)
+- ❌ Senior 불필요: Q1=No (HR 단독), Q2=No (선형), Q3=No (단순 전달) → `senior_agent: null`
+
+### 출력 규약
+- Senior 생성 시: `senior_agent` 에 name/description/orchestration_strategy 포함
+- Senior 미생성 시: `senior_agent: null` 또는 키 생략
+- 생성 여부와 판단 근거를 `senior_decision` 필드에 한 줄로 기록:
+  예: "Q1 Yes (HR+현업 이질 협업), Q2 No, Q3 Yes → 생성"
+  예: "Q1 No (단일 HR), Q2 No (선형), Q3 No (단순 전달) → 미생성"
 
 ■ Junior AI Agent = 사원·주임급 실무자
   - 같은 L4 안에서 연속된 AI L5 태스크 2개 이상을 묶어 순차 파이프라인으로 처리
@@ -260,6 +308,7 @@ Step E. 오케스트레이션 전략
     "description": "Junior Agent의 실행을 관리하고, Agent 간 산출물을 전달하며, Human 단계 핸드오프를 제어하는 오케스트레이터",
     "orchestration_strategy": "Agent 1, 2를 병렬 기동 → 산출물 수령 → Agent 3에 전달 → Human 검토·승인 → 보고"
   },
+  "senior_decision": "Q1 Yes (HR+현업 이질), Q2 Yes (병렬), Q3 Yes (상태 추적) → 생성",
   "workflow_optimization": {
     "parallel_opportunities": ["Agent 1과 Agent 2는 독립적이므로 병렬 수행 가능"],
     "sequential_dependencies": ["Agent 3은 Agent 1·2의 산출물이 필요하므로 순차"],
@@ -506,60 +555,57 @@ def _build_tobe_from_llm_result(
                 node_id=node.get("node_id", ""),
             ))
 
-    # ── Senior Agent ──
-    sa_data = llm_result.get("senior_agent", {})
-    opt_data = llm_result.get("workflow_optimization", {})
+    # ── 오케스트레이션 흐름 ── (Senior 유무와 무관하게 먼저 계산)
+    orchestration_flow = _build_orchestration_flow(
+        as_is_sheet, junior_agents, human_steps
+    )
+    if not orchestration_flow:
+        orchestration_flow = _build_sequential_flow(junior_agents, human_steps)
 
-    senior = SeniorAgent(
-        id="senior-ai-1",
-        name=sa_data.get("name", f"{process_name} Senior AI Orchestrator"),
+    # ── Senior Agent ── Q1/Q2/Q3 판정 결과를 LLM 이 `senior_agent` 로 전달
+    # null / 누락 / 빈 dict 이면 Senior 미생성
+    opt_data = llm_result.get("workflow_optimization", {})
+    sa_data = llm_result.get("senior_agent")
+    decision_note = llm_result.get("senior_decision", "")
+
+    senior: SeniorAgent | None = None
+    if isinstance(sa_data, dict) and sa_data:
+        senior_desc = sa_data.get("description", "")
+        improvement = opt_data.get("improvement_notes", "")
+        if improvement:
+            senior_desc += f"\n개선 효과: {improvement}"
+        senior = SeniorAgent(
+            id="senior-ai-1",
+            name=sa_data.get("name", f"{process_name} Senior AI Orchestrator"),
+            description=senior_desc,
+            orchestration_strategy=sa_data.get("orchestration_strategy", ""),
+        )
+
+    workflow = ToBeWorkflow(
+        process_name=process_name or as_is_sheet.name,
         junior_agents=junior_agents,
         human_steps=human_steps,
         input_sources=input_sources,
-        description=sa_data.get("description", ""),
+        orchestration_flow=orchestration_flow,
+        senior_agent=senior,
     )
 
-    # 오케스트레이션 전략을 description에 추가
-    strategy = sa_data.get("orchestration_strategy", "")
-    if strategy:
-        senior.description += f"\n\n오케스트레이션 전략: {strategy}"
+    # ── 실행 스텝 / React Flow / 요약 ──
+    workflow.execution_steps = _build_execution_steps(workflow)
+    workflow.react_flow = _generate_react_flow(workflow, as_is_sheet)
+    workflow.summary = _build_summary(workflow, classified_nodes)
 
-    improvement = opt_data.get("improvement_notes", "")
-    if improvement:
-        senior.description += f"\n개선 효과: {improvement}"
-
-    # ── 오케스트레이션 흐름 ──
-    senior.orchestration_flow = _build_orchestration_flow(
-        as_is_sheet, junior_agents, human_steps
-    )
-
-    # orchestration_flow가 비어있으면 순차 흐름 생성
-    if not senior.orchestration_flow:
-        senior.orchestration_flow = _build_sequential_flow(junior_agents, human_steps)
-
-    # ── 실행 스텝 ──
-    execution_steps = _build_execution_steps(senior)
-
-    # ── React Flow ──
-    react_flow = _generate_react_flow(senior, as_is_sheet)
-
-    # ── 요약 ──
-    summary = _build_summary(senior, classified_nodes)
-
-    # LLM 최적화 정보 추가
+    # LLM 최적화 정보 + 판정 근거 추가
     if opt_data:
-        summary["optimization"] = {
+        workflow.summary["optimization"] = {
             "parallel_opportunities": opt_data.get("parallel_opportunities", []),
             "sequential_dependencies": opt_data.get("sequential_dependencies", []),
-            "improvement_notes": improvement,
+            "improvement_notes": opt_data.get("improvement_notes", ""),
         }
+    if decision_note:
+        workflow.summary["senior_decision"] = decision_note
 
-    return ToBeWorkflow(
-        senior_agent=senior,
-        execution_steps=execution_steps,
-        react_flow=react_flow,
-        summary=summary,
-    )
+    return workflow
 
 
 # ── To-Be 생성 (규칙 기반 fallback) ──────────────────────────────────────────
@@ -589,43 +635,80 @@ def generate_tobe(
     for agent in junior_agents:
         all_input_sources.extend(agent.input_sources)
 
-    # 6. Senior Agent 정의
-    senior = SeniorAgent(
-        id="senior-ai-1",
-        name=f"{process_name or as_is_sheet.name} Senior AI Orchestrator",
+    # 6. 오케스트레이션 흐름
+    orchestration_flow = _build_orchestration_flow(
+        as_is_sheet, junior_agents, human_steps
+    )
+    if not orchestration_flow:
+        orchestration_flow = _build_sequential_flow(junior_agents, human_steps)
+
+    # 7. Senior AI 필요 여부 판단 (Q1/Q2/Q3 규칙 기반 heuristic)
+    senior, decision_note = _decide_senior_rule_based(
+        junior_agents, human_steps, orchestration_flow,
+        process_name or as_is_sheet.name,
+    )
+
+    workflow = ToBeWorkflow(
+        process_name=process_name or as_is_sheet.name,
         junior_agents=junior_agents,
         human_steps=human_steps,
         input_sources=all_input_sources,
+        orchestration_flow=orchestration_flow,
+        senior_agent=senior,
+    )
+
+    # 8. 실행 스텝 / React Flow / 요약
+    workflow.execution_steps = _build_execution_steps(workflow)
+    workflow.react_flow = _generate_react_flow(workflow, as_is_sheet)
+    workflow.summary = _build_summary(workflow, classified_nodes)
+    workflow.summary["senior_decision"] = decision_note
+
+    return workflow
+
+
+def _decide_senior_rule_based(
+    junior_agents: list[JuniorAgent],
+    human_steps: list[HumanStep],
+    orchestration_flow: list[dict],
+    process_name: str,
+) -> tuple[SeniorAgent | None, str]:
+    """규칙 기반 fallback: Q1/Q2/Q3 heuristic 로 Senior AI 필요 여부 판단.
+
+    - Q1 (이질 작업자): Junior + Human 혼재 → Yes
+    - Q2 (비선형 의존): orchestration_flow 에 병렬 스텝 존재 → Yes
+    - Q3 (cross-task 상태): Junior 3개 이상 → 약한 Yes 시그널
+    셋 다 No 이면 Senior 미생성.
+    """
+    q1 = bool(junior_agents) and bool(human_steps)
+    q2 = any(step.get("is_parallel") for step in orchestration_flow)
+    q3 = len(junior_agents) >= 3
+
+    if not (q1 or q2 or q3):
+        note = (
+            f"Q1 No (Junior {len(junior_agents)}/Human {len(human_steps)} 단독), "
+            f"Q2 No (선형), Q3 No → 미생성"
+        )
+        return None, note
+
+    reasons = []
+    if q1:
+        reasons.append(f"Q1 Yes (Junior+Human 혼재: {len(junior_agents)}/{len(human_steps)})")
+    if q2:
+        reasons.append("Q2 Yes (병렬 스텝)")
+    if q3:
+        reasons.append(f"Q3 Yes (Junior {len(junior_agents)}개)")
+    note = ", ".join(reasons) + " → 생성"
+
+    senior = SeniorAgent(
+        id="senior-ai-1",
+        name=f"{process_name} Senior AI Orchestrator",
         description=(
-            f"신규 생성된 오케스트레이터 Agent입니다. "
             f"{len(junior_agents)}개 Junior AI Agent의 실행 순서를 관리하고, "
             f"각 Agent 간 산출물 정합성을 검증하며, "
             f"Human 수행 단계({len(human_steps)}건)로의 핸드오프를 제어합니다."
         ),
     )
-
-    # 6. 오케스트레이션 흐름
-    senior.orchestration_flow = _build_orchestration_flow(
-        as_is_sheet, junior_agents, human_steps
-    )
-    if not senior.orchestration_flow:
-        senior.orchestration_flow = _build_sequential_flow(junior_agents, human_steps)
-
-    # 7. 실행 스텝
-    execution_steps = _build_execution_steps(senior)
-
-    # 8. React Flow JSON
-    react_flow = _generate_react_flow(senior, as_is_sheet)
-
-    # 9. 요약
-    summary = _build_summary(senior, classified_nodes)
-
-    return ToBeWorkflow(
-        senior_agent=senior,
-        execution_steps=execution_steps,
-        react_flow=react_flow,
-        summary=summary,
-    )
+    return senior, note
 
 
 # ── 내부 함수 ─────────────────────────────────────────────────────────────────
@@ -1037,14 +1120,14 @@ def _build_sequential_flow(
     return flow
 
 
-def _build_execution_steps(senior: SeniorAgent) -> list[dict]:
+def _build_execution_steps(workflow: ToBeWorkflow) -> list[dict]:
     """To-Be 실행 스텝을 생성합니다."""
     steps = []
     step_num = 1
-    for flow_step in senior.orchestration_flow:
+    for flow_step in workflow.orchestration_flow:
         agents_in_step = []
         for agent_id in flow_step["agents"]:
-            junior = next((j for j in senior.junior_agents if j.id == agent_id), None)
+            junior = next((j for j in workflow.junior_agents if j.id == agent_id), None)
             if junior:
                 agents_in_step.append({
                     "type": "junior_ai",
@@ -1071,7 +1154,7 @@ def _build_execution_steps(senior: SeniorAgent) -> list[dict]:
                     ],
                 })
                 continue
-            human = next((h for h in senior.human_steps if h.id == agent_id), None)
+            human = next((h for h in workflow.human_steps if h.id == agent_id), None)
             if human:
                 agents_in_step.append({
                     "type": "human",
@@ -1113,58 +1196,72 @@ def _agent_color(idx: int) -> str:
 # ── React Flow 생성 ───────────────────────────────────────────────────────────
 
 def _generate_react_flow(
-    senior: SeniorAgent,
+    workflow: ToBeWorkflow,
     as_is_sheet: WorkflowSheet,
 ) -> dict:
     """To-Be 워크플로우를 React Flow 호환 JSON으로 생성합니다."""
     nodes = []
     edges = []
 
-    lanes = ["Input", "Senior AI", "Junior AI", "Human"]
+    senior = workflow.senior_agent
+    has_senior = senior is not None
+
+    # Senior AI 없으면 lane 에서도 제외
+    lanes = ["Input", "Senior AI", "Junior AI", "Human"] if has_senior \
+        else ["Input", "Junior AI", "Human"]
 
     LANE_HEIGHT = 300
     NODE_GAP_X = 280
     START_X = 200
     START_Y = 50
 
-    y_offsets = {
-        "input": START_Y,
-        "senior": START_Y + LANE_HEIGHT,
-        "junior": START_Y + LANE_HEIGHT * 2,
-        "human": START_Y + LANE_HEIGHT * 3,
-    }
+    if has_senior:
+        y_offsets = {
+            "input": START_Y,
+            "senior": START_Y + LANE_HEIGHT,
+            "junior": START_Y + LANE_HEIGHT * 2,
+            "human": START_Y + LANE_HEIGHT * 3,
+        }
+    else:
+        y_offsets = {
+            "input": START_Y,
+            "junior": START_Y + LANE_HEIGHT,
+            "human": START_Y + LANE_HEIGHT * 2,
+        }
 
     current_x = START_X
 
-    # Senior AI 노드
-    senior_node_id = "tobe-senior"
-    nodes.append({
-        "id": senior_node_id,
-        "type": "l3",
-        "position": {"x": START_X, "y": y_offsets["senior"]},
-        "data": {
-            "label": senior.name,
-            "level": "Senior AI",
-            "id": senior.id,
-            "description": senior.description,
-            "agentType": "senior",
-        },
-    })
+    # Senior AI 노드 — 있을 때만 생성
+    senior_node_id = "tobe-senior" if has_senior else ""
+    if has_senior:
+        nodes.append({
+            "id": senior_node_id,
+            "type": "l3",
+            "position": {"x": START_X, "y": y_offsets["senior"]},
+            "data": {
+                "label": senior.name,
+                "level": "Senior AI",
+                "id": senior.id,
+                "description": senior.description,
+                "agentType": "senior",
+            },
+        })
 
     # Junior Agent 인덱스 매핑 (색상용)
     junior_idx_map: dict[str, int] = {
-        j.id: i for i, j in enumerate(senior.junior_agents)
+        j.id: i for i, j in enumerate(workflow.junior_agents)
     }
 
-    prev_step_node_ids: list[str] = [senior_node_id]
+    # 시작점: Senior 있으면 Senior 에서, 없으면 없음 (Input → Junior 직결)
+    prev_step_node_ids: list[str] = [senior_node_id] if has_senior else []
 
-    for step_idx, flow_step in enumerate(senior.orchestration_flow):
+    for step_idx, flow_step in enumerate(workflow.orchestration_flow):
         step_node_ids: list[str] = []
         branch_x = current_x
 
         for agent_id in flow_step["agents"]:
             # Junior Agent
-            junior = next((j for j in senior.junior_agents if j.id == agent_id), None)
+            junior = next((j for j in workflow.junior_agents if j.id == agent_id), None)
             if junior:
                 jnode_id = f"tobe-{junior.id}"
                 j_color = _agent_color(junior_idx_map.get(junior.id, 0))
@@ -1269,7 +1366,7 @@ def _generate_react_flow(
                 continue
 
             # Human 노드
-            human = next((h for h in senior.human_steps if h.id == agent_id), None)
+            human = next((h for h in workflow.human_steps if h.id == agent_id), None)
             if human:
                 hnode_id = f"tobe-{human.id}"
                 nodes.append({
@@ -1292,9 +1389,9 @@ def _generate_react_flow(
         for snid in step_node_ids:
             for prev_id in prev_step_node_ids:
                 edge_label = ""
-                if prev_id == senior_node_id:
+                if has_senior and prev_id == senior_node_id:
                     # Senior → Junior: 기동 지시 라벨
-                    junior = next((j for j in senior.junior_agents if f"tobe-{j.id}" == snid), None)
+                    junior = next((j for j in workflow.junior_agents if f"tobe-{j.id}" == snid), None)
                     if junior and junior.senior_instruction:
                         edge_label = junior.senior_instruction[:30]
                     else:
@@ -1313,29 +1410,29 @@ def _generate_react_flow(
         prev_step_node_ids = step_node_ids
         current_x = branch_x + NODE_GAP_X // 2
 
-    # ── Junior → Senior 피드백 엣지 (GRAY #999999) ──
-    for junior in senior.junior_agents:
-        jnode_id = f"tobe-{junior.id}"
-        edges.append({
-            "id": f"e-feedback-{jnode_id}-{senior_node_id}",
-            "source": jnode_id,
-            "target": senior_node_id,
-            "type": "smoothstep",
-            "animated": False,
-            "style": {"stroke": "#999999", "strokeWidth": 1.5, "strokeDasharray": "4 2"},
-            "markerEnd": {"type": "arrowclosed", "color": "#999999"},
-            "label": "결과 반환",
-        })
+    # ── Junior → Senior 피드백 엣지 (GRAY #999999) — Senior 있을 때만 ──
+    if has_senior:
+        for junior in workflow.junior_agents:
+            jnode_id = f"tobe-{junior.id}"
+            edges.append({
+                "id": f"e-feedback-{jnode_id}-{senior_node_id}",
+                "source": jnode_id,
+                "target": senior_node_id,
+                "type": "smoothstep",
+                "animated": False,
+                "style": {"stroke": "#999999", "strokeWidth": 1.5, "strokeDasharray": "4 2"},
+                "markerEnd": {"type": "arrowclosed", "color": "#999999"},
+                "label": "결과 반환",
+            })
 
     # ── Junior → HR 엣지 (GOLD #B48E04) — human_role이 있는 태스크의 Agent만 ──
-    for junior in senior.junior_agents:
+    for junior in workflow.junior_agents:
         has_human = any(
             t.classification == "AI + Human" for t in junior.tasks
         )
         if has_human:
             jnode_id = f"tobe-{junior.id}"
-            # 해당 Agent와 매칭되는 Human 노드 찾기
-            for hs in senior.human_steps:
+            for hs in workflow.human_steps:
                 hnode_id = f"tobe-{hs.id}"
                 if any(t.task_id == hs.task_id for t in junior.tasks):
                     edges.append({
@@ -1349,9 +1446,9 @@ def _generate_react_flow(
                         "label": "검토 요청",
                     })
 
-    # ── Senior → HR 감독 엣지 (RED #8B1A1A) ──
-    if senior.human_steps:
-        for hs in senior.human_steps:
+    # ── Senior → HR 감독 엣지 (RED #8B1A1A) — Senior 있을 때만 ──
+    if has_senior and workflow.human_steps:
+        for hs in workflow.human_steps:
             hnode_id = f"tobe-{hs.id}"
             edges.append({
                 "id": f"e-supervision-{senior_node_id}-{hnode_id}",
@@ -1376,7 +1473,7 @@ def _generate_react_flow(
 # ── 요약 ──────────────────────────────────────────────────────────────────────
 
 def _build_summary(
-    senior: SeniorAgent,
+    workflow: ToBeWorkflow,
     classified_nodes: list[dict],
 ) -> dict:
     """To-Be 워크플로우 요약 정보."""
@@ -1385,14 +1482,22 @@ def _build_summary(
     hybrid_count = sum(1 for n in classified_nodes if n["classification"] == "AI + Human")
     human_count = sum(1 for n in classified_nodes if n["classification"] == "Human")
 
+    senior = workflow.senior_agent
+    senior_payload = {
+        "id": senior.id,
+        "name": senior.name,
+        "description": senior.description,
+        "orchestration_strategy": senior.orchestration_strategy,
+    } if senior else None
+
     return {
-        "process_name": senior.name,
+        "process_name": workflow.process_name,
         "total_tasks": total,
         "ai_tasks": ai_count,
         "hybrid_tasks": hybrid_count,
         "human_tasks": human_count,
         "automation_rate": round((ai_count + hybrid_count * 0.5) / max(total, 1) * 100, 1),
-        "input_source_count": len(senior.input_sources),
+        "input_source_count": len(workflow.input_sources),
         "input_sources": [
             {
                 "id": s.id,
@@ -1401,9 +1506,9 @@ def _build_summary(
                 "description": s.description,
                 "related_task_ids": s.related_task_ids,
             }
-            for s in senior.input_sources
+            for s in workflow.input_sources
         ],
-        "junior_agent_count": len(senior.junior_agents),
+        "junior_agent_count": len(workflow.junior_agents),
         "junior_agents": [
             {
                 "id": j.id,
@@ -1429,9 +1534,9 @@ def _build_summary(
                     for t in j.tasks
                 ],
             }
-            for j in senior.junior_agents
+            for j in workflow.junior_agents
         ],
-        "human_step_count": len(senior.human_steps),
+        "human_step_count": len(workflow.human_steps),
         "human_steps": [
             {
                 "id": h.id,
@@ -1439,11 +1544,7 @@ def _build_summary(
                 "is_hybrid_part": h.is_hybrid_human_part,
                 "reason": h.reason,
             }
-            for h in senior.human_steps
+            for h in workflow.human_steps
         ],
-        "senior_agent": {
-            "id": senior.id,
-            "name": senior.name,
-            "description": senior.description,
-        },
+        "senior_agent": senior_payload,
     }
