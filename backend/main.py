@@ -1920,9 +1920,9 @@ async def upload_workflow_excel(request: Request, file: UploadFile = File(...)):
     global _tasks_cache
     _tasks_cache = tasks
 
-    # AI+Human Task 파트 분리 (fire-and-forget — Step 2 진입 시 lazy 보장)
-    import asyncio as _asyncio
-    _asyncio.create_task(_split_hybrid_tasks_with_llm())
+    # 🔑 Upfront 전체 분리 제거 — Step 2 실행 시 '해당 시트 스코프 내의 미분리 AI+Human task'
+    # 만 lazy 분리 (_split_hybrid_tasks_with_llm(target_task_ids=scoped_task_ids) 호출됨).
+    # 기존엔 Excel 업로드 직후 494개 전체 분리 → 90%+ 가 쓰지 않는 시트 task 라 낭비.
 
     # 가이드 시트 및 데이터 없는 시트는 선택 목록에서 제외
     data_sheets = [
@@ -2004,9 +2004,7 @@ async def select_workflow_excel_sheet(request: Request):
                 "output_types": "",
             }
 
-    # AI+Human Task 파트 분리 (fire-and-forget — Step 2 진입 시 lazy 보장)
-    import asyncio as _asyncio
-    _asyncio.create_task(_split_hybrid_tasks_with_llm())
+    # 🔑 Upfront 전체 분리 제거 — Step 2 에서 해당 스코프만 lazy 분리 (위 설명 동일)
 
     return {
         "ok": True,
