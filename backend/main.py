@@ -4682,6 +4682,61 @@ def _normalize_actor(raw) -> str:
     return actors[0] if actors else "그 외"
 
 
+# ─ _llm_route_tobe_flow STATIC prompt — 프롬프트 캐싱 대상 ──
+# 호출마다 다른 process_name / 시트 / 노드 데이터 외의 규칙·schema 는 모두 여기에 고정.
+_LLM_ROUTE_TOBE_STATIC_HEAD = """당신은 AI/Human 협업 워크플로우를 설계하는 전문가입니다.
+주어진 As-Is 프로세스와 AI Service Flow 를 분석하여, **Swim Lane 다이어그램의 엣지(연결선)와 Human 검토 액션을 지능형으로 배선**하세요.
+
+## 설계 원칙 — **Pipe-through 패턴이 기본**
+
+Junior AI 태스크가 As-Is L5 를 자동화/대체하는 경우가 대부분이므로, 엣지는 다음 패턴으로 흘러야 합니다:
+```
+[As-Is 선행 L5] → [Junior AI] → [As-Is 후행 L5]
+```
+즉 Junior AI 가 As-Is 파이프라인의 한 지점을 "통과"하는 형태입니다.
+
+### 규칙 (엄수)
+1. **As-Is → Junior AI 트리거 엣지**: Junior AI 태스크의 **직전 As-Is L5** (선행 노드) 에서 연결.
+   **같은 task_id 를 공유하는 As-Is 노드 자체는 선행자로 삼지 말 것** (그건 Junior AI 가 대체하는 노드라 loop 됨)
+2. **Junior AI → As-Is 결과 엣지**: Junior AI 태스크의 **직후 As-Is L5** (후행 노드) 로 연결.
+   **같은 task_id 를 공유하는 As-Is 노드로 돌아가지 말 것** (loop 금지)
+3. **Senior AI 오케스트레이션** (Senior AI 가 존재할 때만): Senior AI 가 각 Junior AI 에이전트의 첫 태스크를 '기동' 하는 엣지 (에이전트 그룹당 1개).
+   DYNAMIC 의 "Senior AI 오케스트레이터" 섹션이 `(Senior AI 없음)` 이면 **senior_triggers 는 빈 배열 `[]`** 로 반환 (절대 새로 만들어내지 말 것)
+4. **Human 검토 액션**: automation_level 이 'Human-in-Loop' / 'Human-on-the-Loop' 이거나 human_role 이 비어있지 않은 Junior 태스크에 대해,
+   **어떤 사람이(performer)**, **무슨 행동을 구체적으로 해야 하는지(action)** 명시
+   performer ∈ ["임원", "현업 팀장", "HR 임원", "HR 담당자", "현업 구성원"]
+
+### ❌ 금지 사항 (엄격)
+- **task_id 가 같은 As-Is ↔ Junior AI 간 직접 엣지 금지** (양방향 모두). 예시:
+  - `junior_agent_1_1.1.4.1` 은 `l5-1.1.4.1-xx` 를 대체하므로 두 노드 간 직접 연결 금지
+  - 대신 `l5-1.1.4.0-xx (이전 단계) → junior_agent_1_1.1.4.1 → l5-1.1.4.2-xx (다음 단계)` 로 파이프 통과
+- 과잉 엣지 금지 — 각 Junior 태스크당 트리거+결과 각 **최대 1~2개**
+- As-Is에 적절한 선/후행 매칭이 없으면 생략 (억지로 연결 금지)
+
+## 제약
+- As-Is 노드 ID는 반드시 DYNAMIC 의 노드 목록에서 그대로 사용 (변경·새 ID 생성 금지)
+- Junior 태스크 ID도 DYNAMIC 에 적힌 jid 그대로 사용
+
+## 출력 형식 (JSON만, 마크다운 코드 블록 없음)
+```json
+{
+  "ai_to_asis_edges": [
+    {"from": "junior_xxx_yyy", "to": "asis_l5_id", "label": "결과 전달"}
+  ],
+  "asis_to_ai_edges": [
+    {"from": "asis_l5_id", "to": "junior_xxx_yyy", "label": "트리거"}
+  ],
+  "senior_triggers": [
+    {"from": "senior_x", "to": "junior_xxx_first_task", "label": "기동"}
+  ],
+  "human_actions": [
+    {"junior_task_id": "junior_xxx_yyy", "action": "AI 결과 검토 및 예외 케이스 판단·승인", "performer": "HR 담당자"}
+  ]
+}
+```
+"""
+
+
 async def _llm_route_tobe_flow(
     process_name: str,
     sheet_name: str,
@@ -4745,10 +4800,8 @@ async def _llm_route_tobe_flow(
             )
     junior_block = "\n".join(junior_lines)
 
-    system_prompt = f"""당신은 AI/Human 협업 워크플로우를 설계하는 전문가입니다.
-아래 As-Is 프로세스와 AI Service Flow를 분석하여, **Swim Lane 다이어그램의 엣지(연결선)와 Human 검토 액션을 지능형으로 배선**하세요.
-
-## 프로세스: {process_name} / 시트: {sheet_name}
+    # DYNAMIC — call-specific 데이터만 (프로세스명 + 시트명 + As-Is/AI 노드 목록)
+    dynamic_prompt = f"""## 프로세스: {process_name} / 시트: {sheet_name}
 
 ## As-Is 프로세스 맵 (L4/L5 노드)
 {asis_block}
@@ -4759,56 +4812,22 @@ async def _llm_route_tobe_flow(
 ## Junior AI 에이전트와 태스크
 {junior_block}
 
-## 설계 원칙 — **Pipe-through 패턴이 기본**
-
-Junior AI 태스크가 As-Is L5 를 자동화/대체하는 경우가 대부분이므로, 엣지는 다음 패턴으로 흘러야 합니다:
-```
-[As-Is 선행 L5] → [Junior AI] → [As-Is 후행 L5]
-```
-즉 Junior AI 가 As-Is 파이프라인의 한 지점을 "통과"하는 형태입니다.
-
-### 규칙 (엄수)
-1. **As-Is → Junior AI 트리거 엣지**: Junior AI 태스크의 **직전 As-Is L5** (선행 노드) 에서 연결.
-   **같은 task_id 를 공유하는 As-Is 노드 자체는 선행자로 삼지 말 것** (그건 Junior AI 가 대체하는 노드라 loop 됨)
-2. **Junior AI → As-Is 결과 엣지**: Junior AI 태스크의 **직후 As-Is L5** (후행 노드) 로 연결.
-   **같은 task_id 를 공유하는 As-Is 노드로 돌아가지 말 것** (loop 금지)
-3. **Senior AI 오케스트레이션** (Senior AI 가 존재할 때만): Senior AI 가 각 Junior AI 에이전트의 첫 태스크를 '기동' 하는 엣지 (에이전트 그룹당 1개).
-   위 "Senior AI 오케스트레이터" 섹션이 `(Senior AI 없음)` 이면 **senior_triggers 는 빈 배열 `[]`** 로 반환 (절대 새로 만들어내지 말 것)
-4. **Human 검토 액션**: automation_level 이 'Human-in-Loop' / 'Human-on-the-Loop' 이거나 human_role 이 비어있지 않은 Junior 태스크에 대해,
-   **어떤 사람이(performer)**, **무슨 행동을 구체적으로 해야 하는지(action)** 명시
-   performer ∈ ["임원", "현업 팀장", "HR 임원", "HR 담당자", "현업 구성원"]
-
-### ❌ 금지 사항 (엄격)
-- **task_id 가 같은 As-Is ↔ Junior AI 간 직접 엣지 금지** (양방향 모두). 예시:
-  - `junior_agent_1_1.1.4.1` 은 `l5-1.1.4.1-xx` 를 대체하므로 두 노드 간 직접 연결 금지
-  - 대신 `l5-1.1.4.0-xx (이전 단계) → junior_agent_1_1.1.4.1 → l5-1.1.4.2-xx (다음 단계)` 로 파이프 통과
-- 과잉 엣지 금지 — 각 Junior 태스크당 트리거+결과 각 **최대 1~2개**
-- As-Is에 적절한 선/후행 매칭이 없으면 생략 (억지로 연결 금지)
-
-## 제약
-- As-Is 노드 ID는 반드시 위 목록에서 그대로 사용 (변경·새 ID 생성 금지)
-- Junior 태스크 ID도 위에 적힌 jid 그대로 사용
-
-## 출력 형식 (JSON만, 마크다운 코드 블록 없음)
-{{
-  "ai_to_asis_edges": [
-    {{"from": "junior_xxx_yyy", "to": "asis_l5_id", "label": "결과 전달"}}
-  ],
-  "asis_to_ai_edges": [
-    {{"from": "asis_l5_id", "to": "junior_xxx_yyy", "label": "트리거"}}
-  ],
-  "senior_triggers": [
-    {{"from": "senior_x", "to": "junior_xxx_first_task", "label": "기동"}}
-  ],
-  "human_actions": [
-    {{"junior_task_id": "junior_xxx_yyy", "action": "AI 결과 검토 및 예외 케이스 판단·승인", "performer": "HR 담당자"}}
-  ]
-}}"""
+※ 위 STATIC 섹션의 설계 원칙·규칙·출력 형식을 따르고, 위 DYNAMIC 의 실제 node ID 만 사용.
+"""
 
     try:
-        result = await _call_llm_step1(system_prompt, [
-            {"role": "user", "content": "AI와 As-Is를 매끄럽게 잇는 엣지와 Human 액션을 설계해주세요. JSON만 출력하세요."}
-        ])
+        # 프롬프트 캐싱: STATIC (cache_control) + DYNAMIC 두 블록
+        result = await _call_llm_step1(
+            [
+                {
+                    "type": "text",
+                    "text": _LLM_ROUTE_TOBE_STATIC_HEAD,
+                    "cache_control": {"type": "ephemeral"},
+                },
+                {"type": "text", "text": dynamic_prompt},
+            ],
+            [{"role": "user", "content": "AI와 As-Is를 매끄럽게 잇는 엣지와 Human 액션을 설계해주세요. JSON만 출력하세요."}],
+        )
         if not isinstance(result, dict):
             return {}
         return {
